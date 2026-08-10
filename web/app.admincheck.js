@@ -92,6 +92,7 @@
           <span class="pill s-ready">Ready to accept</span>
           <div class="pipe-actions">
             <button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>
+            <button type="button" class="btn btn-ghost btn-sm btn-danger" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>
       </div>`;
@@ -99,6 +100,9 @@
     body.innerHTML = `<div class="pipe-list">${cards}</div>`;
     body.querySelectorAll('[data-accept]').forEach((b) => {
       b.addEventListener('click', () => acceptOne(wrap, b));
+    });
+    body.querySelectorAll('[data-decline]').forEach((b) => {
+      b.addEventListener('click', () => declineOne(wrap, b));
     });
   }
 
@@ -116,6 +120,22 @@
       loadAdminCheck(wrap, true);     // drop the accepted person off this queue
     } catch (err) {
       toast('Could not accept', err.message, 'err');
+      b.classList.remove('loading'); b.disabled = false;
+    }
+  }
+
+  async function declineOne(wrap, b) {
+    const name = b.dataset.name || 'this person';
+    const reason = (prompt(`Decline ${name}'s FICA? Enter a short reason for the candidate (they will be asked to re-submit):`) || '').trim();
+    if (!reason) return;
+    b.classList.add('loading'); b.disabled = true;
+    try {
+      const r = await api(KINDS.declineFica || 'decline_fica', { folderId: b.dataset.decline, reason });
+      toast('Declined', (r && r.message) ? r.message : `${name}'s FICA was declined and they have been notified.`, 'ok');
+      H.setStatusCache([]);           // force the Progress report to refetch next open
+      loadAdminCheck(wrap, true);     // drop the declined person off this queue
+    } catch (err) {
+      toast('Could not decline', err.message, 'err');
       b.classList.remove('loading'); b.disabled = false;
     }
   }
