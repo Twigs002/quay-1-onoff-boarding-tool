@@ -207,19 +207,24 @@ class PropDataProvisioner(Provisioner):
                 raise
 
             # Record Details
-            self._rs(page, page.locator(F_STATUS), STATUS_ACTIVE)
-            self._rs(page, page.locator(F_BRANCH), BRANCH)
-            self._rs(page, page.locator(F_DISPLAY), BRANCH)
+            self._rs(page, page.locator(F_STATUS), STATUS_ACTIVE, "Status")
+            self._rs(page, page.locator(F_BRANCH), BRANCH, "Branch")
+            self._rs(page, page.locator(F_DISPLAY), BRANCH, "Display on Branches")
 
             # User Details
             page.locator(I_FIRST).fill(person.first_name)
             page.locator(I_LAST).fill(_last_name(person))
             page.locator(I_EMAIL).fill(email)
-            self._rs(page, page.locator(F_COUNTRY), COUNTRY_CODE)
+            self._rs(page, page.locator(F_COUNTRY), COUNTRY_CODE, "Country Code")
             page.locator(I_CELL).fill(person.cell or "")
             # Designation is REQUIRED: candidates get "-" (actively selected, not defaulted),
             # full-status agents get the practitioner title.
-            self._rs(page, page.locator(F_DESIGNATION), designation)
+            # Only set the designation for a REAL practitioner title. Candidates keep the form's
+            # default "-" (DESIGNATION_CANDIDATE) untouched: "-" is the placeholder, not a selectable
+            # react-select option, so trying to pick it silently left the field unset and broke the
+            # whole save for every candidate. Leaving it alone lets the candidate record save.
+            if designation and designation != DESIGNATION_CANDIDATE:
+                self._rs(page, page.locator(F_DESIGNATION), designation, "Designation")
 
             # Portal Feeds -> one Property24 row (best-effort: a failure here must not
             # lose the whole create - the agent record still saves without the feed).
@@ -309,12 +314,18 @@ class PropDataProvisioner(Provisioner):
         except Exception:  # noqa: BLE001 - banner is best-effort, never fatal
             pass
 
-    def _rs(self, page, group, value: str) -> None:
+    def _rs(self, page, group, value: str, label: str = "") -> None:
         """Pick `value` in a PDMS react-select. Opens the control, waits for options
         (some load async), and clicks the exact-text option. If the option is not
         already shown (e.g. the huge Country Code list), narrows it with REAL
         keystrokes - react-select ignores Playwright's fill(), so press_sequentially
-        is required to trigger its search."""
+        is required to trigger its search.
+
+        VERIFIES a value actually landed: react-select renders a .react-select__single-value
+        (or __multi-value) ONLY once an option is chosen, otherwise it keeps a __placeholder.
+        A control still empty after the attempt means the option text did not match what we
+        sent - which silently breaks the whole save. Raise loudly naming the field + value so
+        the failure is actionable (this is the usual cause of a 'did not save, fields: unknown')."""
         exact_re = re.compile(r"^\s*%s\s*$" % re.escape(value))
         group.locator(".react-select__control").first.click()
         opts = page.locator(".react-select__option")
@@ -332,6 +343,12 @@ class PropDataProvisioner(Provisioner):
         else:
             group.locator("input.react-select__input").first.press("Enter")
         page.wait_for_timeout(150)
+        # Confirm the selection stuck; a still-empty control = no matching option.
+        if group.locator(".react-select__single-value, .react-select__multi-value").count() == 0:
+            raise RuntimeError(
+                "PDMS field %r: could not select %r - no option matched the text the worker sent. "
+                "Check the exact option label in PDMS (the value in the worker's constants/payload "
+                "must match it verbatim)." % (label or "react-select", value))
 
     def _try_portal_feed(self, page) -> bool:
         """Add one Portal Feed row (Active / Property24 / Quay 1). Best-effort: any
