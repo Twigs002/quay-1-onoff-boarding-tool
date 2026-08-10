@@ -388,7 +388,10 @@
       const idInput = $('#f_id_number', form);
       const natWrap = $('#nationalityWrap', form), natInput = $('#f_nationality', form);
       const syncNat = () => {
-        const foreign = !/^\d{13}$/.test(((idInput && idInput.value) || '').trim());
+        // Reveal ONLY once a non-empty ID that is NOT a 13-digit SA ID is entered (an empty field
+        // must not show Nationality; a 13-digit SA ID hides it).
+        const idVal = ((idInput && idInput.value) || '').trim();
+        const foreign = idVal.length > 0 && !/^\d{13}$/.test(idVal);
         if (natWrap) natWrap.hidden = !foreign;
         if (natInput) {
           if (foreign) { natInput.setAttribute('aria-required', 'true'); }
@@ -706,7 +709,9 @@
     const docPill = HUB.docPill;
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
-      const state = o.approved ? { c: 's-done', t: 'Approved · setting up' }
+      const state = (o.approved && o.setup_error) ? { c: 's-error', t: 'Setup error · needs attention' }
+        : (o.approved && o.setup_incomplete) ? { c: 's-inprogress', t: 'Setting up accounts' }
+        : o.approved ? { c: 's-done', t: 'Approved · setting up' }
         : o.docs_ready ? { c: 's-ready', t: 'Ready to approve' }
         : { c: 's-pending', t: 'Waiting on documents' };
       const docs = `<div class="docs">

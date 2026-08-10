@@ -382,18 +382,31 @@ class PropDataProvisioner(Provisioner):
             # Success only when PDMS leaves the add form FOR the users list / a user detail page.
             if "/agents/add" not in url and "/agents" in url:
                 return
-        # still on the add form -> collect which fields PDMS flagged
+        # still on the add form -> collect actionable diagnostics (not just "unknown"): (a) any field
+        # group carrying a required/invalid/error marker (by class OR text, since PDMS does not always
+        # print the word "required"), and (b) any visible alert / toast / validation banner text.
+        info = {}
         try:
-            labels = page.evaluate(
-                """() => [...document.querySelectorAll('.form-group')]
-                    .filter(g => /required|invalid/i.test(g.innerText))
-                    .map(g => (g.querySelector('label')||{}).textContent || '')
-                    .filter(Boolean).slice(0, 12)""")
+            info = page.evaluate(
+                """() => {
+                    const norm = t => (t||'').replace(/\\s+/g,' ').trim();
+                    const fields = [...document.querySelectorAll('.form-group, [class*=field-]')]
+                        .filter(g => /required|invalid|error/i.test(g.className + ' ' + g.innerText))
+                        .map(g => norm((g.querySelector('label')||{}).textContent)).filter(Boolean);
+                    const banners = [...document.querySelectorAll('.alert, .toast, .notification, [class*=error], [role=alert]')]
+                        .map(n => norm(n.innerText)).filter(Boolean);
+                    return { fields: [...new Set(fields)].slice(0,12), banners: [...new Set(banners)].slice(0,6) };
+                }""") or {}
         except Exception:  # noqa: BLE001
-            labels = []
+            info = {}
         self._shot(page, "_savefail")
-        raise RuntimeError("PDMS did not save (still on Add User). Fields flagged: %s"
-                           % (", ".join(labels) or "unknown"))
+        fields = info.get("fields") or []
+        banners = info.get("banners") or []
+        detail = "; ".join(p for p in [
+            ("fields flagged: " + ", ".join(fields)) if fields else "",
+            ("messages: " + " | ".join(banners)) if banners else "",
+        ] if p) or "no field/banner captured - see the _savefail screenshot"
+        raise RuntimeError("PDMS did not save (still on Add User). %s" % detail)
 
 
 # module-level singletons for the dispatch table in poll.py
