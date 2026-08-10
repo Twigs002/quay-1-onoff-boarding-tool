@@ -276,8 +276,7 @@
           <span class="field-err" id="e_nationality" aria-live="polite"></span></div>` +
         fieldText('contact', 'Cell number', { required: true, type: 'tel' }) +
         fieldText('email', 'Personal email', { required: true, type: 'email', hint: 'Used to send the contract + induction pack.' }) +
-        fieldText('start_date', 'Start date', { required: true, type: 'date' }) +
-        fieldText('division', 'Division', {});
+        fieldText('start_date', 'Start date', { required: true, type: 'date' });
 
       const quay1 =
         // Broker activity drives BOTH the {{BROKER_ACTIVITY}} clause and the Sale-vs-Rental
