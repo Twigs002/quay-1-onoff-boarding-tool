@@ -492,7 +492,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Programs</h2>
-        <p>CMA and PropData accounts per team, grouped by senior broker. A senior sees their own team; supers and admins see everyone.</p>
+        <p>CMA and PropData accounts per team, grouped by senior broker. You see every team you work in; supers and admins see everyone.</p>
       </div>
       <div class="card card-pad">
         <div class="toolbar">
@@ -540,7 +540,7 @@
     }
   }
 
-  const SCOPE_LABEL = { all: 'all teams', senior: 'your team', self: 'your account' };
+  const SCOPE_LABEL = { all: 'all teams', senior: 'your teams', self: 'your account' };
   function renderPrograms(body, meta, r) {
     const sections = (r && r.sections) || [];
     const teamCount = sections.reduce((n, s) => n + (s.teams ? s.teams.length : 0), 0);

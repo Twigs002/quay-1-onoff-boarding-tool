@@ -11,9 +11,12 @@
  *   - Agents also get a full-name fallback when the email misses. Numbered specialist profiles
  *     have no personal name (the name field is the slot label) so they match on email only.
  *
- * Role scope (SPEC: only a senior sees their team; a plain broker sees only themselves):
+ * Role scope:
  *   - super || admin        -> every team, every section.
- *   - senior of a team(s)    -> those team(s), in full (senior = the team's FIRST-listed broker).
+ *   - a broker on team(s)    -> those team(s) in full, whether they are the senior (the team's
+ *                               FIRST-listed broker) OR any listed member. A broker who works
+ *                               across several teams (e.g. a second-slot area lead) sees every
+ *                               team they appear on, not only the ones they are the senior of.
  *   - any other active staff -> a single "Your account" row (their own CMA/PropData status only).
  *
  * Public surface:
@@ -43,14 +46,18 @@ function programsData_(ctx) {
 
   var me = _normEmail_(ctx.email);
 
-  // Teams where the caller is the senior. Keyed on the team's seniorEmail (the RAW first-listed
-  // broker slot, computed in _programsTree_), NOT on people[0] - people[] skips blank-name slots,
-  // so a blank slot 0 would otherwise promote the next member to senior and leak the whole team.
-  // Fails closed: a team with no identifiable senior email matches nobody.
+  // Every team the caller belongs to - as the senior (the team's RAW first-listed broker slot,
+  // computed in _programsTree_) OR as any listed member. This lets a broker who works across
+  // several teams (a second-slot area lead like Schaughn) see ALL of those teams in full, not
+  // only the ones they are the senior of. Matching is dot-insensitive on email (_normEmail_);
+  // the per-person SENIOR star still marks each team's actual first-listed broker. Fails closed:
+  // no email match on a team -> that team is not included.
   var mine = [];
   full.forEach(function (s) {
     var teams = (s.teams || []).filter(function (t) {
-      return !!me && !!t.seniorEmail && t.seniorEmail === me;
+      if (!me) return false;
+      if (t.seniorEmail && t.seniorEmail === me) return true;
+      return (t.people || []).some(function (p) { return _normEmail_(p.email) === me; });
     });
     if (teams.length) mine.push({ name: s.name, teams: teams });
   });
