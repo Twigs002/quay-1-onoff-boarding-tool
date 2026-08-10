@@ -509,7 +509,7 @@
           <span class="prog-chip pd">Agent</span> full PropData agent
           <span class="prog-chip pd">Spec #</span> property-specialist profile
           <span class="prog-chip off">dimmed</span> inactive
-          <span class="prog-chip none">–</span> none
+          <span class="prog-chip none">no</span> none held
         </div>
         <div id="progBody"></div>
       </div>
@@ -547,38 +547,39 @@
   function renderPrograms(body, meta, r) {
     const sections = (r && r.sections) || [];
     const teamCount = sections.reduce((n, s) => n + (s.teams ? s.teams.length : 0), 0);
-    meta.textContent = sections.length
-      ? `Showing ${SCOPE_LABEL[r.scope] || ''} · ${teamCount} team(s)`
-      : '';
+    meta.textContent = sections.length ? `Showing ${SCOPE_LABEL[r.scope] || ''} · ${teamCount} team(s)` : '';
     if (!sections.length) {
       body.innerHTML = `<div class="state"><div class="state-title">Nothing to show</div><div>No team accounts are visible for your login yet.</div></div>`;
       return;
     }
     const pdChip = (pd) => {
-      if (!pd) return `<span class="prog-chip none">–</span>`;
+      if (!pd) return `<span class="prog-chip none">no</span>`;
       const lbl = pd.type === 'agent' ? 'Agent' : `Spec #${esc(pd.number)}`;
       const cls = pd.active ? 'pd' : 'off';
       return `<span class="prog-chip ${cls}">${lbl}</span>` + (pd.active ? '' : `<span class="prog-chip none">inactive</span>`);
     };
+    const cmaChip = (p) => p.cma ? `<span class="prog-chip ok">✓ CMA</span>` : `<span class="prog-chip none">no</span>`;
     const rowHtml = (p) => `<div class="prog-tr${p.senior ? ' sr' : ''}">
-        <span class="prog-nm">${p.senior ? '<span class="prog-star">★</span>' : '<span class="prog-star dim">·</span>'}${esc(p.name)}${p.senior ? ' <em>SENIOR</em>' : ''}</span>
-        <span>${p.cma ? '<span class="prog-chip ok">✓</span>' : '<span class="prog-chip none">–</span>'}</span>
-        <span>${pdChip(p.pd)}</span>
+        <span class="prog-nm">${p.senior ? '<span class="prog-star">★</span>' : '<span class="prog-star dim">·</span>'}<span class="prog-nmtxt">${esc(p.name)}</span>${p.isNew ? '<span class="prog-chip new">NEW</span>' : ''}${p.senior ? '<em>SENIOR</em>' : ''}</span>
+        <span class="prog-cell">${cmaChip(p)}</span>
+        <span class="prog-cell">${pdChip(p.pd)}</span>
       </div>`;
+    const meter = (label, have, total, tone) => `<span class="prog-meter ${tone}"><b>${have}</b>/${total} ${label}</span>`;
     const teamHtml = (t) => {
       const n = t.people.length;
       const nc = t.people.filter((p) => p.cma).length;
       const np = t.people.filter((p) => p.pd).length;
       const head = t.name
-        ? `<div class="prog-teamh"><div class="prog-tname">${esc(t.name)}${t.senior ? `<span class="prog-tsr">Senior: ${esc(t.senior)}</span>` : ''}</div>
-             <div class="prog-tcount">CMA ${nc}/${n} · PropData ${np}/${n}</div></div>`
+        ? `<div class="prog-teamh">
+             <div class="prog-tname">${esc(t.name)}${t.senior ? `<span class="prog-tsr"><span class="prog-star">★</span>${esc(t.senior)}</span>` : ''}</div>
+             <div class="prog-tcount">${meter('CMA', nc, n, 'ok')}${meter('PropData', np, n, 'pd')}</div>
+           </div>`
         : '';
       return `<div class="prog-card">${head}
         <div class="prog-tbl"><div class="prog-th"><span>Broker</span><span>CMA</span><span>PropData</span></div>
         ${t.people.map(rowHtml).join('')}</div></div>`;
     };
-    body.innerHTML = sections.map((s) =>
-      `<div class="prog-sech">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
+    body.innerHTML = sections.map((s) => `<div class="prog-sech">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
   }
 
   //  2. PROVISIONING STATUS

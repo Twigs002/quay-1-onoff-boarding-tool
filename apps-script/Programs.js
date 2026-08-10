@@ -105,7 +105,9 @@ function _programsBuild_() {
   try { ss = sheet_(); } catch (e) { logAudit_('programs_sheet_open_failed', { error: String(e) }); }
   var cma = _cmaSet_(ss);
   var pd = _propdataMaps_(ss);
-  return _programsTree_(div, cma, pd);
+  var tree = _programsTree_(div, cma, pd);
+  _programsMergeOnboarding_(tree, cma, pd);   // add newly-onboarded members onto their team
+  return tree;
 }
 
 // ---------------------------------------------------------------- tree build
@@ -143,6 +145,81 @@ function _programsTree_(div, cma, pd) {
  *  an email genuinely differs across systems the row fails closed (shows "none") rather than lying. */
 function _pdLookup_(pd, normEmail) {
   return (normEmail && pd.byEmail[normEmail]) || null;
+}
+
+// ---------------------------------------------------------------- onboarding merge (new starters)
+
+var PROGRAMS_NEW_SECTION = 'New starters (not yet in the directory)';
+
+/** Loose team key: lowercase, alphanumerics only (for a tolerant second-pass team-name match). */
+function _looseTeam_(t) { return String(t == null ? '' : t).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+
+/** Locate a team in the assembled Programs tree by name, case/space-insensitively. Exact normalised
+ *  pass first (via _normTeam_), then a loose pass (alphanumerics only). Returns
+ *  { sectionIndex, teamIndex, section, team } or null. */
+function findTeamInTree_(tree, teamName) {
+  var want = _normTeam_(teamName);
+  if (!want) return null;
+  var wantLoose = _looseTeam_(teamName);
+  var loose = null;
+  for (var si = 0; si < (tree || []).length; si++) {
+    var teams = tree[si].teams || [];
+    for (var ti = 0; ti < teams.length; ti++) {
+      var n = teams[ti].name;
+      if (_normTeam_(n) === want) return { sectionIndex: si, teamIndex: ti, section: tree[si], team: teams[ti] };
+      if (!loose && _looseTeam_(n) === wantLoose) loose = { sectionIndex: si, teamIndex: ti, section: tree[si], team: teams[ti] };
+    }
+  }
+  return loose;
+}
+
+/** Return the tree team named `teamName`, or synthesise it under a trailing "New starters" section so
+ *  a brand-new / not-yet-in-directory team still shows the member. A matched EXISTING team is returned
+ *  untouched (its seniorEmail preserved). A synthetic team's seniorEmail is the member's own
+ *  senior_email (normalised) if present, else '' so senior-scope fails closed. Mutates `tree`. */
+function ensureTeamForOnboard_(tree, teamName, seniorEmail) {
+  var found = findTeamInTree_(tree, teamName);
+  if (found) return { section: found.section, team: found.team };
+  var sec = null;
+  for (var i = 0; i < tree.length; i++) { if (tree[i].name === PROGRAMS_NEW_SECTION) { sec = tree[i]; break; } }
+  if (!sec) { sec = { name: PROGRAMS_NEW_SECTION, teams: [] }; tree.push(sec); }
+  var name = String(teamName || '').trim() || 'Unassigned';
+  var norm = _normTeam_(name);
+  var team = null;
+  for (var j = 0; j < sec.teams.length; j++) { if (_normTeam_(sec.teams[j].name) === norm) { team = sec.teams[j]; break; } }
+  if (!team) { team = { name: name, seniorEmail: _normEmail_(seniorEmail), senior: '', people: [] }; sec.teams.push(team); }
+  return { section: sec, team: team };
+}
+
+/** Merge newly-onboarded members (Onboarding tab) into the Programs tree, in place, so a new hire
+ *  shows under their team immediately - before divisions.json is regenerated. Placed on their team
+ *  (existing, or a synthesised "New starters" one). NEVER the senior: seniorEmail/senior star are left
+ *  untouched, so senior-scope still resolves to the real first-listed broker AND the hire still sees
+ *  their own team via the membership path in programsData_ (they match people[].email). CMA/PropData
+ *  flags use the SAME email join as divisions people. Deduped by normalised email (name fallback when
+ *  the email is blank). Marked isNew for the "NEW" pill. Never throws - a bad row is skipped. */
+function _programsMergeOnboarding_(tree, cma, pd) {
+  var rows;
+  try { rows = listOnboarding_(); } catch (e) { logAudit_('programs_onboarding_read_failed', { error: String(e) }); return; }
+  rows.forEach(function (o) {
+    if (!o || !o.name || !o.team) return;             // need a name + a team to place them
+    if (/declined/i.test(o.status || '')) return;     // dropped/rejected candidates are not on a roster
+    var found;
+    try { found = ensureTeamForOnboard_(tree, o.team, o.senior_email); } catch (e) { found = null; }
+    if (!found || !found.team) return;
+    var people = found.team.people || (found.team.people = []);
+    var ne = _normEmail_(o.email);
+    var nm = String(o.name).trim().toLowerCase();
+    var dup = people.some(function (p) {
+      if (ne) return _normEmail_(p.email) === ne;                       // primary: dot-insensitive email
+      return nm && String(p.name || '').trim().toLowerCase() === nm;    // fallback when no email
+    });
+    if (dup) return;
+    people.push({
+      name: o.name, email: o.email || '', senior: false, isNew: true,
+      cma: !!ne && !!cma[ne], pd: _pdLookup_(pd, ne),
+    });
+  });
 }
 
 // ---------------------------------------------------------------- roster readers
