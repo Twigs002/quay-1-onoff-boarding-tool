@@ -31,13 +31,13 @@
     offboard: 'offboard',
   };
 
-  // Provisioning systems (docs/CONTRACTS.md section 6). google/propdata/property24
-  // are the core stack, checked by default. cma/dialfire are optional and
-  // auto-check when the matching broker program is ticked on the Quay 1 form.
+  // Provisioning systems (docs/CONTRACTS.md section 6). google/propdata are the
+  // core stack, checked by default. cma/dialfire are optional and auto-check when
+  // the matching broker program is ticked on the Quay 1 form. (Property24 is no
+  // longer provisioned by this tool - removed at the client's request.)
   const SYSTEMS = [
     { key: 'google',     label: 'Google Workspace', sub: 'account + groups', core: true },
     { key: 'propdata',   label: 'PropData',         sub: 'agent profile',    core: true },
-    { key: 'property24', label: 'Property24',        sub: 'listing agent',    core: true },
     { key: 'cma',        label: 'CMA',               sub: 'valuation login' },
     { key: 'dialfire',   label: 'Dialfire',          sub: 'dialer seat' },
   ];
