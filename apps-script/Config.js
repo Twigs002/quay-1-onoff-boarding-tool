@@ -115,7 +115,7 @@ var CFG = {
     CREDENTIALS: 'Google Credentials',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
-  DIVISIONS_URL: 'https://twigs002.github.io/quay-1-boarding-tool/data/divisions.json',
+  DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',
 
   // Enum vocabulary (mirror docs/CONTRACTS.md section 5). Import these exact strings.
   SYSTEMS: ['google', 'propdata', 'property24', 'cma', 'dialfire', 'hubspot'],
