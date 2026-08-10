@@ -67,6 +67,10 @@ var FLAG = {
   // HR Information Sheet mirror (Hr.js). Independent of DRY_RUN so HR writes can be validated /
   // armed on their own without also arming Google/PropData account creation. Default OFF (safe).
   HR_SYNC_ENABLED: 'HR_SYNC_ENABLED',
+  // Master switch for ALL internal-directed mail: CC/BCC copies (senior brokers, ALWAYS_CC), the
+  // CMA/Dialfire approver requests, and the HubSpot team-login alert. Default ON. Set to 0 for a
+  // clean end-to-end test so a run never emails real colleagues; candidate-facing mail still sends.
+  CC_ENABLED: 'CC_ENABLED',
 };
 
 /** Non-secret constants shared across modules. */
@@ -80,7 +84,7 @@ var CFG = {
 
   // Per-entity company info used by the contract + email builders.
   COMPANY: {
-    quay1: { name: 'Quay 1', full: 'Quay 1 Properties', kicker: 'Broker Agreement' },
+    quay1: { name: 'Quay 1', full: 'Quay 1 International Realty', kicker: 'Broker Agreement' },
     aqua: { name: 'Aqua Promotions', full: 'Aqua Promotions (Pty) Ltd', kicker: 'Memorandum of Agreement' },
   },
 
@@ -115,7 +119,7 @@ var CFG = {
     CREDENTIALS: 'Google Credentials',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
-  DIVISIONS_URL: 'https://twigs002.github.io/quay-1-boarding-tool/data/divisions.json',
+  DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',
 
   // Enum vocabulary (mirror docs/CONTRACTS.md section 5). Import these exact strings.
   SYSTEMS: ['google', 'propdata', 'property24', 'cma', 'dialfire', 'hubspot'],
@@ -135,10 +139,12 @@ var CFG = {
   FFC_STATUSES: ['full', 'candidate', 'none'],
 
   // Systems provisioned by DEFAULT for a new hire per entity (RESEARCH 1.4 flags the program
-  // -> system mapping as the architect's call; this is that decision). Property24 auto-links on
-  // Google login but we still create it explicitly. Aqua contractors get Google only by default.
+  // -> system mapping as the architect's call; this is that decision). Property24 is intentionally
+  // NOT provisioned by this tool (removed at the client's request); it stays in the SYSTEMS enum +
+  // WORKER_SYSTEMS so the OFFBOARD deactivate path still works for pre-existing accounts. Aqua
+  // contractors get Google only by default.
   CORE_SYSTEMS: {
-    quay1: ['google', 'propdata', 'property24'],
+    quay1: ['google', 'propdata'],
     aqua: ['google'],
   },
   // Broker-facing program toggle -> lifecycle SYSTEM (RESEARCH 1.4). Only these two overlap the
@@ -177,8 +183,8 @@ var CFG = {
   },
 
   // Internal recipient lists (internal @quay1 addresses, not secrets; matches live Aqua CONFIG).
-  ALWAYS_CC: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],
-  INTERNAL_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'alan@quay1.co.za', 'lieze@quay1.co.za'],
+  ALWAYS_CC: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za'],
+  INTERNAL_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za'],
   SYSTEM_PROVISION_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
   // CMA access costs money, so it is not auto-created. When an admin ACCEPTS a CMA-entitled candidate
   // on the Admin Check tab, an approval-request email auto-sends to these approvers (see _maybeRequestCma_).
@@ -188,6 +194,10 @@ var CFG = {
   // request: on admin acceptance of a Dialfire-entitled starter, a request email (name + team) is
   // sent to these recipients to create the account. Scoped auto-send, same model as CMA_APPROVERS.
   DIALFIRE_APPROVERS: ['alan@quay1.co.za'],
+
+  // Broker-initiated offboarding (phase 1): clicking "Request offboarding" just sends a simple
+  // notification to these people; the full destructive offboarding stays super/admin. Extend later.
+  OFFBOARD_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za', 'sheldon@quay1.co.za'],
 
   MAX_ATTEMPTS: 3,
   OFFBOARD_DELAY_MIN: 30,
@@ -235,6 +245,12 @@ function hubspotSeatEnabled_() { return flag_(FLAG.HUBSPOT_SEAT_ENABLED, false);
 function propdataLive_() { return flag_(FLAG.PROPDATA_LIVE, false); }
 /** HR-sheet mirror armed? Default OFF (safe) - Hr.js dry-logs until this is set. */
 function hrSyncEnabled_() { return flag_(FLAG.HR_SYNC_ENABLED, false); }
+/** Internal-directed mail (CC/BCC + approver requests + HubSpot alert) allowed? Default ON. */
+function ccEnabled_() { return flag_(FLAG.CC_ENABLED, true); }
+/** Turn internal CC/BCC + approver/HubSpot emails OFF (for a clean test). Candidate mail still sends. */
+function ccsOff() { _scriptProps_().setProperty(FLAG.CC_ENABLED, '0'); return 'CC/BCC + approver + HubSpot-alert emails OFF (candidate emails still send).'; }
+/** Turn internal CC/BCC + approver/HubSpot emails back ON. */
+function ccsOn() { _scriptProps_().setProperty(FLAG.CC_ENABLED, '1'); return 'CC/BCC + approver + HubSpot-alert emails ON.'; }
 
 // ---------------------------------------------------------------- sheet access
 

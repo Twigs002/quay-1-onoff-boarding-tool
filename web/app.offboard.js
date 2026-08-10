@@ -17,9 +17,43 @@
 
   let offbCache = null;
 
+  // Brokers (not super/admin) get a simple notify-only "Request offboarding" form; the destructive
+  // teardown tree below stays super/admin.
+  function renderOffboardRequest(root) {
+    const wrap = el(`<div class="stack">
+      <div class="section-head">
+        <h2>Request an offboarding</h2>
+        <p>Let us know someone is leaving. This sends a quick notification to the offboarding team (Pagan, Kat, Lieze and Sheldon), who will action it. It does not remove any access itself.</p>
+      </div>
+      <div class="card card-pad">
+        <div class="field"><label for="ob_name">Who is leaving? <span class="req">*</span></label>
+          <input id="ob_name" type="text" placeholder="Full name" autocomplete="off"></div>
+        <div class="field"><label for="ob_team">Team</label>
+          <input id="ob_team" type="text" placeholder="e.g. Vipers" autocomplete="off"></div>
+        <div class="field"><label for="ob_reason">Reason or notes</label>
+          <textarea id="ob_reason" placeholder="Anything the team should know (optional)"></textarea></div>
+        <div class="form-actions"><button type="button" class="btn btn-primary" id="ob_submit">Request offboarding</button></div>
+      </div>
+    </div>`);
+    root.appendChild(wrap);
+    $('#ob_submit', wrap).addEventListener('click', async () => {
+      const name = $('#ob_name', wrap).value.trim();
+      if (!name) { toast('Name needed', 'Please enter who is leaving.', 'err'); return; }
+      const btn = $('#ob_submit', wrap); btn.disabled = true; btn.classList.add('loading');
+      try {
+        await api(KINDS.offboardNotify, { name, team: $('#ob_team', wrap).value.trim(), reason: $('#ob_reason', wrap).value.trim() });
+        wrap.innerHTML = `<div class="card card-pad"><div class="state"><div class="state-title">Offboarding requested</div><div>Thanks, the offboarding team has been notified about ${esc(name)}. They will take it from here.</div></div></div>`;
+      } catch (err) {
+        toast('Could not send request', err.message, 'err');
+        btn.disabled = false; btn.classList.remove('loading');
+      }
+    });
+  }
+
   function viewOffboard(root) {
     const user = H.getUser();
     const canOffboard = user && user.canOffboard;
+    if (!canOffboard) { renderOffboardRequest(root); return; }   // brokers: simple notify-only form
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Offboard a person</h2>

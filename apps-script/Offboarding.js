@@ -31,6 +31,35 @@
  * never auto-retries an 'error' row (only 'scheduled'/'firing').
  */
 
+/**
+ * Broker-initiated "Request offboarding" (kind:'offboard_notify'). Phase 1: tears NOTHING down - it
+ * just emails CFG.OFFBOARD_NOTIFY (Pagan, Kat, Lieze, Sheldon) so a human actions it. Any onboarder
+ * (incl. a senior broker) may raise it. Sends unconditionally (this send IS the point of the click,
+ * not a CC copy, so it is not gated by ccEnabled_); wrapped so a mail failure returns a clean error.
+ */
+function requestOffboardNotify_(body, ctx) {
+  var f = (body && body.fields) || body || {};
+  var name = String(f.name || f.full_name || '').trim();
+  if (!name) return { ok: false, error: 'a name is required' };
+  var team = String(f.team || '').trim();
+  var reason = String(f.reason || '').trim();
+  var by = (ctx && (ctx.name || ctx.email)) || 'a team member';
+  var to = (CFG.OFFBOARD_NOTIFY || []).filter(function (x) { return x; });
+  var subject = 'Offboarding requested: ' + name + (team ? ' (' + team + ')' : '');
+  var plain = 'Hi team,\n\n' + by + ' has requested that ' + name +
+    (team ? ' from the ' + team + ' team' : '') + ' be offboarded.' +
+    (reason ? '\n\nReason: ' + reason : '') +
+    '\n\nPlease action the offboarding when you have a moment.\n\nThanks,\nThe Quay 1 On/Offboarding Tool';
+  try {
+    GmailApp.sendEmail(to.join(','), subject, plain, { name: 'Quay 1' });
+    logAudit_('offboard_notify_sent', { name: name, team: team, by: by });
+    return { ok: true, to: to };
+  } catch (err) {
+    logAudit_('offboard_notify_failed', { name: name, error: String(err) });
+    return { ok: false, error: 'could not send the offboarding request: ' + String(err) };
+  }
+}
+
 function offboardRequest_(body, ctx) {
   requireAdmin_(ctx);
   var f = (body && body.fields) || body || {};

@@ -30,6 +30,7 @@
     programs: 'programs',
     retry: 'retry',
     offboard: 'offboard',
+    offboardNotify: 'offboard_notify',
   };
 
   // Provisioning systems (docs/CONTRACTS.md section 6). google/propdata are the
@@ -193,7 +194,7 @@
 
   function route(tab) {
     // Brokers cannot open Offboard or Admin Check; bounce them to Onboard.
-    if (tab === 'offboard' && !(USER && USER.canOffboard)) tab = 'onboard';
+    if (tab === 'offboard' && !(USER && USER.canOnboard)) tab = 'onboard';
     if (tab === 'admincheck' && !canAdminCheck()) tab = 'onboard';
     document.querySelectorAll('.tab-btn').forEach((b) => {
       const on = b.dataset.tab === tab;
@@ -851,9 +852,9 @@
     const so = $('#signOutBtn'); so.hidden = false;
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' - ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
-    // Offboarding is super/admin only; a broker never sees the tab (the backend
-    // also rejects a broker 'offboard' POST, so this is convenience, not the gate).
-    if (!(USER && USER.canOffboard)) {
+    // Offboarding: super/admin get the full destructive teardown tree; a broker gets a simple
+    // "Request offboarding" form (notify only). Everyone with tool access can open the tab.
+    if (!(USER && USER.canOnboard)) {
       const offBtn = document.querySelector('.tab-btn[data-tab="offboard"]');
       if (offBtn) offBtn.remove();
     }

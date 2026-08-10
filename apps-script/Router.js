@@ -19,9 +19,9 @@
  *   programs                       -> Programs.programsData_(ctx)     [authed, role-scoped]
  *   retry                          -> Queue.retryRow_(queue_id, ctx)  [super]
  *
- * doGet routes: FICA form (?f=<folderId> -> HTML), induction lookup (?i=<folderId> -> JSON),
+ * doGet routes: FICA form (?f=<folderId> -> HTML), induction booking page (?i=<folderId> -> HTML),
  * and a health ping (default). Both candidate links are generated server-side, so the query
- * contract (?f= vs ?i=) is owned here.
+ * contract (?f= vs ?i=) is owned here. The induction page POSTs book_induction itself.
  *
  * Every handler returns a plain object; Router wraps it with jsonOut_. Errors are caught and
  * returned as { ok:false, error } with a 200 body (the frontend reads the ok flag).
@@ -33,7 +33,7 @@ function doGet(e) {
   try {
     var p = (e && e.parameter) || {};
     if (p.f) return ficaForm_(String(p.f));                 // candidate FICA upload page (HTML)
-    if (p.i) return jsonOut_(inductionLookup_(String(p.i))); // candidate induction status (JSON)
+    if (p.i) return inductionPageHtml_(String(p.i));         // candidate induction booking page (HTML)
     return textOut_('ok'); // health ping
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -78,9 +78,12 @@ function dispatch_(kind, body, ctx) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
     case 'approve': return _approveDispatch_(body, ctx);
+    case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
+    case 'resend_packet': return _resendPacketDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
+    case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
     case 'status': return readForUi_(ctx);
     case 'programs': return programsData_(ctx);
     case 'retry': return retryRow_(String(body.queue_id || ''), ctx);
@@ -97,6 +100,15 @@ function _approveDispatch_(body, ctx) {
   return approveAndProvision_(folderId, ctx);
 }
 
+/** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records the
+ *  reason and notifies the candidate to re-submit. Never provisions. */
+function _declineDispatch_(body, ctx) {
+  requireAdmin_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return declineFica_(folderId, String(body.reason || ''), ctx);
+}
+
 /** Send a candidate a reminder to sign + submit FICA (re-sends the contract email). Any onboarder
  *  (super/admin/senior broker) may nudge; the handler re-sends only to the candidate on file. */
 function _remindDispatch_(body, ctx) {
@@ -104,6 +116,23 @@ function _remindDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return _remindContract_(folderId, ctx);
+}
+
+/** Broker "Request offboarding" (kind:'offboard_notify'). Phase-1 notify-only: any onboarder
+ *  (super/admin/senior broker) may raise it; it emails the offboarding team, tears nothing down. */
+function _offboardNotifyDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  return requestOffboardNotify_(body, ctx);
+}
+
+/** Resend the induction packet (kind:'resend_packet') for a candidate who has already booked a week.
+ *  Any onboarder (super/admin/senior broker) may resend; the handler reads the booked dates + candidate
+ *  email off the row and refuses if no week is booked yet. */
+function _resendPacketDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return resendInductionPacket_(folderId, ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded
