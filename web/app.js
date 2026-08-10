@@ -25,6 +25,7 @@
     onboardAqua: 'onboard_aqua',
     approve: 'approve',
     remind: 'remind',
+    resendPacket: 'resend_packet',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
@@ -592,6 +593,7 @@
           </div>
         </div>
         <div id="pipeBody"></div>
+        <div id="bookedBody"></div>
         <div id="provBody"></div>
       </div>
     </div>`);
@@ -630,7 +632,51 @@
     const pipeline = (r.onboarding || []).slice();       // candidates not yet set up
     statusCache = rows;
     renderPipeline(pipe, meta, pipeline, wrap);
+    renderBooked($('#bookedBody', wrap), (r.booked || []));
     renderStatus(body, null, rows);
+  }
+
+  // Candidates who have booked an induction week: a compact list with a "Resend induction packet" button.
+  function renderBooked(host, items) {
+    if (!host) return;
+    if (!items || !items.length) { host.innerHTML = ''; return; }
+    const cards = items.map((o) => {
+      const entTag = HUB.entTag(o.entity);
+      const when = [o.induction_wed, o.induction_thu].filter(Boolean).map((d) => fmtNiceDate(d)).join(' & ');
+      return `<div class="pipe-row">
+        <div class="pipe-main">
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
+          <div class="pipe-team muted">${esc(o.team || '')}${when ? ` · induction ${esc(when)}` : ''}</div>
+        </div>
+        <div class="pipe-side">
+          <span class="pill s-done">Induction booked</span>
+          <div class="pipe-actions"><button type="button" class="btn btn-ghost btn-sm" data-resend="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Resend induction packet</button></div>
+        </div>
+      </div>`;
+    }).join('');
+    host.innerHTML = `<div class="pipe-subhead">Induction booked</div><div class="pipe-list">${cards}</div>`;
+    host.querySelectorAll('[data-resend]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.name || 'this person';
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          const r = await api(KINDS.resendPacket, { folderId: b.dataset.resend });
+          toast('Induction packet resent', `The induction packet was resent to ${esc(name)}.`, 'ok');
+          b.classList.remove('loading'); b.disabled = false;
+        } catch (err) {
+          toast('Could not resend packet', err.message, 'err');
+          b.classList.remove('loading'); b.disabled = false;
+        }
+      });
+    });
+  }
+
+  // Friendly date for the booked-induction line ('Wed 5 Aug' style); falls back to the raw value.
+  function fmtNiceDate(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return iso || '';
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${+m[3]} ${MON[+m[2] - 1]}`;
   }
 
   // Compact "3h ago" / "2d ago" from an ISO timestamp; '' if unparseable.
