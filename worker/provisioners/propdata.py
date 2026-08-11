@@ -74,7 +74,7 @@ PORTAL = config.PROPDATA_PORTAL
 STATUS_ACTIVE = "Active"
 COUNTRY_CODE = "+27 (ZA)"
 DESIGNATION_FULL = "Non-Principal Property Practitioner"
-DESIGNATION_CANDIDATE = "-"  # the form default; left untouched for candidates
+DESIGNATION_CANDIDATE = "-"  # a real, selectable PDMS option for non-full-FFC agents (actively picked)
 
 _LOGIN_URL = "https://manage.propdata.net/login"
 
@@ -96,8 +96,8 @@ def _agents_url() -> str:
 
 def _designation_for(person: Person) -> str:
     """Map induction FFC status -> PDMS Designation. A full-FFC holder is a
-    'Non-Principal Property Practitioner'; anyone else (blank/candidate) keeps the
-    form's default "-". The payload's precomputed value wins if present."""
+    'Non-Principal Property Practitioner'; anyone else (blank/candidate) gets "-"
+    (a real PDMS option, actively selected). The payload's precomputed value wins if present."""
     pd = person.payload or {}
     explicit = str(pd.get("designation") or "").strip()
     if explicit:
@@ -194,7 +194,7 @@ class PropDataProvisioner(Provisioner):
             self._dismiss_autosave(page)
             log.info("propdata add-page url=%s title=%r", page.url, page.title())
             try:
-                page.wait_for_selector(F_STATUS, state="attached", timeout=30000)
+                page.wait_for_selector(F_STATUS, state="visible", timeout=30000)
             except Exception:
                 import os as _os
                 dbg = _os.environ.get("PROPDATA_DEBUG_SHOT", "/tmp/propdata_debug.png")
@@ -217,18 +217,18 @@ class PropDataProvisioner(Provisioner):
             page.locator(I_EMAIL).fill(email)
             self._rs(page, page.locator(F_COUNTRY), COUNTRY_CODE, "Country Code")
             page.locator(I_CELL).fill(person.cell or "")
-            # Designation is REQUIRED: candidates get "-" (actively selected, not defaulted),
-            # full-status agents get the practitioner title.
-            # Only set the designation for a REAL practitioner title. Candidates keep the form's
-            # default "-" (DESIGNATION_CANDIDATE) untouched: "-" is the placeholder, not a selectable
-            # react-select option, so trying to pick it silently left the field unset and broke the
-            # whole save for every candidate. Leaving it alone lets the candidate record save.
-            if designation and designation != DESIGNATION_CANDIDATE:
+            # Designation is a REQUIRED PDMS field and "-" is a real, selectable react-select option
+            # (the value Quay uses for anyone without a full FFC), NOT just a placeholder. It must be
+            # ACTIVELY selected: leaving the control on its default makes PDMS reject the save with
+            # "Designation This field is required". Full-status agents get the practitioner title,
+            # everyone else gets "-" - both go through the same _rs selection + verification.
+            if designation:
                 self._rs(page, page.locator(F_DESIGNATION), designation, "Designation")
 
-            # Portal Feeds -> one Property24 row (best-effort: a failure here must not
-            # lose the whole create - the agent record still saves without the feed).
-            portal_added = self._try_portal_feed(page)
+            # Portal Feeds -> one Property24 row. Disabled by default (config.PROPDATA_PORTAL_FEED):
+            # PDMS's marketing/help popups can overlay the Portal section and leave a half-filled feed
+            # row that blocks the whole save. Off = the core agent profile saves reliably.
+            portal_added = self._try_portal_feed(page) if config.PROPDATA_PORTAL_FEED else False
 
             # Profile Picture (best-effort for the same reason).
             photo_added = self._try_photo(page, _resolve_photo(person))
@@ -258,7 +258,10 @@ class PropDataProvisioner(Provisioner):
         and if it bounces to /login, submit credentials and retry (with a settle
         delay) until the add page holds."""
         for attempt in range(4):
-            page.goto(_add_url(), wait_until="networkidle", timeout=45000)
+            # Land explicitly on the Record Details section. Without the fragment the SPA
+            # sometimes settles on a different sub-view where Status/Designation/Portal-feed
+            # are not interactable, which shows up as a 30s Locator.click timeout at save.
+            page.goto(_add_url() + "#record-details", wait_until="networkidle", timeout=45000)
             page.wait_for_timeout(1500)  # allow the SPA's client-side auth redirect
             if "/login" not in page.url:
                 return  # authenticated and on the Add User page
@@ -305,12 +308,20 @@ class PropDataProvisioner(Provisioner):
             pass
 
     def _dismiss_autosave(self, page) -> None:
-        """PDMS offers to restore a half-finished draft ('You have unsaved work').
-        Always Discard it so each run starts from a clean form."""
+        """PDMS offers to restore a half-finished draft ('You have unsaved work') - which a
+        prior failed run will have left behind. The banner appears asynchronously, so an
+        immediate check usually misses it and the form stays on the restore view (a common
+        cause of the later click timeouts). Wait briefly for the Discard control, then click
+        it so every run starts from a clean Record Details form."""
         try:
             btn = page.get_by_role("button", name="Discard")
+            try:
+                btn.first.wait_for(state="visible", timeout=3000)
+            except Exception:  # noqa: BLE001 - no banner this run is the happy path
+                return
             if btn.count() and btn.first.is_visible():
                 btn.first.click()
+                page.wait_for_timeout(400)  # let the form re-render on the clean view
         except Exception:  # noqa: BLE001 - banner is best-effort, never fatal
             pass
 

@@ -59,6 +59,20 @@ function ficaUpload_(body) {
   }
   var profileType = propdataProfileType_(ffcStatus);
 
+  // Numeric-field integrity (server-side mirror of the FICA page's input filtering, so a direct POST
+  // cannot smuggle words past it). Reject BEFORE writing anything. Tax + bank account are digits only;
+  // ID/passport keeps letters (passports are alphanumeric) but bars spaces/free-text; NoK contact is a
+  // phone. Empty values are left to the required-field checks, not flagged here.
+  var num_ = function (key, label) { return String((body && body[key]) || d0[label] || '').trim(); };
+  var acctVal_ = num_('account_number', 'Account number');
+  var taxVal_ = num_('tax_number', 'Income tax number');
+  var idVal_ = String(d0['ID/passport number'] || '').trim();
+  var nokVal_ = num_('nok_contact', 'Next of kin contact');
+  if (acctVal_ && !/^[0-9]+$/.test(acctVal_.replace(/\s/g, ''))) return { ok: false, error: 'Bank account number must be digits only (no letters or words).' };
+  if (taxVal_ && !/^[0-9]+$/.test(taxVal_.replace(/\s/g, ''))) return { ok: false, error: 'Income tax number must be digits only (no letters or words).' };
+  if (idVal_ && !/^[A-Za-z0-9]+$/.test(idVal_)) return { ok: false, error: 'ID or passport number must contain only letters and numbers, with no spaces or words.' };
+  if (nokVal_ && /[A-Za-z]/.test(nokVal_)) return { ok: false, error: 'Next of kin contact number must be a phone number, not text.' };
+
   var ficaFolder = _ficaSubfolder_(folder);
 
   var files = ((body && body.files) || []).filter(function (x) { return x && x.dataBase64; });
@@ -151,11 +165,12 @@ function ficaUpload_(body) {
   if (isEmail_(meta.email)) {
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
     try {
-      GmailApp.sendEmail(meta.email, company.name + ' - FICA documents received - ' + name,
-        'Hi ' + firstName_(name) + ',\n\nThank you for submitting your FICA documents to ' +
-        company.name + '. We have received them and everything is now on file.\n\n' +
+      GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,
+        'Hi ' + firstName_(name) + ',\n\nThank you for submitting your documents to ' +
+        company.name + '. Our admin team is now checking them. Please look out for another ' +
+        'email shortly confirming your induction day.\n\n' +
         'Warm regards,\nThe ' + company.name + ' Team', {
-          bcc: CFG.ALWAYS_CC.filter(function (x) { return x; }).join(','),
+          bcc: ccEnabled_() ? CFG.ALWAYS_CC.filter(function (x) { return x; }).join(',') : undefined,
           name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name)),
         });
     } catch (err) { logAudit_('fica_thankyou_failed', { folderId: folderId, error: String(err) }); }
@@ -248,7 +263,8 @@ badLink +
 '<p class="hint">Upload the agreement you received by email, signed. We create your accounts once this and your FICA documents are in.</p></div></div>' +
 '<div class="card"><p class="sec">2 - Identity</p>' +
 '<div class="row"><label for="id_number">ID or passport number <span class="req">*</span></label>' +
-'<input type="text" id="id_number" inputmode="numeric" autocomplete="off" required></div>' +
+'<input type="text" id="id_number" inputmode="text" autocomplete="off" required>' +
+'<p class="hint">South African ID: 13 digits. Passport: letters and numbers only, no spaces.</p></div>' +
 '<div class="filewrap"><label for="f_id">Certified copy of your ID or passport <span class="req">*</span></label>' +
 '<input type="file" id="f_id" accept="image/*,application/pdf" required></div>' +
 // Work permit block - revealed only when the ID entered is not a 13-digit South African ID.
@@ -258,10 +274,12 @@ badLink +
 '<div class="filewrap"><label for="f_permit">Work permit / right-to-work document <span class="req">*</span></label>' +
 '<input type="file" id="f_permit" accept="image/*,application/pdf">' +
 '<p class="hint">Required because your ID is not a 13-digit South African ID. This confirms you are legally allowed to work with us.</p></div></div></div>' +
-'<div class="card"><p class="sec">3 - Date of birth</p>' +
-'<div class="row"><label for="birthday">Date of birth</label>' +
+// Date of birth - hidden for a 13-digit SA ID (derived from the ID server-side, saIdBirthday_);
+// shown + required only for a non-SA ID (passport). Toggled by permitState() with the permit block.
+'<div class="card" id="dobBlock" style="display:none"><p class="sec">3 - Date of birth</p>' +
+'<div class="row"><label for="birthday">Date of birth <span class="req">*</span></label>' +
 '<input type="date" id="birthday">' +
-'<p class="hint">Optional for South African IDs - we read it from your ID automatically. Please fill it in if you use a passport.</p></div></div>' +
+'<p class="hint">Required because your ID is not a 13-digit South African ID. For South African IDs we read your date of birth from the ID automatically.</p></div></div>' +
 '<div class="card"><p class="sec">4 - Proof of address</p>' +
 '<div class="row"><label for="home_address">Residential address <span class="req">*</span></label>' +
 '<textarea id="home_address" placeholder="Street, suburb, city, postal code" required></textarea></div>' +
@@ -272,7 +290,8 @@ badLink +
 '<div class="row"><label for="bank_name">Bank <span class="req">*</span></label>' +
 '<input type="text" id="bank_name" autocomplete="off" required></div>' +
 '<div class="row"><label for="account_number">Account number <span class="req">*</span></label>' +
-'<input type="text" id="account_number" inputmode="numeric" autocomplete="off" required></div>' +
+'<input type="text" id="account_number" inputmode="numeric" autocomplete="off" required>' +
+'<p class="hint">Digits only.</p></div>' +
 '<div class="row"><label for="account_type">Type of account <span class="req">*</span></label>' +
 '<select id="account_type" required><option value="">Select...</option>' +
 '<option value="Cheque">Cheque</option><option value="Savings">Savings</option>' +
@@ -281,7 +300,8 @@ badLink +
 '<input type="file" id="f_bank" accept="image/*,application/pdf" required></div></div>' +
 '<div class="card"><p class="sec">6 - Tax</p>' +
 '<div class="row"><label for="tax_number">Income tax number <span class="req">*</span></label>' +
-'<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required></div>' +
+'<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required>' +
+'<p class="hint">Digits only.</p></div>' +
 '<div class="filewrap"><label for="f_tax">SARS / tax number proof (optional)</label>' +
 '<input type="file" id="f_tax" accept="image/*,application/pdf"></div></div>' +
 '<div class="card"><p class="sec">7 - Professional status</p>' +
@@ -329,10 +349,20 @@ badLink +
 'var idEl=document.getElementById("id_number");' +
 'var permitBlock=document.getElementById("permitBlock");' +
 'var permitFile=document.getElementById("f_permit"),permitExp=document.getElementById("work_permit_expiry");' +
+'var dobBlock=document.getElementById("dobBlock"),dobEl=document.getElementById("birthday");' +
 'function isSaId(v){return /^\\d{13}$/.test(String(v||"").trim());}' +
 'function permitState(){var need=!isSaId(val("id_number"));if(permitBlock)permitBlock.style.display=need?"":"none";' +
-'if(permitFile)permitFile.required=need;if(permitExp)permitExp.required=need;}' +
+'if(permitFile)permitFile.required=need;if(permitExp)permitExp.required=need;' +
+'if(dobBlock)dobBlock.style.display=need?"":"none";if(dobEl){dobEl.required=need;if(!need)dobEl.value="";}}' +
 'if(idEl){idEl.addEventListener("input",permitState);}permitState();' +
+// Numeric-field integrity: fields that must be numbers reject words/letters as the user types, so a
+// value like "Dont have" or "Will revert" can never be submitted. ID/passport keeps letters (passports
+// are alphanumeric) but drops spaces/punctuation; NoK contact stays a phone (digits + phone symbols).
+'function keepRe(el,re){if(!el)return;el.addEventListener("input",function(){var s=el.value.replace(re,"");if(s!==el.value)el.value=s;});}' +
+'keepRe(document.getElementById("tax_number"),/[^0-9]/g);' +
+'keepRe(document.getElementById("account_number"),/[^0-9]/g);' +
+'keepRe(document.getElementById("id_number"),/[^A-Za-z0-9]/g);' +
+'keepRe(document.getElementById("nok_contact"),/[^0-9+()\\s-]/g);' +
 'form.addEventListener("submit",function(e){e.preventDefault();if(!KNOWN)return;' +
 'if(!form.checkValidity()){form.reportValidity();return;}' +
 'btn.disabled=true;showNote("info","Uploading your documents, please hold on...");' +

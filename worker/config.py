@@ -94,11 +94,22 @@ PORTAL_ACCOUNTS = {
     },
 }
 
+# ---- Programs-page account-flag mirror tabs -------------------------------
+# Same tracker sheet (SHEET_ID above), mirrored 1:1 from apps-script/Config.js's
+# CFG.TAB.CMA_ACCOUNTS / PROPDATA_ACCOUNTS - see worker/programs_mirror.py.
+CMA_ACCOUNTS_TAB: str = os.environ.get("CMA_ACCOUNTS_TAB", "CMA Accounts")
+PROPDATA_ACCOUNTS_TAB: str = os.environ.get("PROPDATA_ACCOUNTS_TAB", "PropData Accounts")
+
 # ---- PropData (PDMS) specifics -------------------------------------------
 # The company id is the /secure/<id>/ segment of the PDMS admin URL (Quay 1 = 46).
 PROPDATA_COMPANY_ID: str = os.environ.get("PROPDATA_COMPANY_ID", "46").strip()
 PROPDATA_BRANCH: str = os.environ.get("PROPDATA_BRANCH", "Quay 1 International Realty")
 PROPDATA_PORTAL: str = os.environ.get("PROPDATA_PORTAL", "Property24")
+# Whether to add the Property24 portal-feed row during a PDMS create. Default OFF: PDMS's own
+# marketing/help popups intermittently overlay the Portal section, so the feed selection can fail
+# and leave a half-filled row that blocks the whole save. Off = the core agent profile saves
+# reliably; the feed can be added manually or re-enabled once the popup handling is solid.
+PROPDATA_PORTAL_FEED: bool = _bool("PROPDATA_PORTAL_FEED", "0")
 # Default profile picture for candidate ("-") agents: the Quay 1 logo shipped in the repo.
 # Full-status agents pass a per-person photo_path (Canva headshot) in the queue payload.
 PROPDATA_DEFAULT_PHOTO: str = os.environ.get(

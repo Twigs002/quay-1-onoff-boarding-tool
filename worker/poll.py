@@ -23,6 +23,7 @@ import sys
 import json
 
 import config
+import programs_mirror
 from log_setup import get_logger
 from sheets import SheetBus, QueueRow, DONE, ERROR, SKIPPED
 from provisioners import REGISTRY
@@ -46,6 +47,22 @@ def _dispatch(qr: QueueRow) -> dict:
     if qr.action == "deactivate":
         return module.deactivate(person)
     raise ValueError(f"unknown action {qr.action!r} (expected create|deactivate)")
+
+
+def _mirror_account_flag(bus: SheetBus, qr: QueueRow, res: dict) -> None:
+    """Best-effort Programs-page roster mirror (see programs_mirror.py), run
+    only after a `create` that actually returned ok. Never raises - a mirror
+    problem must not turn a real provisioning success into a reported error.
+    """
+    try:
+        person = Person.from_queue_row(qr)
+        if qr.system == "propdata":
+            programs_mirror.mirror_propdata_created(bus, person, email=res.get("email", ""))
+        elif qr.system == "cma":
+            programs_mirror.mirror_cma_created(bus, person, email=res.get("email", ""))
+    except Exception as e:  # noqa: BLE001
+        log.warning("row %d %s: account-flag mirror failed (provisioning still recorded ok): %s",
+                    qr.row_index, qr.queue_id, e)
 
 
 def process_row(bus: SheetBus, qr: QueueRow) -> str:
@@ -72,6 +89,8 @@ def process_row(bus: SheetBus, qr: QueueRow) -> str:
     try:
         res = _dispatch(qr)
         status = DONE if res.get("ok") else ERROR
+        if status == DONE and qr.action == "create":
+            _mirror_account_flag(bus, qr, res)
         bus.finish(qr, status, res)
         log.info("row %d %s: %s  %s", qr.row_index, qr.queue_id, status,
                  json.dumps(res, ensure_ascii=False))

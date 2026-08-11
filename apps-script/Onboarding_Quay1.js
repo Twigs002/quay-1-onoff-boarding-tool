@@ -35,26 +35,39 @@ function onboardQuay1_(body, ctx) {
 
   var folder = _entityFolder_(prop_(PROP.QUAY1_PARENT_FOLDER, true), c.full_name, c.id_number);
   _saveUploadedFiles_(folder, (body && body.files) || []);
-  var gen = genQuay1Contract_(folder, c);
 
   var requesterEmail = (ctx && ctx.email) || '';
   var requesterName = (ctx && ctx.name) || '';
 
-  // Resolve the systems to provision NOW (operator ticks + entitlements) but do NOT create anything:
-  // provisioning is deferred to provisionReadyBatch_ (Wednesday 08:00), which fires only once the
-  // signed contract + FICA docs are in. Persist the resolved list so the batch honours the operator's
-  // selection without re-deriving it.
-  var systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team, c.activity);
-
+  // Write the tracker row FIRST so a fresh onboard ALWAYS leaves a visible row, even if contract
+  // generation later throws (missing/unreadable template, DocumentApp failure, missing Team Directory).
+  // Status starts 'Contract pending' and advances to 'Contract sent' once the PDF is in hand.
   upsertOnboardingRow_({
     folderId: folder.getId(), entity: 'quay1', name: c.full_name, id_number: c.id_number,
     email: c.candidate_email, contact: c.contact_number,
     start_date: fmtDate_(c.start_date), senior_name: c.senior_broker,
     senior_email: c.senior_email, requester_name: requesterName,
     requester_email: requesterEmail, designation: brokerActivityLabel_(c.activity) || c.activity, team: c.team,
-    commission: c.commission, programs: c.programs, systems_json: JSON.stringify(systems),
-    nationality: c.nationality, status: 'Contract sent',
+    commission: c.commission, programs: c.programs,
+    nationality: c.nationality, status: 'Contract pending',
   });
+
+  // Generate the contract + resolve the provisioning systems (deferred to provisionReadyBatch_; nothing
+  // is created now). If this throws, the row above still stands - mark it 'Contract error' and return the
+  // error so the operator sees it, instead of losing the candidate with no row at all.
+  var gen, systems;
+  try {
+    gen = genQuay1Contract_(folder, c);
+    systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team, c.activity);
+  } catch (err) {
+    try { setOnboardingStatus_(folder.getId(), 'Contract error'); } catch (e) { /* row still stands */ }
+    logAudit_('quay1_contract_gen_failed', { folderId: folder.getId(), error: String(err) });
+    return { ok: false, folderId: folder.getId(), folderUrl: folder.getUrl(),
+      error: 'contract generation failed: ' + String(err && err.message ? err.message : err) };
+  }
+
+  // Contract is in hand: persist the resolved systems + advance the status.
+  upsertOnboardingRow_({ folderId: folder.getId(), systems_json: JSON.stringify(systems), status: 'Contract sent' });
 
   // Mirror the new starter into the HR sheet's "New Starters (Tracking)" tab (non-fatal, DRY_RUN-safe).
   try { hrTrackingUpsert_(folder.getId()); }

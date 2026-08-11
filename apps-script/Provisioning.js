@@ -155,6 +155,71 @@ function provisionAll_(folderId, systems, ctx) {
   return { ok: !anyError, results: results, anyError: anyError, dryRun: DRY_RUN_() };
 }
 
+/**
+ * ONE-OFF armed test: create ONLY the Google account for a specific onboarding folder, live.
+ * Bypasses the provisioned_at gate (calls provisionAll_ directly) and forces systems to ['google']
+ * so it never touches PropData/Dialfire (no worker + no alan email). DRY_RUN must be 0 for this to
+ * create a real account; with DRY_RUN on it just logs. Run from the editor. Safe to delete after.
+ */
+function provisionGoogleLiveFor_(folderId) {
+  var r = provisionAll_(folderId, ['google'], { email: 'admin@' + CFG.DOMAIN, role: 'admin', name: 'Admin' });
+  Logger.log(JSON.stringify(r, null, 2));
+  return r;
+}
+function provisionJohnSmithGoogleLive() {
+  return provisionGoogleLiveFor_('1ix1BEEuQ9VMu2_zfWGxDvhcZ194L38FR');  // "John Smith Test"
+}
+
+/** ONE-OFF cleanup: delete the "John Smith Test" live Google Workspace account. The tracker rows
+ *  (onboarding / credentials / queue) are removed separately; the PDMS agent is removed by hand. */
+function removeJohnSmithTestGoogle() {
+  var email = 'john@quay1.co.za';
+  var out = {};
+  try { AdminDirectory.Users.remove(email); out.google = 'deleted ' + email; }
+  catch (e) { out.google = 'error (may already be gone): ' + String(e); }
+  Logger.log(JSON.stringify(out));
+  return out;
+}
+
+/** ONE-OFF cleanup after the 2026-08-10 end-to-end test run: delete the leftover test Google
+ *  Workspace accounts (john@ from the earlier go-live, zztest@ from the full-flow test) and trash
+ *  the two test candidate Drive folders (Zztest + Zzdecline, with their contract/FICA files). The
+ *  tracker rows were already removed via gspread. Idempotent - re-running is safe (already-gone
+ *  items just report an error string). Run once from the editor. */
+function cleanupTestArtifacts() {
+  var out = { users: {}, folders: {} };
+  ['john@quay1.co.za', 'zztest@quay1.co.za'].forEach(function (email) {
+    try { AdminDirectory.Users.remove(email); out.users[email] = 'deleted'; }
+    catch (e) { out.users[email] = 'error (may already be gone): ' + String(e); }
+  });
+  // Zztest Candidate + Zzdecline Testcase folders (contract PDF + FICA uploads live inside).
+  ['1vq4sMRxGLI0q58X3UYGJzBXj-FDlQJUF', '1BVqp_f3gWrTSKkinUQPqFZNYUDxjfl74'].forEach(function (fid) {
+    try { DriveApp.getFolderById(fid).setTrashed(true); out.folders[fid] = 'trashed'; }
+    catch (e) { out.folders[fid] = 'error (may already be gone): ' + String(e); }
+  });
+  Logger.log(JSON.stringify(out));
+  return out;
+}
+
+/**
+ * ONE-SHOT GO-LIVE: arm the live flags atomically, then run the ready-batch so every ready candidate
+ * (currently just "John Smith Test") is provisioned for real. setProperties(..., false) only ADDS/
+ * updates these four keys - it never touches the other Script Properties (Supabase keys, template
+ * IDs, folders), so there is no corruption risk. Google is created inline here; PropData is enqueued
+ * for the Python worker (run poll.py after). Run once from the editor. Returns the batch summary.
+ */
+function goLiveAndProvisionAll() {
+  PropertiesService.getScriptProperties().setProperties({
+    DRY_RUN: '0',
+    PROPDATA_LIVE: '1',
+    HR_SYNC_ENABLED: '1',
+    WORKER_SA_EMAIL: 'va-sheets-bot@va-automation-497708.iam.gserviceaccount.com',
+  }, false);
+  var out = provisionReadyBatch_();
+  Logger.log('ARMED (DRY_RUN=0, PROPDATA_LIVE=1, HR_SYNC_ENABLED=1) + batch: ' + JSON.stringify(out, null, 2));
+  return out;
+}
+
 // ---------------------------------------------------------------- deferred provisioning batch
 
 /** Docs are in when the signed contract AND the three FICA docs (ID, proof of address, bank) are
@@ -199,6 +264,9 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
+      _sendInductionInvite_(o.folderId, o);   // same one-time invite as the interactive accept path
+      _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
+      _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       out.provisioned.push(o.folderId);
     } catch (err) {
       out.errors.push({ folderId: o.folderId, error: String(err) });
@@ -247,6 +315,10 @@ function approveAndProvision_(folderId, ctx) {
     // entitled candidate triggers a manual account-request email - CMA to Sheldon + Marthinus,
     // Dialfire to Alan. After provisionAll_ so no one is asked to set up an account before the rest
     // of setup has started. Both idempotent + test-safe inside (see helpers).
+    // These are FUNCTIONAL account-request emails (CMA -> Sheldon + Marthinus, Dialfire -> Alan), not
+    // CC copies, so they fire on approval REGARDLESS of the CC toggle. ccsOff only silences candidate
+    // CC/BCC + the internal HubSpot-login alert; it must not stop a CMA/Dialfire account from being
+    // requested. Entitlement, idempotency (stamped so never re-sent) + DRY_RUN handling are inside.
     _maybeRequestCma_(folderId, o, systems);
     _maybeRequestDialfire_(folderId, o, systems);
 
@@ -263,10 +335,61 @@ function approveAndProvision_(folderId, ctx) {
     }
     setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
     setOnboardingStatus_(folderId, 'Provisioned');
+    // Real accounts exist now, so invite the candidate to pick an induction week (CC the senior).
+    _sendInductionInvite_(folderId, o);
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Candidate "pick your induction week" invite. Sent ONCE, the moment a row first reaches the
+ * provisioned state - from BOTH transition points (the interactive approveAndProvision_ and the
+ * scheduled provisionReadyBatch_), each guarded by the provisioned_at check so there is no double
+ * send. Fully guarded: a missing email or a mail failure logs and returns without breaking
+ * provisioning. CC of the senior broker is suppressed while CC is off; the candidate send is
+ * unconditional so the candidate always gets it.
+ */
+function _sendInductionInvite_(folderId, o) {
+  try {
+    if (!isEmail_(o && o.email)) { logAudit_('induction_invite_skipped_no_email', { folderId: folderId }); return; }
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var link = inductionLink_(folderId);
+    if (!link) logAudit_('induction_invite_no_link', { folderId: folderId });   // WEBAPP_URL unset -> dead link
+    GmailApp.sendEmail(o.email, 'Pick your ' + company.name + ' induction week' + (o.name ? ' - ' + o.name : ''),
+      'Hi ' + firstName_(o.name) + ',\n\nWelcome aboard. Please pick your ' + company.name +
+      ' induction week here: ' + link + '\n\nWarm regards,\nThe ' + company.name + ' Team',
+      { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+  } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * DECLINE FICA (kind:'decline_fica'). An admin reviews the uploaded FICA documents on the site and
+ * rejects them (wrong doc, illegible, expired). Sets the status to 'FICA declined' and emails the
+ * candidate the admin's reason plus their FICA link so they can re-submit. The FICA ticks are left
+ * intact on purpose - a fresh upload re-ticks the relevant box. requireAdmin_ is asserted at the call
+ * site. The email send is guarded so a mail failure still returns ok. Returns { ok, declined }.
+ */
+function declineFica_(folderId, reason, ctx) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  setOnboardingStatus_(folderId, 'FICA declined');
+  var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+  var ficaUrl = ficaLink_(folderId);
+  var why = String(reason || '').trim();
+  try {
+    GmailApp.sendEmail(o.email, 'Action needed on your ' + company.name + ' FICA documents',
+      'Hi ' + firstName_(o.name) + ',\n\n' +
+      'We were unable to accept your FICA documents' + (why ? ' for the following reason:\n\n' + why : '.') +
+      '\n\nPlease re-submit using your personal, secure link: ' + ficaUrl +
+      '\n\nWarm regards,\nThe ' + company.name + ' Team',
+      { name: company.name, htmlBody: ficaDeclineHtml_(company, firstName_(o.name), why, ficaUrl),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+  } catch (e) { logAudit_('fica_decline_email_failed', { folderId: folderId, error: String(e) }); }
+  logAudit_('fica_declined', { folderId: folderId, reason: why, by: (ctx && ctx.email) || '' });
+  return { ok: true, declined: true };
 }
 
 /**

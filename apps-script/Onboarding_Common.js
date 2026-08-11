@@ -86,6 +86,7 @@ function _isTestRecipient_(email) {
  *  extraCc (Quay 1 adds the senior broker + requester). De-duplicated (case-insensitive), only
  *  valid addresses, excluding the recipient is left to Gmail. Returns '' when nothing to CC. */
 function _contractCc_(entity, extraCc) {
+  if (!ccEnabled_()) return '';
   var base = (CFG.CONTRACT_CC && CFG.CONTRACT_CC[entity]) || CFG.ALWAYS_CC || [];
   var all = base.concat(Array.isArray(extraCc) ? extraCc : (extraCc ? [extraCc] : []));
   var seen = {}, out = [];
@@ -124,17 +125,16 @@ function _remindContract_(folderId, ctx) {
   var first = firstName_(o.name);
   var ficaUrl = ficaLink_(folderId);
   var pdf = _folderContractPdf_(folderId);
-  var subject = 'Reminder: Your ' + company.name + ' Agreement' + (o.name ? ' - ' + o.name : '');
+  var subject = 'Reminder: submit your ' + company.name + ' FICA documents' + (o.name ? ' - ' + o.name : '');
   var plain =
     'Hi ' + first + ',\n\n' +
-    'Just a friendly follow-up on your ' + company.name + ' agreement' +
-    (pdf ? ' (attached again for convenience)' : '') + '. When you have a moment, please sign and ' +
-    'return it, and submit your FICA documents using your personal, secure link:\n' +
+    'Just a friendly reminder to submit your FICA documents using your personal, secure link:\n' +
     ficaUrl + '\n\n' +
     'If you have already taken care of this, thank you - please ignore this note. Reply to this email ' +
     'if you need any help.\n\nWarm regards,\nThe ' + company.name + ' Team';
   try {
     var opts = { name: company.name, htmlBody: agreementEmailHtml_(company, first, ficaUrl) };
+    if (ccEnabled_() && isEmail_(o.senior_email)) opts.cc = o.senior_email;
     if (pdf) opts.attachments = [pdf.getAs('application/pdf')];
     GmailApp.sendEmail(o.email, subject, plain, opts);
     setOnboardingCell_(folderId, ONB_COL.reminded_at, nowIso_());
