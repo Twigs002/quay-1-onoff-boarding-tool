@@ -6,6 +6,14 @@
 node_modules/
 npm-debug.log*
 
+# Agent tooling cruft (claude-flow scratch state, per-subdir)
+.claude-flow/
+**/.claude-flow/
+
+# Binary docs / exports don't belong in source (keep the repo source-only;
+# stash PDFs in docs/ intentionally or link them externally)
+*.pdf
+
 # OS / editor cruft
 .DS_Store
 *.log

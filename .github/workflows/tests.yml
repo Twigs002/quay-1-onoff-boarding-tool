@@ -1,0 +1,44 @@
+name: Offline test suite
+
+# Runs the offline correctness gate documented in docs/TEST-REPORT.md on every
+# push and PR. The whole suite is side-effect free (DRY_RUN on, a hard socket
+# guard in the python harness), and every heavy worker dep (gspread, playwright)
+# is lazy-imported - so no pip install / npm install is needed to run it.
+#
+# `make test` is the merge gate. `seam_check` is an advisory static heuristic
+# (e2e_doPost.js is the authoritative seam gate), so it runs in its own
+# non-blocking step and never fails the build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Correctness gate (syntax + harnesses)
+        run: make test
+
+      - name: Seam heuristic (advisory - does not block)
+        continue-on-error: true
+        run: make seam
