@@ -30,24 +30,38 @@ function onboardAqua_(body, ctx) {
   if (typeErr) return { ok: false, error: typeErr };
 
   var folder = _entityFolder_(prop_(PROP.AQUA_PARENT_FOLDER, true), name, id);
-  var gen = genAquaMoa_(folder, f);
 
   // Force requester identity from the verified caller (client value is UX only).
   var requesterEmail = (ctx && ctx.email) || '';
   var requesterName = (ctx && ctx.name) || '';
 
-  // Deferred provisioning (see onboardQuay1_): resolve + persist the systems, create nothing now.
-  var systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f), f.team);
-
+  // Write the tracker row FIRST so a fresh onboard ALWAYS leaves a visible row, even if MOA generation
+  // later throws. Status starts 'Contract pending' and advances to 'Contract sent' once the PDF is in hand.
   upsertOnboardingRow_({
     folderId: folder.getId(), entity: 'aqua', name: name, id_number: id,
     email: f.email || '', contact: f.contact || '', start_date: fmtDate_(f.start_date),
     requester_name: requesterName, requester_email: requesterEmail,
     designation: f.designation || '', agreement_type: _aquaTypeLabel_(f),
     work_hours: _workHours_(f.work_hours), remuneration: fmtRemuneration_(f.remuneration),
-    programs: f.programs || [], systems_json: JSON.stringify(systems),
-    nationality: String(f.nationality || '').trim(), status: 'Contract sent',
+    programs: f.programs || [],
+    nationality: String(f.nationality || '').trim(), status: 'Contract pending',
   });
+
+  // Generate the MOA + resolve provisioning systems (deferred; nothing created now). If this throws,
+  // the row above still stands - mark it 'Contract error' and return the error.
+  var gen, systems;
+  try {
+    gen = genAquaMoa_(folder, f);
+    systems = resolveSystems_('aqua', f.programs, _provisionList_(body, f), f.team);
+  } catch (err) {
+    try { setOnboardingStatus_(folder.getId(), 'Contract error'); } catch (e) { /* row still stands */ }
+    logAudit_('aqua_contract_gen_failed', { folderId: folder.getId(), error: String(err) });
+    return { ok: false, folderId: folder.getId(), folderUrl: folder.getUrl(),
+      error: 'contract generation failed: ' + String(err && err.message ? err.message : err) };
+  }
+
+  // Contract is in hand: persist the resolved systems + advance the status.
+  upsertOnboardingRow_({ folderId: folder.getId(), systems_json: JSON.stringify(systems), status: 'Contract sent' });
 
   // Mirror the new starter into the HR sheet's "New Starters (Tracking)" tab (non-fatal, DRY_RUN-safe).
   try { hrTrackingUpsert_(folder.getId()); }

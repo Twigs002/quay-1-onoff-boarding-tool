@@ -158,7 +158,7 @@ function readForUi_(ctx) {
   var email = ctx && ctx.email ? String(ctx.email).toLowerCase() : '';
   // The candidate pipeline: onboarded people not yet set up, so admins can review + Approve & set up.
   // Scoped to a broker's own candidates for non-admins.
-  var onboarding = _onboardingPipeline_(isAdmin, email);
+  var onboarding = _onboardingPipeline_(isAdmin, email, pq);
   if (!isAdmin && email) {
     // Scope the provisioning queue to ALL of the broker's own candidates (by requester_email), NOT the
     // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
@@ -169,9 +169,27 @@ function readForUi_(ctx) {
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
   }
+  // Candidates who have BOOKED an induction week - the audience for the "Resend induction packet"
+  // action on the Progress report (they are already provisioned, so they are off the pipeline above).
+  var booked = _bookedForResend_(isAdmin, email);
   // `rows` is the alias the status UI reads (TEST-REPORT drift 4); provisioning/offboarding are
   // kept as explicit keys for any caller that wants them split. `onboarding` drives the approval UI.
-  return { ok: true, rows: pq, provisioning: pq, offboarding: oq, onboarding: onboarding };
+  return { ok: true, rows: pq, provisioning: pq, offboarding: oq, onboarding: onboarding, booked: booked };
+}
+
+/** Onboarded people who have BOOKED an induction week (induction_wed/thu set), so an admin can resend
+ *  their induction packet from the Progress report. Non-admins see only candidates they onboarded. */
+function _bookedForResend_(isAdmin, email) {
+  var out = [];
+  listOnboarding_().forEach(function (o) {
+    if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
+    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    out.push({
+      folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
+      induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '', status: o.status || '',
+    });
+  });
+  return out;
 }
 
 /**
@@ -180,10 +198,26 @@ function readForUi_(ctx) {
  * "Approve & set up" affordance. Non-admins see only candidates they onboarded. Provisioned rows drop
  * off (their created systems already show in the Provisioning Queue list).
  */
-function _onboardingPipeline_(isAdmin, email) {
+function _onboardingPipeline_(isAdmin, email, pq) {
   var out = [];
+  // Per-folder provisioning progress, from the create rows on the Provisioning Queue. A candidate is
+  // only "fully set up" (and so drops off the pipeline) when every create row is done/skipped. A row
+  // still pending/in-progress -> incomplete; an errored row -> incomplete + error, so a PropData/worker
+  // failure keeps the new hire VISIBLY unfinished in the pipeline instead of vanishing once Google (the
+  // inline system) succeeds and stamps provisioned_at.
+  var setup = {};
+  (pq || []).forEach(function (r) {
+    if (String(r.action) !== 'create') return;
+    var st = String(r.status || '').toLowerCase();
+    var s = setup[r.folderId] || { incomplete: false, error: false };
+    if (st === 'error') { s.error = true; s.incomplete = true; }
+    else if (st !== 'done' && st !== 'skipped') { s.incomplete = true; }
+    setup[r.folderId] = s;
+  });
   listOnboarding_().forEach(function (o) {
-    if (o.provisioned_at) return;
+    var s = setup[o.folderId] || { incomplete: false, error: false };
+    // Drop only when fully set up: provisioned AND no create row is still pending or errored.
+    if (o.provisioned_at && !s.incomplete) return;
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     var sys = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(sys)) {
@@ -196,6 +230,8 @@ function _onboardingPipeline_(isAdmin, email) {
       docs_ready: _docsReady_(o),
       approved: !!o.approved_at, approved_at: o.approved_at || '', approved_by: o.approved_by || '',
       reminded_at: o.reminded_at || '',
+      // Provisioning progress so the UI can keep a hire visible until every system succeeds.
+      provisioned: !!o.provisioned_at, setup_incomplete: !!s.incomplete, setup_error: !!s.error,
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,

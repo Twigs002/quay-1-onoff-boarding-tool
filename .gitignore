@@ -41,3 +41,6 @@ worker/playwright-report/
 worker/test-results/
 worker/browser_profile/
 apps-script/SeedAccounts.js
+
+# One-time legacy migration fixture (candidate PII; import already completed)
+scripts/legacy_candidates_source.json

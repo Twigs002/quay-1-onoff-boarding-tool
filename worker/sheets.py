@@ -119,6 +119,7 @@ class SheetBus:
         self._gc = gspread.service_account(filename=self.key_path)
         self._book = self._gc.open_by_key(self.sheet_id)
         self._prov = self._book.worksheet(config.PROVISIONING_TAB)
+        self._other: dict = {}   # lazy cache for worksheet(), keyed by tab name
 
     # -------------------------------------------------- reads
     def pending_provisioning(self) -> list[QueueRow]:
@@ -182,3 +183,21 @@ class SheetBus:
         """
         self._prov.update_cell(qr.row_index, PROV_COLS["status"], PENDING)
         self._prov.update_cell(qr.row_index, PROV_COLS["updated_at"], _now_iso())
+
+    # -------------------------------------------------- other tabs on the book
+    def worksheet(self, tab_name: str):
+        """Lazily open + cache any other worksheet on the same tracker book (e.g.
+        the Programs-page account-flag mirror tabs in programs_mirror.py). Returns
+        None if the tab does not exist - tab creation/formatting is owned by Apps
+        Script (Setup.js's ensureAccountsTabs_), so a missing tab is "nothing to
+        mirror onto yet", not a worker error.
+        """
+        ws = self._other.get(tab_name)
+        if ws is not None:
+            return ws
+        try:
+            ws = self._book.worksheet(tab_name)
+        except Exception:
+            return None
+        self._other[tab_name] = ws
+        return ws

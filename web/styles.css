@@ -528,3 +528,49 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .ac-cma { margin-top: 6px; font-size: 12.5px; }
 .ac-cma.muted { color: var(--muted); }
 .ac-cma.warn-text { color: var(--amber); font-weight: 600; }
+
+/* ============================================================
+   Mobile polish (<=560px). Mobile-only via this query, so the
+   desktop layout above is untouched. Goals: no horizontal
+   overflow, 44px+ touch targets, 16px inputs (no iOS zoom),
+   and the fixed-width data grids collapse into stacked cards.
+   ============================================================ */
+@media (max-width: 560px) {
+  /* 16px inputs stop iOS Safari zooming the page on focus. */
+  .field input, .field select, .field textarea { font-size: 16px; }
+
+  /* A little more room edge-to-edge on small screens. */
+  .main { padding: 18px 0 60px; }
+  .card-pad { padding: 18px 16px; }
+  .section-head h2 { font-size: 19px; }
+
+  /* Comfortable tap sizes. */
+  .tab-btn { min-height: 44px; }
+  .btn { min-height: 44px; }
+  .seg button { padding: 11px 18px; }
+
+  /* Programs: the 1fr/120px/172px grid does not fit a phone. Drop the header row
+     (which labelled the columns) and stack the name on its own line with the CMA +
+     PropData chips flowing beneath. The PropData chip ("Agent"/"Spec #"/"no") is
+     labelled inline since its column header is now gone; the CMA chip self-labels. */
+  .prog-th { display: none; }
+  .prog-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 16px; }
+  .prog-tr.sr { padding-left: 13px; }
+  .prog-nm { flex: 1 1 100%; }
+  .prog-cell { flex: 0 0 auto; justify-content: flex-start; }
+  .prog-cell:last-child::before {
+    content: "PropData"; margin-right: 6px; font-size: 10px; font-weight: 800;
+    letter-spacing: .4px; text-transform: uppercase; color: var(--muted);
+  }
+  .prog-teamh { flex-wrap: wrap; }
+  .prog-tcount { flex-wrap: wrap; }
+
+  /* Offboard tree: stack name / accounts / action instead of 3 columns. */
+  .offb-tr { grid-template-columns: 1fr; gap: 8px; padding: 12px 16px; }
+  .offb-acc { justify-content: flex-start; }
+  .offb-go { justify-self: start; }
+
+  /* Progress-report pipeline rows already wrap; make the action buttons full-width
+     targets so they are easy to hit. */
+  .pipe-actions .btn { flex: 1 1 auto; }
+}
