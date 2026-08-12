@@ -121,7 +121,7 @@ def sample_worker_rows():
         "updated_at": "",
     }
     rows = []
-    for i, system in enumerate(["property24", "cma", "dialfire"]):
+    for i, system in enumerate(["propdata", "cma", "dialfire"]):
         r = dict(base)
         r["queue_id"] = f"Q{i+1}"
         r["system"] = system

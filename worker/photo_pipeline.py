@@ -1,5 +1,5 @@
 """
-photo_pipeline.py - build a branded Property24 profile photo for a FULL-STATUS agent.
+photo_pipeline.py - build a branded profile photo for a FULL-STATUS agent.
 
 Flow: take the agent's headshot -> remove the background (rembg) -> composite the
 cut-out onto the solid Quay 1 navy (#3D5BA6) circular backdrop
@@ -63,10 +63,10 @@ def _default_out(source_path) -> str:
     return str(p.with_name(p.stem + "_p24.png"))
 
 
-def build_prop24_photo(source_path, out_path=None, backdrop_path=None,
+def build_profile_photo(source_path, out_path=None, backdrop_path=None,
                        cutout_height_frac: float = CUTOUT_HEIGHT_FRAC,
                        cutout_bottom_frac: float = CUTOUT_BOTTOM_FRAC) -> str:
-    """Build the branded circular Prop24 photo and write it to `out_path`.
+    """Build the branded circular profile photo and write it to `out_path`.
 
     Returns the output path. The template circle is taken from the backdrop's own
     alpha channel, so the final image is clipped to exactly the Canva circle (no
@@ -106,5 +106,5 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("usage: python photo_pipeline.py <headshot> [out.png]")
         raise SystemExit(2)
-    written = build_prop24_photo(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
+    written = build_profile_photo(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
     print("wrote", written)

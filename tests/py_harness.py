@@ -9,7 +9,7 @@ Asserts:
   A. Column cross-check: worker sheets.PROV_COLS / OFFB_COLS match the canonical
      contract (tests/contracts.json) field-for-field AND in column order. This is
      the single most important test - a drift here silently corrupts the bus.
-  B. property24 + dialfire, create AND deactivate -> terminal `done`, result_json
+  B. dialfire, create AND deactivate -> terminal `done`, result_json
      carries dry_run=True and a `would` field (CONTRACTS sec 3).
   C. cma (create + deactivate) -> terminal `skipped` (never a fake done / error).
   D. A row already at MAX_ATTEMPTS is marked `error {"error":"max attempts"}`
@@ -80,7 +80,7 @@ def test_column_cross_check():
     check(sorted(sheets.PROV_COLS.values()) == list(range(1, len(contracts.PROVISIONING_QUEUE_COLUMNS) + 1)),
           "Provisioning column indices are 1..N contiguous, no dupes")
     check(set(sheets.WORKER_SYSTEMS) == set(contracts.WORKER_SYSTEMS),
-          "worker WORKER_SYSTEMS == contract WORKER_SYSTEMS (propdata/property24/cma/dialfire)")
+          "worker WORKER_SYSTEMS == contract WORKER_SYSTEMS (propdata/cma/dialfire)")
 
 
 # ----------------------------------------------------------- fake bus + rows
@@ -126,11 +126,9 @@ def make_row(row_index, queue_id, system, action, status="pending", attempts=0):
 
 # --------------------------------------------------------------------------- B/C
 def test_dispatch_paths():
-    print("B/C. Dry-run dispatch: property24/dialfire -> done, cma -> skipped")
+    print("B/C. Dry-run dispatch: dialfire -> done, cma -> skipped")
     bus = FakeBus()
     cases = [
-        ("property24", "create", "done"),
-        ("property24", "deactivate", "done"),
         ("dialfire", "create", "done"),
         ("dialfire", "deactivate", "done"),
         ("cma", "create", "skipped"),
@@ -159,7 +157,7 @@ def test_dispatch_paths():
 def test_max_attempts_not_claimed():
     print("D. Row at MAX_ATTEMPTS -> error, never claimed")
     bus = FakeBus()
-    qr = make_row(9, "PQ-F1-property24-create", "property24", "create",
+    qr = make_row(9, "PQ-F1-dialfire-create", "dialfire", "create",
                   attempts=config.MAX_ATTEMPTS)
     ret = poll.process_row(bus, qr)
     check(ret == "max_attempts", f"return == max_attempts (got {ret})")
@@ -198,7 +196,7 @@ def test_status_transition_sequence():
             seq.append(status)
 
     bus = TracingBus()
-    qr = make_row(11, "PQ-F1-property24-create", "property24", "create")
+    qr = make_row(11, "PQ-F1-dialfire-create", "dialfire", "create")
     seq.append(qr.status)                          # pending
     poll.process_row(bus, qr)
     check(seq == ["pending", "in_progress", "done"],

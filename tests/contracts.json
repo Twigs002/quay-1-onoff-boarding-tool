@@ -16,11 +16,11 @@
   "offboarding_status": ["scheduled", "firing", "done", "error"],
 
   "_note_system_scopes": "col H of Provisioning Queue only ever holds the 5 in provisioning_systems (CONTRACTS section 1). hubspot lives ONLY in offboarding systems_json (col G) + the master vocab, handled inline by Apps Script - never a worker/queue-H value.",
-  "provisioning_systems": ["google", "propdata", "property24", "cma", "dialfire"],
-  "systems_master": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
-  "offboarding_systems_default": ["google", "propdata", "property24", "cma", "dialfire", "hubspot"],
+  "provisioning_systems": ["google", "propdata", "cma", "dialfire"],
+  "systems_master": ["google", "propdata", "cma", "dialfire", "hubspot"],
+  "offboarding_systems_default": ["google", "propdata", "cma", "dialfire", "hubspot"],
   "inline_systems": ["google"],
-  "worker_systems": ["propdata", "property24", "cma", "dialfire"],
+  "worker_systems": ["propdata", "cma", "dialfire"],
   "entities": ["quay1", "aqua"],
 
   "max_attempts_default": 3,

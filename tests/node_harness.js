@@ -95,13 +95,13 @@ function main() {
   if (typeof ctx.enqueueProvision_ === 'function') {
     const qid = ctx.enqueueProvision_({
       folderId: 'FID1', full_name: 'Jane Doe', first_name: 'Jane', id_number: '9001010000000',
-      quay_email: 'jane@quay1.co.za', cell: '0820000000', system: 'property24', action: 'create',
+      quay_email: 'jane@quay1.co.za', cell: '0820000000', system: 'dialfire', action: 'create',
       payload: { branch: 'CT' }, status: 'pending',
     });
     const pqSheet = getSheet('Provisioning Queue');
     const row = pqSheet._rows[pqSheet._rows.length - 1]; // last appended
     const C = ctx.PQ_COL;
-    check(/^PQ-FID1-property24-/.test(qid) && row[C.queue_id] === qid,
+    check(/^PQ-FID1-dialfire-/.test(qid) && row[C.queue_id] === qid,
       `queue_id generated in CONTRACTS format (${qid})`);
     check(row[C.folderId] === 'FID1', 'folderId -> col B');
     check(row[C.full_name] === 'Jane Doe', 'full_name -> col C');
@@ -109,7 +109,7 @@ function main() {
     check(row[C.id_number] === '9001010000000', 'id_number -> col E (leading-zero safe as text)');
     check(row[C.quay_email] === 'jane@quay1.co.za', 'quay_email -> col F');
     check(row[C.cell] === '0820000000', 'cell -> col G');
-    check(row[C.system] === 'property24', 'system -> col H');
+    check(row[C.system] === 'dialfire', 'system -> col H');
     check(row[C.action] === 'create', 'action -> col I');
     check(row[C.payload_json] === JSON.stringify({ branch: 'CT' }), 'payload_json -> col J');
     check(row[C.status] === 'pending', 'status -> col K (worker system => pending)');
@@ -181,7 +181,7 @@ function main() {
     const offbId = ctx.writeOffboard_({
       full_name: 'Ida Idem', quay_email: 'ida@quay1.co.za', requested_by: 'boss@quay1.co.za',
       requested_at: new Date(Date.now() - 90000).toISOString(), fire_at: pastFire,
-      systems: ['google', 'property24', 'hubspot'],
+      systems: ['google', 'dialfire', 'hubspot'],
     });
     const pqSheet = getSheet('Provisioning Queue');
     calls.adminDirectory.length = 0;
@@ -191,8 +191,8 @@ function main() {
     const pqCountAfter1 = pqSheet._rows.length;
     check(rowAfter1 && rowAfter1.status === 'done', 'fireOffboarding_ takes a due row to status=done');
     const p24 = ctx.readQueue_('Provisioning Queue').filter(
-      (r) => r.quay_email === 'ida@quay1.co.za' && r.system === 'property24' && r.action === 'deactivate');
-    check(p24.length === 1, 'one property24 deactivate row enqueued for the worker');
+      (r) => r.quay_email === 'ida@quay1.co.za' && r.system === 'dialfire' && r.action === 'deactivate');
+    check(p24.length === 1, 'one dialfire deactivate row enqueued for the worker');
     const liveSuspend = calls.adminDirectory.some((c) => c.op === 'Users.update' && c.user && c.user.suspended === true);
     check(!liveSuspend, 'OFFBOARD_ARMED off => no live Google suspend (destructive op suppressed)');
 
@@ -235,20 +235,20 @@ function main() {
     blocked('credential ledger (recordCredential_)', 'Provisioning.recordCredential_ not defined (stub)');
   }
   if (typeof ctx.resolveSystems_ === 'function') {
-    // A full Broker (SB) keeps Property24; an Assistant (JB) is stripped of Property24 + CMA even
+    // A full Broker (SB) keeps CMA; an Assistant (JB) is stripped of CMA even
     // when explicitly ticked. Team '' so team-mapping does not add systems in the test.
-    const sb = ctx.resolveSystems_('quay1', [], ['google', 'property24', 'cma'], '', 'sell_res_sb');
-    check(sb.indexOf('property24') >= 0 && sb.indexOf('cma') >= 0,
-      'entitlements: full Broker (SB) keeps Property24 + CMA');
-    const jb = ctx.resolveSystems_('quay1', [], ['google', 'property24', 'cma'], '', 'sell_res_jb');
-    check(jb.indexOf('property24') < 0 && jb.indexOf('cma') < 0 && jb.indexOf('google') >= 0,
-      'entitlements: Assistant (JB) barred from Property24 + CMA, keeps Google');
+    const sb = ctx.resolveSystems_('quay1', [], ['google', 'cma'], '', 'sell_res_sb');
+    check(sb.indexOf('cma') >= 0,
+      'entitlements: full Broker (SB) keeps CMA');
+    const jb = ctx.resolveSystems_('quay1', [], ['google', 'cma'], '', 'sell_res_jb');
+    check(jb.indexOf('cma') < 0 && jb.indexOf('google') >= 0,
+      'entitlements: Assistant (JB) barred from CMA, keeps Google');
     // The matrix reads the label form too (standalone re-provision passes o.designation).
-    const jbLabel = ctx.resolveSystems_('quay1', [], ['property24'], '', 'Sell · Residential · Assistant (JB)');
-    check(jbLabel.indexOf('property24') < 0, 'entitlements: JB detected from the label form "(JB)"');
+    const jbLabel = ctx.resolveSystems_('quay1', [], ['cma'], '', 'Sell · Residential · Assistant (JB)');
+    check(jbLabel.indexOf('cma') < 0, 'entitlements: JB detected from the label form "(JB)"');
     // No activity -> nothing barred (defensive default).
-    const none = ctx.resolveSystems_('quay1', [], ['property24', 'cma'], '', '');
-    check(none.indexOf('property24') >= 0 && none.indexOf('cma') >= 0,
+    const none = ctx.resolveSystems_('quay1', [], ['dialfire', 'cma'], '', '');
+    check(none.indexOf('cma') >= 0,
       'entitlements: unknown role bars nothing (default-allow)');
   } else {
     blocked('entitlements matrix (resolveSystems_)', 'Provisioning.resolveSystems_ not defined (stub)');
@@ -305,11 +305,11 @@ function main() {
     // ARMED batch (DRY_RUN off) provisions an approved, docs-in row for real and stamps it.
     const armed = loadGas({ props: Object.assign({}, DEFAULT_PROPS, { DRY_RUN: '0' }), dryRun: false });
     armed.getSheet('Provisioning Queue'); armed.getSheet('Onboarding');
-    // Use a browser system (property24 is enqueued for the worker, no Admin SDK) so the stamping
+    // Use a browser system (dialfire is enqueued for the worker, no Admin SDK) so the stamping
     // logic is exercised without depending on a live/mocked AdminDirectory.
     armed.ctx.upsertOnboardingRow_({ folderId: 'RDY-1', entity: 'quay1', name: 'Ready Ray',
       fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received',
-      approved_at: '2026-01-01', approved_by: 'boss@quay1.co.za', systems_json: JSON.stringify(['property24']) });
+      approved_at: '2026-01-01', approved_by: 'boss@quay1.co.za', systems_json: JSON.stringify(['dialfire']) });
     const res1 = armed.ctx.provisionReadyBatch_();
     check(res1.provisioned.indexOf('RDY-1') >= 0, 'ARMED batch provisions an approved + docs-in row');
     const rdy = armed.ctx.readOnboardingByFolder_('RDY-1');
@@ -328,7 +328,7 @@ function main() {
     const stuckId = ctx.writeOffboard_({
       full_name: 'Stan Stuck', quay_email: 'stan@quay1.co.za', requested_by: 'boss@quay1.co.za',
       requested_at: new Date(Date.now() - 90000).toISOString(),
-      fire_at: new Date(Date.now() - 60000).toISOString(), systems: ['google', 'property24'],
+      fire_at: new Date(Date.now() - 60000).toISOString(), systems: ['google', 'dialfire'],
     });
     const pqBefore = pqSheet._rows.length;
     ctx.reapOffboarding_();

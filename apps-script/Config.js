@@ -54,7 +54,7 @@ var PROP = {
   HR_SHEET_ID: 'HR_SHEET_ID',
   // The provisioning worker's Google service-account email (client_email from its key file). When set,
   // a full-status agent's FICA headshot is shared with it at enqueue so the worker can download the
-  // photo and build the branded Prop24 picture. Unset -> no share (worker falls back to the logo).
+  // photo and build the branded profile picture. Unset -> no share (worker falls back to the logo).
   WORKER_SA_EMAIL: 'WORKER_SA_EMAIL',
 };
 
@@ -122,13 +122,13 @@ var CFG = {
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',
 
   // Enum vocabulary (mirror docs/CONTRACTS.md section 5). Import these exact strings.
-  SYSTEMS: ['google', 'propdata', 'property24', 'cma', 'dialfire', 'hubspot'],
+  SYSTEMS: ['google', 'propdata', 'cma', 'dialfire', 'hubspot'],
   // PropData moved from inline REST to the browser worker (PDMS has no usable user API);
   // see worker/provisioners/propdata.py. Google is the only remaining inline (API) system.
   // CMA stays a worker system for the OFFBOARD (deactivate) path, but CMA CREATE is never actually
   // performed automatically (it costs money + is OTP-gated): the create row just skips, and an
   // approval-request email is sent to CMA_APPROVERS on admin acceptance instead (see _maybeRequestCma_).
-  WORKER_SYSTEMS: ['propdata', 'property24', 'cma', 'dialfire'],
+  WORKER_SYSTEMS: ['propdata', 'cma', 'dialfire'],
   INLINE_SYSTEMS: ['google'],
   ACTIONS: ['create', 'deactivate'],
   QUEUE_STATUS: ['pending', 'in_progress', 'done', 'error', 'skipped'],
@@ -139,10 +139,8 @@ var CFG = {
   FFC_STATUSES: ['full', 'candidate', 'none'],
 
   // Systems provisioned by DEFAULT for a new hire per entity (RESEARCH 1.4 flags the program
-  // -> system mapping as the architect's call; this is that decision). Property24 is intentionally
-  // NOT provisioned by this tool (removed at the client's request); it stays in the SYSTEMS enum +
-  // WORKER_SYSTEMS so the OFFBOARD deactivate path still works for pre-existing accounts. Aqua
-  // contractors get Google only by default.
+  // -> system mapping as the architect's call; this is that decision). Aqua contractors get
+  // Google only by default.
   CORE_SYSTEMS: {
     quay1: ['google', 'propdata'],
     aqua: ['google'],
@@ -155,11 +153,11 @@ var CFG = {
   // value: 'sb' = full Broker, 'jb' = Assistant. Each entry lists the systems that role must NOT be
   // provisioned - a filter applied to the resolved CREATE set, even if an operator explicitly ticks
   // a barred system. Assistants (JB) work under a senior broker's listings/CMA, so they are barred
-  // from Property24 + CMA; full brokers (SB) get everything. Google is never barred. Revoke is
+  // from CMA; full brokers (SB) get everything. Google is never barred. Revoke is
   // offboarding-only (no mid-life reconcile) - this gates CREATE. A role not listed bars nothing.
   ENTITLEMENTS_BARRED: {
     sb: [],
-    jb: ['property24', 'cma'],
+    jb: ['cma'],
   },
 
   // Broker Activities - the residential clause definitions from the Quay 1 Broker Agreement

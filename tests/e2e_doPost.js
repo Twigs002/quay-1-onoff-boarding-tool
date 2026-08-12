@@ -40,7 +40,7 @@ const canonOnboardQuay1 = {
   email: 'jane@personal.com', start_date: '2026-08-01', division: 'Sales',
   team: 'Alpha', designation: 'agent', senior_name: 'Sam Senior',
   senior_email: 'sam@quay1.co.za', commission: '60',
-  systems: ['google', 'propdata', 'property24'], programs: ['cma'],
+  systems: ['google', 'propdata', 'dialfire'], programs: ['cma'],
   requester_name: 'ignored', requester_email: 'ignored@x.com',
 };
 const SEAM_ERR = /full_name and id_number are required|valid candidate_email is required/;
@@ -87,7 +87,7 @@ check(rbOn.error !== 'unauthorized' && !/forbidden/.test(rbOn.error || ''),
 //     Call provisionAll_ directly with a broker ctx - it is the exact line that used to throw
 //     'forbidden' AFTER the contract was generated and the candidate emailed.
 let provErr = null, provRes = null;
-try { provRes = brokerGas.ctx.provisionAll_('F-broker', ['property24'], { role: { is_broker: true, is_admin: false, is_super: false } }); }
+try { provRes = brokerGas.ctx.provisionAll_('F-broker', ['dialfire'], { role: { is_broker: true, is_admin: false, is_super: false } }); }
 catch (e) { provErr = String(e); }
 check(provErr === null && provRes && provRes.ok === true,
   `provisionAll_ runs for a broker (inline onboard path, no admin gate)${provErr ? ' -> threw ' + provErr : ''}`);
