@@ -19,22 +19,11 @@
 
   const DRIVE_FOLDER = (id) => `https://drive.google.com/drive/folders/${encodeURIComponent(id)}`;
 
-  // Local render helpers matching the redesign's class contract (styles.css). These mirror
-  // what HUB.docPill/HUB.entTag do today, but app.js hasn't been migrated to the new classes
-  // yet (still emits .doc-on/.doc-off, .entity-tag, and has no HUB.avatar) - once it is, these
-  // can be dropped in favour of the shared H.docPill/H.entTag/H.avatar helpers.
-  const initials = (name) => {
-    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
-    if (!parts.length) return '?';
-    return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
-  };
-  const avatarFor = (name, ent) => {
-    const aqua = String(ent || '').toLowerCase() === 'aqua';
-    return `<div class="avatar${aqua ? ' avatar-aqua' : ''}">${esc(initials(name))}</div>`;
-  };
-  const entTag = (ent) => String(ent || '').toLowerCase() === 'aqua'
-    ? '<span class="tag-entity tag-aqua">Aqua</span>' : '<span class="tag-entity tag-quay1">Quay 1</span>';
-  const docTick = (on, label) => `<span class="doc-tick${on ? '' : ' missing'}">${esc(label)}</span>`;
+  // Render helpers are the shared HUB ones (app.js) so Admin Check, Progress report and
+  // Programs render an identical starter: H.avatar (initials), H.entTag, H.docPill.
+  const avatarFor = (name, ent) => H.avatar(name, ent);
+  const entTag = (ent) => H.entTag(ent);
+  const docTick = (on, label) => H.docPill(on, label);
 
   function viewAdminCheck(root) {
     const user = H.getUser();
@@ -107,7 +96,7 @@
         <div class="pipe-side">
           <span class="pill pill-ready">Ready to accept</span>
           <div class="pipe-actions">
-            <button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>
+            <button type="button" class="btn btn-blue-solid" style="font-size:17px" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>
             <button type="button" class="btn btn-danger btn-sm" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>

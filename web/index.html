@@ -65,7 +65,8 @@
         </div>
       </div>
       <nav class="tab-nav" id="tabNav" aria-label="Hub sections">
-        <button class="tab-btn active" data-tab="onboard" aria-current="page">Onboard</button>
+        <button class="tab-btn active" data-tab="today" aria-current="page">Today</button>
+        <button class="tab-btn" data-tab="onboard">Onboard</button>
         <button class="tab-btn" data-tab="admincheck">Admin Check</button>
         <button class="tab-btn" data-tab="provisioning">Progress report</button>
         <button class="tab-btn" data-tab="programs">Programs</button>
@@ -78,9 +79,10 @@
   <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
 
   <nav class="bottom-nav" aria-label="Sections">
-    <a href="#" data-tab="onboard" aria-current="page"><span class="ico"></span>Onboard</a>
+    <a href="#" data-tab="today" aria-current="page"><span class="ico"></span>Today</a>
+    <a href="#" data-tab="onboard"><span class="ico"></span>Onboard</a>
     <a href="#" data-tab="admincheck"><span class="ico"></span>Admin Check</a>
-    <a href="#" data-tab="provisioning"><span class="ico"></span>Progress report</a>
+    <a href="#" data-tab="provisioning"><span class="ico"></span>Progress</a>
     <a href="#" data-tab="programs"><span class="ico"></span>Programs</a>
     <a href="#" data-tab="offboard"><span class="ico"></span>Offboard</a>
   </nav>
@@ -89,6 +91,7 @@
   <script src="config.js"></script>
   <script src="auth.js"></script>
   <script src="app.js"></script>
+  <script src="app.today.js"></script>
   <script src="app.offboard.js"></script>
   <script src="app.admincheck.js"></script>
 </body>

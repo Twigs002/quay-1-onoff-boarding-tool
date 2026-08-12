@@ -465,3 +465,39 @@ a:hover { color: var(--blue-900); text-decoration: underline; }
 .tbl th { text-align: left; padding: 10px 12px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); border-bottom: 1px solid var(--line); }
 .tbl td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 .tbl tr:last-child td { border-bottom: 0; }
+
+/* Solid CTA button variants (redesign changelog round 2, #18/#20/#21): the primary
+   form submit is solid yellow; the "Accept and set up" action is solid blue. White
+   label per the user's explicit choice in the changelog. */
+.btn-yellow-solid { background: var(--yellow); color: #fff; border: 2px solid var(--yellow); }
+.btn-yellow-solid:hover { background: #E6B200; border-color: #E6B200; }
+.btn-yellow-solid:active { background: #D4A800; border-color: #D4A800; }
+.btn-blue-solid { background: var(--blue); color: #fff; border: 2px solid var(--blue); }
+.btn-blue-solid:hover { background: var(--blue-900); border-color: var(--blue-900); }
+.btn-blue-solid:active { background: var(--blue-900); border-color: var(--blue-900); }
+
+/* Today landing: stat cards use the base .stat; give the "needs you" count an accent. */
+.stat.is-accent .stat-value { color: var(--blue); }
+
+/* ============================================================
+   Behavior-preservation fixes from the redesign code-review gate.
+   The round-2 sheet dropped several rules the markup/JS still rely
+   on; restore them here rather than editing the delivered sheet.
+   ============================================================ */
+/* Pre-auth: fully remove the app chrome from layout + focus order (not just cover
+   it with the opaque login gate), so keyboard/screen-reader focus can't land on the
+   hidden tabs/bottom-nav and the page can't scroll behind the gate on mobile. */
+body.pre-auth { overflow: hidden; }
+body.pre-auth .topbar,
+body.pre-auth .tab-nav,
+body.pre-auth .main,
+body.pre-auth .bottom-nav { display: none !important; }
+/* Keep the header + in-chrome tab bar pinned on long pages (Progress report etc.). */
+.topbar { position: sticky; top: 0; z-index: 100; }
+.topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
+/* Account-setup queue table cell treatments the redesign sheet dropped. */
+.tbl .who { font-weight: 700; }
+.tbl .sys { text-transform: capitalize; }
+.tbl td.actions { text-align: right; }
+/* Admin Check "review documents in Drive" link spacing. */
+.ac-links { margin-top: 8px; font-size: 13px; }

@@ -192,6 +192,7 @@
 
   //  ROUTER
   const VIEWS = {
+    today: (root) => window.HUB.viewToday(root),            // defined in app.today.js
     onboard: viewOnboard, provisioning: viewProvisioning, programs: viewPrograms,
     offboard: (root) => window.HUB.viewOffboard(root),      // defined in app.offboard.js
     admincheck: (root) => window.HUB.viewAdminCheck(root),  // defined in app.admincheck.js
@@ -229,9 +230,9 @@
         <p>Generate the contract and record the systems to provision. The candidate is emailed their agreement and a secure FICA link. No accounts are created here: once their signed contract and FICA documents are in, an admin accepts them on the Admin Check tab, and accounts are set up then. Fields marked with a red asterisk are required.</p>
       </div>
       <div class="card card-pad stack">
-        <div class="segmented" role="tablist" aria-label="Entity">
-          <button type="button" role="tab" data-ent="quay1" aria-pressed="true">Quay 1</button>
-          <button type="button" role="tab" data-ent="aqua" aria-pressed="false">Aqua Promotions</button>
+        <div class="segmented" role="group" aria-label="Entity">
+          <button type="button" data-ent="quay1" aria-pressed="true">Quay 1</button>
+          <button type="button" data-ent="aqua" aria-pressed="false">Aqua Promotions</button>
         </div>
         <form id="onboardForm" novalidate></form>
       </div>
@@ -346,7 +347,7 @@
         </div>
         ${gate}
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract</button>
+          <button type="submit" class="btn btn-yellow-solid" id="obSubmit" style="font-size:19px" ${canOnboard ? '' : 'disabled'}>Create contract</button>
           <button type="reset" class="btn btn-ghost">Clear</button>
         </div>`;
 
@@ -870,7 +871,7 @@
     document.querySelectorAll('.bottom-nav a[data-tab]').forEach((a) => {
       a.addEventListener('click', (e) => { e.preventDefault(); route(a.dataset.tab); });
     });
-    route('onboard');
+    route('today');
   }
 
   async function boot() {
