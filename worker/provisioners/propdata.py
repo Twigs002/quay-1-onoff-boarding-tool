@@ -14,8 +14,6 @@ CREATE flow (mirrors the recorded walk-through):
   User Details   -> First Name, Last Name, Email, Country Code=+27 (ZA), Cell,
                     and Designation ONLY for full-FFC agents (candidates keep the
                     default "-")
-  Portal Feeds   -> add one row: Status=Active, Portal=Property24,
-                    Branch=Quay 1 International Realty
   Profile Picture-> upload the photo (Quay 1 logo for candidates; a per-person
                     Canva headshot later for full-status agents)
   Save User
@@ -61,16 +59,9 @@ I_LAST = "#input-field-last_name"
 I_EMAIL = "#input-field-email"
 I_CELL = "#input-cell_number"
 FILE_PHOTO = "#image"                          # profile-picture <input type=file>, hidden
-# Portal Feeds row (created by the single "Add" button) uses dynamic UUID ids, so
-# its three selects are targeted by exact label text, taking the LAST occurrence
-# (Record Details already owns a "Status"/"Branch" group above).
-PF_STATUS = 'div.form-group:has(> label:text-is("Status"))'
-PF_PORTAL = 'div.form-group:has(> label:text-is("Portal"))'
-PF_BRANCH = 'div.form-group:has(> label:text-is("Branch"))'
 
 # Fixed PDMS field values for a Quay 1 agent (see module docstring).
 BRANCH = config.PROPDATA_BRANCH
-PORTAL = config.PROPDATA_PORTAL
 STATUS_ACTIVE = "Active"
 COUNTRY_CODE = "+27 (ZA)"
 DESIGNATION_FULL = "Non-Principal Property Practitioner"
@@ -130,7 +121,7 @@ def _photo_path(person: Person) -> str:
 
 
 def _resolve_photo(person: Person) -> str:
-    """Live photo path. Full-status agents with a FICA headshot get a branded Prop24
+    """Live photo path. Full-status agents with a FICA headshot get a branded profile
     photo built on the fly (download headshot -> rembg -> composite). Any failure, or
     no headshot, falls back to the Quay 1 logo so a save never ships a blank picture."""
     pd = person.payload or {}
@@ -146,9 +137,9 @@ def _resolve_photo(person: Person) -> str:
         import photo_pipeline
         tmp = tempfile.mkdtemp(prefix="p24_")
         src = drive.download_file(file_id, os.path.join(tmp, "headshot"))
-        return photo_pipeline.build_prop24_photo(src, os.path.join(tmp, "p24.png"))
+        return photo_pipeline.build_profile_photo(src, os.path.join(tmp, "profile.png"))
     except Exception as e:
-        log.warning("prop24 photo build failed (%s) - using default logo", e)
+        log.warning("profile photo build failed (%s) - using default logo", e)
         return config.PROPDATA_DEFAULT_PHOTO
 
 
@@ -161,13 +152,13 @@ class PropDataProvisioner(Provisioner):
         log.info(
             "[DRY_RUN] propdata.create WOULD: log in to PDMS as %s, open Add User, set "
             "Status=Active Branch=%r Display=%r; First=%r Last=%r Email=%r Country=%r Cell=%r "
-            "Designation=%r; add Portal Feed (Active/%s/%r); upload photo=%r; Save User",
+            "Designation=%r; upload photo=%r; Save User",
             config.PORTAL_ACCOUNTS["propdata"]["user"] or "<unset>",
             BRANCH, BRANCH, person.first_name, _last_name(person), _email(person),
-            COUNTRY_CODE, person.cell, designation, PORTAL, BRANCH, _photo_path(person),
+            COUNTRY_CODE, person.cell, designation, _photo_path(person),
         )
         pd = person.payload or {}
-        would_photo = ("branded Prop24 photo built from FICA headshot id=%s"
+        would_photo = ("branded profile photo built from FICA headshot id=%s"
                        % pd["photo_file_id"]) if pd.get("photo_file_id") else _photo_path(person)
         return result(True, "create", self.system, simulated=True,
                       would="add PDMS agent profile",
@@ -225,22 +216,17 @@ class PropDataProvisioner(Provisioner):
             if designation:
                 self._rs(page, page.locator(F_DESIGNATION), designation, "Designation")
 
-            # Portal Feeds -> one Property24 row. Disabled by default (config.PROPDATA_PORTAL_FEED):
-            # PDMS's marketing/help popups can overlay the Portal section and leave a half-filled feed
-            # row that blocks the whole save. Off = the core agent profile saves reliably.
-            portal_added = self._try_portal_feed(page) if config.PROPDATA_PORTAL_FEED else False
-
-            # Profile Picture (best-effort for the same reason).
+            # Profile Picture (best-effort: PDMS's marketing/help popups can overlay the section).
             photo_added = self._try_photo(page, _resolve_photo(person))
 
             # Save
             self._save(page)
             self._await_save(page)
 
-        log.info("propdata.create OK: %s (%s) designation=%s portal_feed=%s photo=%s",
-                 person.full_name, email, designation, portal_added, photo_added)
+        log.info("propdata.create OK: %s (%s) designation=%s photo=%s",
+                 person.full_name, email, designation, photo_added)
         return result(True, "create", self.system, email=email, designation=designation,
-                      portal_feed_added=portal_added, photo_added=photo_added)
+                      photo_added=photo_added)
 
     def _deactivate_live(self, person: Person) -> dict:
         # The offboard/deactivate DOM path was not part of the mapped walk-through.
@@ -259,8 +245,8 @@ class PropDataProvisioner(Provisioner):
         delay) until the add page holds."""
         for attempt in range(4):
             # Land explicitly on the Record Details section. Without the fragment the SPA
-            # sometimes settles on a different sub-view where Status/Designation/Portal-feed
-            # are not interactable, which shows up as a 30s Locator.click timeout at save.
+            # sometimes settles on a different sub-view where Status/Designation are not
+            # interactable, which shows up as a 30s Locator.click timeout at save.
             page.goto(_add_url() + "#record-details", wait_until="networkidle", timeout=45000)
             page.wait_for_timeout(1500)  # allow the SPA's client-side auth redirect
             if "/login" not in page.url:
@@ -360,21 +346,6 @@ class PropDataProvisioner(Provisioner):
                 "PDMS field %r: could not select %r - no option matched the text the worker sent. "
                 "Check the exact option label in PDMS (the value in the worker's constants/payload "
                 "must match it verbatim)." % (label or "react-select", value))
-
-    def _try_portal_feed(self, page) -> bool:
-        """Add one Portal Feed row (Active / Property24 / Quay 1). Best-effort: any
-        failure is logged and swallowed so the agent still saves without the feed."""
-        try:
-            page.get_by_role("button", name="Add", exact=True).first.click()
-            page.wait_for_timeout(500)
-            # The new row's three selects share labels with fields above, so take .last.
-            self._rs(page, page.locator(PF_STATUS).last, STATUS_ACTIVE)
-            self._rs(page, page.locator(PF_PORTAL).last, PORTAL)
-            self._rs(page, page.locator(PF_BRANCH).last, BRANCH)
-            return True
-        except Exception as e:  # noqa: BLE001
-            log.warning("propdata portal-feed step failed (agent still saved): %s", e)
-            return False
 
     def _try_photo(self, page, path: str) -> bool:
         """Set the profile picture by feeding the hidden file input directly (no OS

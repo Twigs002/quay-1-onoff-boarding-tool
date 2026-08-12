@@ -18,7 +18,7 @@ def portal_page(profile_name: str):
     """Yield a Playwright page backed by a persistent context for `profile_name`.
 
     Usage:
-        with portal_page("property24") as page:
+        with portal_page("propdata") as page:
             page.goto(...)
     Never called in dry-run - provisioners short-circuit before opening a browser.
     Playwright is imported lazily here so the whole worker (and its dry-run path)

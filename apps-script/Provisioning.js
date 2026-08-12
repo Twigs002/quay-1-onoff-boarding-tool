@@ -1,6 +1,6 @@
 /**
  * Provisioning.js - account creation. Google Workspace + PropData are API-based and run INLINE
- * here, written to the Provisioning Queue as done/error for audit. Property24, CMA and Dialfire
+ * here, written to the Provisioning Queue as done/error for audit. CMA and Dialfire
  * have no usable API, so this module ENQUEUES pending rows for the Python worker.
  *
  * Owner: backend. See docs/SPEC.md section 4 and docs/CONTRACTS.md section 1.
@@ -11,8 +11,7 @@
  * live-tested from here; ships behind DRY_RUN. The va-automation key on disk is a DIFFERENT
  * project and does NOT authorize Directory writes.
  *
- * Google is the linchpin: created FIRST so quay_email is available to later rows. Property24
- * auto-links on Google login but we still enqueue an explicit create.
+ * Google is the linchpin: created FIRST so quay_email is available to later rows.
  *
  * Public surface:
  *   resolveSystems_(entity, programs, explicit, team, activity) - [system...]  core + mapped programs + team map, then the entitlements matrix strips systems the broker role may not hold.
@@ -54,7 +53,7 @@ function resolveSystems_(entity, programs, explicit, team, activity) {
   // Team-configured systems are a baseline that applies in BOTH branches (see docstring).
   if (team) teamMapping_(team).systems.forEach(add);
   // Entitlements matrix has the FINAL say: strip systems this broker role may not hold, even when
-  // explicitly ticked or team-mapped (e.g. a JB assistant never gets Property24/CMA). See Config.
+  // explicitly ticked or team-mapped (e.g. a JB assistant never gets CMA). See Config.
   return entitlementFilter_(Object.keys(set), activity);
 }
 
@@ -68,7 +67,7 @@ function brokerRole_(activity) {
 }
 
 /** Apply the entitlements matrix: remove any system barred for this broker role. Logs what it
- *  strips (audit trail) so a missing Property24/CMA on a JB is explained, not silent. */
+ *  strips (audit trail) so a missing CMA on a JB is explained, not silent. */
 function entitlementFilter_(systems, activity) {
   var role = brokerRole_(activity);
   var barred = (role && CFG.ENTITLEMENTS_BARRED[role]) || [];
@@ -109,7 +108,7 @@ function _personFor_(folderId) {
     // FICA time; ffc_status is kept as a fallback so the role still derives if it was not.
     ffc_status: o.ffc_status || '',
     propdata_profile_type: o.propdata_profile_type || '',
-    photo_file_id: o.photo_file_id || '',   // FICA headshot -> branded Prop24 photo (full-status only)
+    photo_file_id: o.photo_file_id || '',   // FICA headshot -> branded profile photo (full-status only)
     quay_email: '',
   };
 }
@@ -731,7 +730,7 @@ function enqueueBrowserSystems_(person, systems, action) {
     if (s === 'dialfire') return;
     var payload = _browserPayload_(s, person);
     // Grant the worker's service account read access to the FICA headshot it will download to build
-    // the branded Prop24 photo. Non-fatal: a share failure just means the worker uses the logo.
+    // the branded profile photo. Non-fatal: a share failure just means the worker uses the logo.
     if (s === 'propdata' && payload.photo_file_id) _sharePhotoWithWorker_(payload.photo_file_id);
     var id = enqueueProvision_({
       folderId: person.folderId, full_name: person.full_name, first_name: person.first_name,
@@ -761,11 +760,10 @@ function _browserPayload_(system, person) {
     ffc_status: person.ffc_status || '',
     role: _propdataRole_(person),                 // agent|specialist (reference / fallback)
     branch: person.team || '',                    // informational; PDMS branch is fixed to Quay 1
-    // Full-status agents get a branded Prop24 photo built by the worker from this FICA headshot;
+    // Full-status agents get a branded profile photo built by the worker from this FICA headshot;
     // candidates have no photo id and fall back to the Quay 1 logo. See worker/photo_pipeline.py.
     photo_file_id: (_propdataDesignation_(person) !== '-' && person.photo_file_id) || '',
   };
-  if (system === 'property24') return { branch: person.team || '', google_linked: true };
   if (system === 'dialfire') return { campaign: person.team || '' };
   return {}; // cma: OTP-gated, no payload
 }

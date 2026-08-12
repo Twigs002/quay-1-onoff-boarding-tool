@@ -76,7 +76,7 @@ var ONB_COL = {
   // is the idempotency marker so a re-run never double-appends a promoted candidate. See Hr.js.
   hr_tracking_at: 51, hr_promoted_at: 52,
   // Drive file id of the candidate's FICA headshot (PHOTO upload), captured at FICA time. For a
-  // full-status agent it is passed to the PropData worker, which builds the branded Prop24 photo
+  // full-status agent it is passed to the PropData worker, which builds the branded profile photo
   // (worker/photo_pipeline.py). Empty when no headshot was uploaded. See _browserPayload_.
   photo_file_id: 53,
   // When the Dialfire manual account-request email was sent to DIALFIRE_APPROVERS (on admin

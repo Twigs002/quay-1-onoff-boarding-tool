@@ -118,7 +118,7 @@ function ficaUpload_(body) {
     try {
       var blob = Utilities.newBlob(p.bytes, p.mime, p.label + ' - ' + name + '.' + p.ext);
       var file = ficaFolder.createFile(blob);
-      if (p.label === 'PHOTO') photoFileId = file.getId();   // the branded Prop24 photo source
+      if (p.label === 'PHOTO') photoFileId = file.getId();   // the branded profile photo source
       var key = FICA_LABEL_KEY[p.label];
       if (key) { tickFica_(folderId, key); ticked.push(key); }
     } catch (err) {
@@ -316,7 +316,7 @@ badLink +
 '<p class="hint">Your Fidelity Fund Certificate number from the PPRA.</p></div>' +
 '<div class="filewrap" id="photoRow"><label for="f_photo">Headshot photo (optional)</label>' +
 '<input type="file" id="f_photo" accept="image/*">' +
-'<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your Property24 profile up faster. Optional, but recommended.</p></div></div>' +
+'<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your online profile up faster. Optional, but recommended.</p></div></div>' +
 '<div class="card"><p class="sec">8 - Next of kin</p>' +
 '<div class="row"><label for="nok_name">Next of kin name <span class="req">*</span></label>' +
 '<input type="text" id="nok_name" autocomplete="off" required></div>' +

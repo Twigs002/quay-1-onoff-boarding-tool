@@ -3,7 +3,7 @@ drive.py - minimal read-only Google Drive download for the worker.
 
 Uses the SAME service-account key as the sheet client (config.GOOGLE_KEY_PATH) to
 fetch a candidate's FICA headshot by Drive file id, so photo_pipeline.py can build
-the branded Prop24 photo. The apps-script side shares each headshot with this service
+the branded profile photo. The apps-script side shares each headshot with this service
 account at enqueue time (see _sharePhotoWithWorker_), so the SA can read it.
 
 Imported lazily by the PropData provisioner; only full-status agents ever call it.

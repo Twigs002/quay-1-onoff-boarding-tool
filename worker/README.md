@@ -1,14 +1,14 @@
 # Worker (Python + Playwright)
 
 Executes the browser-only provisioning/offboarding steps that Apps Script cannot
-do (Property24, CMA, Dialfire have no usable user-management API). It reads jobs
+do (PropData, CMA, Dialfire have no usable user-management API). It reads jobs
 off the shared Google Sheet, runs them, and writes the result back.
 
 ```
 Apps Script  ──writes rows──►  Provisioning Queue tab  ◄──polls/updates──  poll.py
                                                                              │
                                         dispatch by (system, action)         ▼
-                                     provisioners/{property24,cma,dialfire}.py
+                                     provisioners/{propdata,cma,dialfire}.py
 ```
 
 ## Safety (read this first)
@@ -17,7 +17,7 @@ Apps Script  ──writes rows──►  Provisioning Queue tab  ◄──polls/
   what it *would* do and returns a clearly-labelled simulated result. It **never**
   submits a real create or deactivate on any portal.
 - Live provisioning (`DRY_RUN=0`) is **user-gated** and additionally blocked in
-  code: the Property24 and Dialfire live flows still contain `TODO(portal-map)`
+  code: the Dialfire live flow still contains `TODO(portal-map)`
   selectors and raise `NotImplementedError` until a human maps the real portal
   DOM. CMA is OTP/2FA-gated, so it raises `Skip` and its rows land as the terminal
   `skipped` status (never a fake `done`, never a retriable `error`) until the OTP
@@ -36,7 +36,7 @@ Apps Script  ──writes rows──►  Provisioning Queue tab  ◄──polls/
 | `log_setup.py` | Per-day file + stdout logging. |
 | `provisioners/base.py` | `Person` model, `Provisioner` base, dry-run gate + result shape. |
 | `provisioners/browser.py` | Shared persistent-context Playwright launcher. |
-| `provisioners/property24.py` | Add / deactivate Property24 agent. NEEDS-PORTAL-MAP. |
+| `provisioners/propdata.py` | Add PDMS agent profile (browser-driven). Deactivate not mapped yet. |
 | `provisioners/cma.py` | Add / disable CMA user. Login ported from cma-lookup; OTP unsolved. |
 | `provisioners/dialfire.py` | Add / remove Dialfire seat. NEEDS-PORTAL-MAP. |
 
@@ -60,7 +60,6 @@ cp .env.example .env
 Portal passwords (only needed to arm live, never for dry-run):
 
 ```bash
-security add-generic-password -s property24-admin -a "<admin-user>" -w
 security add-generic-password -s cma-info        -a "<admin-user>" -w
 security add-generic-password -s dialfire-admin  -a "<admin-user>" -w
 ```

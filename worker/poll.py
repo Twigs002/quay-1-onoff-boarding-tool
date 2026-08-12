@@ -4,7 +4,7 @@ Quay 1 Boarding Tool - Python worker.
 
 Polls the Provisioning Queue tab of the shared Google Sheet, claims each pending
 browser-portal row by CAS (compare-and-set), dispatches it to the right
-provisioner (property24 | cma | dialfire) for the requested action
+provisioner (propdata | cma | dialfire) for the requested action
 (create | deactivate), and writes status + result_json back to the sheet.
 
 Offboarding teardown reaches the worker as `deactivate` rows that Apps Script
