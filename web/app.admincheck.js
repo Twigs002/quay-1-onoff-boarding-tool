@@ -19,6 +19,23 @@
 
   const DRIVE_FOLDER = (id) => `https://drive.google.com/drive/folders/${encodeURIComponent(id)}`;
 
+  // Local render helpers matching the redesign's class contract (styles.css). These mirror
+  // what HUB.docPill/HUB.entTag do today, but app.js hasn't been migrated to the new classes
+  // yet (still emits .doc-on/.doc-off, .entity-tag, and has no HUB.avatar) - once it is, these
+  // can be dropped in favour of the shared H.docPill/H.entTag/H.avatar helpers.
+  const initials = (name) => {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+  };
+  const avatarFor = (name, ent) => {
+    const aqua = String(ent || '').toLowerCase() === 'aqua';
+    return `<div class="avatar${aqua ? ' avatar-aqua' : ''}">${esc(initials(name))}</div>`;
+  };
+  const entTag = (ent) => String(ent || '').toLowerCase() === 'aqua'
+    ? '<span class="tag-entity tag-aqua">Aqua</span>' : '<span class="tag-entity tag-quay1">Quay 1</span>';
+  const docTick = (on, label) => `<span class="doc-tick${on ? '' : ' missing'}">${esc(label)}</span>`;
+
   function viewAdminCheck(root) {
     const user = H.getUser();
     const canCheck = user && (user.isAdmin || user.isSuper);
@@ -28,7 +45,7 @@
         <p>Review each new starter's signed contract and FICA documents, then accept them to set up their accounts. Accepting is the only thing that releases provisioning. If a starter is entitled to CMA, accepting also emails a CMA approval request (a paid seat) to Sheldon and Marthinus.</p>
       </div>
       <div class="card card-pad">
-        ${canCheck ? '' : '<div class="notice warn">Only a super or admin can accept starters.</div>'}
+        ${canCheck ? '' : '<div class="notice notice-warn">Only a super or admin can accept starters.</div>'}
         <div class="toolbar">
           <div class="muted" id="acMeta">Loading...</div>
           <div class="toolbar-right"><button type="button" class="btn btn-ghost btn-sm" id="acRefresh">Refresh</button></div>
@@ -69,30 +86,29 @@
       body.innerHTML = `<div class="state"><div class="state-title">Nobody awaiting acceptance</div><div>New starters appear here once their signed contract and all FICA documents are in.</div></div>`;
       return;
     }
-    const docPill = H.docPill;
     const cards = items.map((o) => {
-      const entTag = H.entTag(o.entity);
       const docs = `<div class="docs">
-        ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}
-        ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
+        ${docTick(o.docs && o.docs.contract, 'Contract')}${docTick(o.docs && o.docs.id, 'ID')}
+        ${docTick(o.docs && o.docs.poa, 'Address')}${docTick(o.docs && o.docs.bank, 'Bank')}</div>`;
       const cmaNote = o.cma_entitled
         ? (o.cma_requested
-            ? '<div class="ac-cma muted">CMA request already sent to the approvers.</div>'
-            : '<div class="ac-cma warn-text">Accepting emails a CMA approval request (paid seat) to Sheldon &amp; Marthinus.</div>')
+            ? '<div class="ac-cma notice notice-info">CMA request already sent to the approvers.</div>'
+            : '<div class="ac-cma notice notice-warn">Accepting emails a CMA approval request (paid seat) to Sheldon &amp; Marthinus.</div>')
         : '';
       return `<div class="pipe-row">
+        ${avatarFor(o.name, o.entity)}
         <div class="pipe-main">
-          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
-          <div class="pipe-team muted">${esc(o.team || '')}</div>
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag(o.entity)}</div>
+          <div class="pipe-team">${esc(o.team || '')}</div>
           ${docs}
           <div class="ac-links"><a href="${DRIVE_FOLDER(o.folderId)}" target="_blank" rel="noopener">Review documents in Drive</a></div>
           ${cmaNote}
         </div>
         <div class="pipe-side">
-          <span class="pill s-ready">Ready to accept</span>
+          <span class="pill pill-ready">Ready to accept</span>
           <div class="pipe-actions">
             <button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>
-            <button type="button" class="btn btn-ghost btn-sm btn-danger" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
+            <button type="button" class="btn btn-danger btn-sm" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>
       </div>`;

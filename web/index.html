@@ -48,35 +48,42 @@
 
   <header class="topbar">
     <div class="bar-inner">
-      <div class="topbar-left">
-        <img class="brand-logo" src="assets/quay1-logo-white.png"
-             alt="Quay 1 International Realty" width="277" height="120">
-        <div class="topbar-divider" aria-hidden="true"></div>
-        <div class="topbar-titles">
-          <h1>On/Offboarding Tool</h1>
-          <p>Onboard &middot; provision &middot; offboard</p>
+      <div class="topbar-row">
+        <div class="topbar-left">
+          <img class="brand-logo" src="assets/quay1-logo-white.png"
+               alt="Quay 1 International Realty" width="277" height="120">
+          <div class="topbar-divider" aria-hidden="true"></div>
+          <div class="topbar-titles">
+            <h1>On/Offboarding Tool</h1>
+            <p>Onboard &middot; provision &middot; offboard</p>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button type="button" id="signOutBtn" class="btn btn-onblue btn-sm signout-btn" hidden>
+            <span class="topbar-who" id="signOutWho"></span>Sign out
+          </button>
         </div>
       </div>
-      <div class="topbar-right">
-        <button type="button" id="signOutBtn" class="signout-btn" hidden>
-          <span class="signout-who" id="signOutWho"></span>Sign out
-        </button>
-      </div>
+      <nav class="tab-nav" id="tabNav" aria-label="Hub sections">
+        <button class="tab-btn active" data-tab="onboard" aria-current="page">Onboard</button>
+        <button class="tab-btn" data-tab="admincheck">Admin Check</button>
+        <button class="tab-btn" data-tab="provisioning">Progress report</button>
+        <button class="tab-btn" data-tab="programs">Programs</button>
+        <button class="tab-btn" data-tab="offboard">Offboard</button>
+      </nav>
     </div>
   </header>
 
-  <nav class="tab-nav" id="tabNav" aria-label="Hub sections">
-    <div class="bar-inner">
-      <button class="tab-btn active" data-tab="onboard" aria-current="page">Onboard</button>
-      <button class="tab-btn" data-tab="admincheck">Admin Check</button>
-      <button class="tab-btn" data-tab="provisioning">Progress report</button>
-      <button class="tab-btn" data-tab="programs">Programs</button>
-      <button class="tab-btn" data-tab="offboard">Offboard</button>
-    </div>
-  </nav>
-
   <main id="content" class="main" tabindex="-1"></main>
   <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <nav class="bottom-nav" aria-label="Sections">
+    <a href="#" data-tab="onboard" aria-current="page"><span class="ico"></span>Onboard</a>
+    <a href="#" data-tab="admincheck"><span class="ico"></span>Admin Check</a>
+    <a href="#" data-tab="provisioning"><span class="ico"></span>Progress report</a>
+    <a href="#" data-tab="programs"><span class="ico"></span>Programs</a>
+    <a href="#" data-tab="offboard"><span class="ico"></span>Offboard</a>
+  </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="config.js"></script>
