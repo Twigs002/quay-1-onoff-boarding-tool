@@ -97,5 +97,13 @@ window.AUTH = (() => {
     return (data && data.session) ? data.session.access_token : null;
   }
 
-  return { signIn, getSession, signOut, getAccessToken };
+  // The shared supabase-js client, so feature modules (e.g. app.vasearches.js)
+  // that read/write their own RLS-gated tables reuse ONE GoTrue instance and the
+  // signed-in session, instead of spawning a second client (which warns and can
+  // desync the session). Returns null only if the supabase UMD failed to load.
+  function getClient() {
+    return (window.supabase && cfg.SUPABASE_URL) ? client() : null;
+  }
+
+  return { signIn, getSession, signOut, getAccessToken, getClient };
 })();
