@@ -44,3 +44,6 @@ apps-script/SeedAccounts.js
 
 # One-time legacy migration fixture (candidate PII; import already completed)
 scripts/legacy_candidates_source.json
+
+# Ruflo / claude-flow local session state
+.claude-flow/
