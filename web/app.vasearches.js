@@ -228,16 +228,18 @@
   function renderLog(wrap) {
     const rows = visibleLog();
     const head = `<thead><tr>
-      <th>Name</th><th>Type</th><th>Sheet</th><th>On record</th><th>Found</th>
+      <th>Name</th><th>ID number</th><th>Type</th><th>Area</th><th>Sheet</th><th>On record</th><th>Found</th>
       <th>Outcome</th><th>By</th><th class="actions"></th></tr></thead>`;
     if (!rows.length) {
       H.$('#vaLogTbl', wrap).innerHTML = head +
-        `<tbody><tr><td colspan="8"><div class="state"><div class="state-title">Nothing here yet</div><div>Add a sheet above to start tracking searches.</div></div></td></tr></tbody>`;
+        `<tbody><tr><td colspan="10"><div class="state"><div class="state-title">Nothing here yet</div><div>Add a sheet above to start tracking searches.</div></div></td></tr></tbody>`;
       return;
     }
     const body = rows.map((r) => `<tr data-id="${H.esc(r.id)}">
       <td class="who">${H.esc(r.name || '')}</td>
+      <td class="muted">${H.esc(r.id_number || '')}</td>
       <td>${H.esc(ENTITY[r.entity_type] || r.entity_type || '')}</td>
+      <td class="muted">${H.esc(r.suburb || r.division || '')}</td>
       <td>${H.esc(r.sheet || '')}</td>
       <td class="muted">${H.esc(r.existing_number || '')}</td>
       <td>${H.esc(r.found_number || '')}</td>
@@ -260,7 +262,7 @@
     const opts = Object.keys(OUTCOME).map((k) =>
       `<option value="${k}"${k === rec.outcome ? ' selected' : ''}>${H.esc(OUTCOME[k].label)}</option>`).join('');
     tr.innerHTML = `<td class="who">${H.esc(rec.name || '')}</td>
-      <td colspan="6">
+      <td colspan="8">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <input class="ed-found" type="text" placeholder="Number found" value="${H.esc(rec.found_number || '')}" style="min-width:150px">
           <select class="ed-outcome">${opts}</select>
@@ -392,10 +394,12 @@
 
   function exportCsv() {
     const rows = visibleLog();
-    const head = ['name', 'type', 'sheet', 'on_record', 'found', 'outcome', 'searched_by', 'searched_at'];
+    const head = ['name', 'id_number', 'type', 'division', 'suburb', 'address', 'lead_status',
+      'sheet', 'on_record', 'found', 'outcome', 'searched_by', 'searched_at'];
     const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
     const lines = [head.join(',')].concat(rows.map((r) => [
-      r.name, ENTITY[r.entity_type] || r.entity_type, r.sheet, r.existing_number,
+      r.name, r.id_number, ENTITY[r.entity_type] || r.entity_type, r.division, r.suburb,
+      r.address, r.lead_status, r.sheet, r.existing_number,
       r.found_number, OUTCOME[r.outcome] ? OUTCOME[r.outcome].label : r.outcome,
       r.searched_by, r.searched_at,
     ].map(esc).join(',')));

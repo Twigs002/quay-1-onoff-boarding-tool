@@ -27,6 +27,15 @@ create table if not exists public.va_search_records (
   found_number   text,                                -- number the VA found (nullable)
   outcome        text not null default 'pending'
                    check (outcome in ('pending', 'not_found', 'found_unchanged', 'found_changed')),
+  -- Optional richer fields, populated by bulk imports (e.g. the HubSpot CRM export
+  -- via scripts/import_hubspot_va.py). All nullable so a hand-added row needs none.
+  id_number      text,                                -- SA ID / registration number
+  division       text,
+  suburb         text,
+  address        text,                                -- composed street address if present
+  lead_status    text,                                -- source system's status (e.g. "No Contact Details")
+  contact_owner  text,
+  source_id      text unique,                         -- stable source key (e.g. 'hubspot:4491916') for dedupe/upsert
   notes          text,
   searched_by    text,                                -- staff name/username who recorded the result
   searched_at    timestamptz,                         -- when the result was recorded
