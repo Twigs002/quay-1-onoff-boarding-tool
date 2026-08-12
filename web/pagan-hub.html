@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pagan Hub</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Shared Quay 1 app switcher (superuser-only dropdown on the flag). -->
+  <script src="https://twigs002.github.io/quay-dashboard-v2/quay-nav.js" defer></script>
+</head>
+<body class="pre-auth">
+  <!-- Login gate - same PIN login as every other Quay 1 tool (auth.js). The hub
+       additionally checks the signed-in identity is Pagan (pagan-hub.js); anyone
+       else is signed straight back out. -->
+  <div id="loginGate" class="login-gate">
+    <div class="login-box">
+      <img class="login-logo" src="assets/quay1-logo-white.png" alt="Quay 1 International Realty" width="200">
+      <h2 class="login-title">Pagan Hub</h2>
+      <p class="login-sub">Private workspace. Sign in with your usual username &amp; PIN.</p>
+      <label class="visually-hidden" for="loginUser">Username</label>
+      <input id="loginUser" class="login-user" type="text" autocomplete="username"
+             autocapitalize="none" autocorrect="off" placeholder="username">
+      <div class="pin-dots" id="pinDots" role="img" aria-label="PIN entry">
+        <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+        <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      </div>
+      <div class="login-error" id="loginError" role="alert" hidden></div>
+      <div class="keypad" id="loginKeypad">
+        <button class="key" data-d="1">1</button>
+        <button class="key" data-d="2">2</button>
+        <button class="key" data-d="3">3</button>
+        <button class="key" data-d="4">4</button>
+        <button class="key" data-d="5">5</button>
+        <button class="key" data-d="6">6</button>
+        <button class="key" data-d="7">7</button>
+        <button class="key" data-d="8">8</button>
+        <button class="key" data-d="9">9</button>
+        <button class="key alt" data-back aria-label="Delete last digit">Back</button>
+        <button class="key" data-d="0">0</button>
+        <button class="key alt" data-clear aria-label="Clear PIN">Clear</button>
+      </div>
+      <p class="login-foot">Private to Pagan.</p>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="bar-inner">
+      <div class="topbar-row">
+        <div class="topbar-left">
+          <img class="brand-logo" src="assets/quay1-logo-white.png"
+               alt="Quay 1 International Realty" width="277" height="120">
+          <div class="topbar-divider" aria-hidden="true"></div>
+          <div class="topbar-titles">
+            <h1>Pagan Hub</h1>
+            <p>Your private workspace</p>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button type="button" id="signOutBtn" class="btn btn-onblue btn-sm signout-btn" hidden>
+            <span class="topbar-who" id="signOutWho"></span>Sign out
+          </button>
+        </div>
+      </div>
+      <nav class="tab-nav" id="tabNav" aria-label="Hub sections" hidden></nav>
+    </div>
+  </header>
+
+  <main id="content" class="main" tabindex="-1"></main>
+  <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <!-- pagan-hub.js MUST load before app.vasearches.js: it defines window.HUB, which
+       the VA Searches module binds to at load time. -->
+  <script src="pagan-hub.js"></script>
+  <script src="app.vasearches.js"></script>
+</body>
+</html>
