@@ -196,7 +196,6 @@
     onboard: viewOnboard, provisioning: viewProvisioning, programs: viewPrograms,
     offboard: (root) => window.HUB.viewOffboard(root),      // defined in app.offboard.js
     admincheck: (root) => window.HUB.viewAdminCheck(root),  // defined in app.admincheck.js
-    vasearches: (root) => window.HUB.viewVaSearches(root),  // defined in app.vasearches.js
   };
 
   // Admin Check (accept FICA -> release provisioning + email CMA approvers) is super/admin only.
@@ -206,8 +205,6 @@
     // Brokers cannot open Offboard or Admin Check; bounce them to Onboard.
     if (tab === 'offboard' && !(USER && USER.canOnboard)) tab = 'onboard';
     if (tab === 'admincheck' && !canAdminCheck()) tab = 'onboard';
-    // VA Searches (skip-tracing tracker) is super/admin only, same gate as Admin Check.
-    if (tab === 'vasearches' && !canAdminCheck()) tab = 'today';
     document.querySelectorAll('.tab-btn').forEach((b) => {
       const on = b.dataset.tab === tab;
       b.classList.toggle('active', on);
@@ -868,8 +865,6 @@
     // Admin Check (accept FICA) is super/admin only - remove the tab (and bottom-nav twin) for everyone else.
     if (!canAdminCheck()) {
       document.querySelectorAll('[data-tab="admincheck"]').forEach((n) => n.remove());
-      // VA Searches shares the super/admin gate - hide it for brokers too.
-      document.querySelectorAll('[data-tab="vasearches"]').forEach((n) => n.remove());
     }
     document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => route(b.dataset.tab)));
     // Mobile bottom nav (index.html) routes through the same handler.
