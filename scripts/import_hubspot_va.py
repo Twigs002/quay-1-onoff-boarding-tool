@@ -127,12 +127,22 @@ def build_record(row: list, hidx: dict, sheet: str, entity_mode: str) -> dict | 
     if extra_numbers:
         notes = "Other numbers on record: " + ", ".join(extra_numbers)
 
+    # A contact that ALREADY has a number on record is not a blank "pending" job -
+    # it counts as found (same number we already had), so the dashboard reflects
+    # real progress. Only contacts with no number import as pending to be searched.
+    if existing_number:
+        outcome, found_number, searched_by = "found_unchanged", existing_number, "HubSpot import"
+    else:
+        outcome, found_number, searched_by = "pending", None, None
+
     rec = {
         "entity_type": entity_type,
         "name": name,
         "sheet": sheet,
         "existing_number": existing_number,
-        "outcome": "pending",
+        "found_number": found_number,
+        "outcome": outcome,
+        "searched_by": searched_by,
         "id_number": id_number or None,
         "division": division or None,
         "suburb": suburb or None,
@@ -236,7 +246,8 @@ def main() -> None:
     print(f"Parsed {len(records)} rows from {path.name}")
     print(f"  sheet label     : {sheet!r}")
     print(f"  person / company: {n_person} / {n_company}")
-    print(f"  have a number   : {n_with_num}  (rest import as pending with no number on record)")
+    print(f"  already found   : {n_with_num}  (imported as found - number already on record)")
+    print(f"  to search       : {len(records) - n_with_num}  (imported as pending - no number yet)")
     if skipped_dupe:
         print(f"  in-file dupes skipped (same Record ID): {skipped_dupe}")
     print("  sample rows:")
