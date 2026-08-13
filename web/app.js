@@ -175,24 +175,15 @@
   HUB.KINDS = KINDS; HUB.OFFBOARD_DELAY_MIN = OFFBOARD_DELAY_MIN;
   // Shared pipeline-card pieces, so the Progress report (renderPipeline) and the Admin Check tab
   // (app.admincheck.js) render the same new hire identically and never drift.
-  HUB.docPill = (on, label) => `<span class="doc-tick${on ? '' : ' missing'}">${esc(label)}</span>`;
+  HUB.docPill = (on, label) => `<span class="doc ${on ? 'doc-on' : 'doc-off'}">${on ? '✓' : '○'} ${label}</span>`;
   HUB.entTag = (ent) => String(ent || '').toLowerCase() === 'aqua'
-    ? '<span class="tag-entity tag-aqua">Aqua</span>' : '<span class="tag-entity tag-quay1">Quay 1</span>';
-  // Initial-badge for queue/pipeline cards (up to two initials of the name). app.admincheck.js
-  // reuses this so both tabs render the same new hire identically.
-  HUB.avatar = (name, ent) => {
-    const initials = String(name || '').trim().split(/\s+/).filter(Boolean)
-      .slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
-    const aqua = String(ent || '').toLowerCase() === 'aqua' ? ' avatar-aqua' : '';
-    return `<span class="avatar${aqua}">${esc(initials)}</span>`;
-  };
+    ? '<span class="entity-tag aqua">Aqua</span>' : '<span class="entity-tag quay1">Quay 1</span>';
   HUB.getUser = () => USER;
   HUB.getStatusCache = () => statusCache;
   HUB.setStatusCache = (v) => { statusCache = v; };
 
   //  ROUTER
   const VIEWS = {
-    today: (root) => window.HUB.viewToday(root),            // defined in app.today.js
     onboard: viewOnboard, provisioning: viewProvisioning, programs: viewPrograms,
     offboard: (root) => window.HUB.viewOffboard(root),      // defined in app.offboard.js
     admincheck: (root) => window.HUB.viewAdminCheck(root),  // defined in app.admincheck.js
@@ -210,10 +201,6 @@
       b.classList.toggle('active', on);
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
-    // Mirror the active state onto the mobile bottom nav (index.html .bottom-nav a[data-tab]).
-    document.querySelectorAll('.bottom-nav a[data-tab]').forEach((a) => {
-      if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
-    });
     const main = $('#content');
     main.innerHTML = '';
     (VIEWS[tab] || viewOnboard)(main);
@@ -230,21 +217,21 @@
         <p>Generate the contract and record the systems to provision. The candidate is emailed their agreement and a secure FICA link. No accounts are created here: once their signed contract and FICA documents are in, an admin accepts them on the Admin Check tab, and accounts are set up then. Fields marked with a red asterisk are required.</p>
       </div>
       <div class="card card-pad stack">
-        <div class="segmented" role="group" aria-label="Entity">
-          <button type="button" data-ent="quay1" aria-pressed="true">Quay 1</button>
-          <button type="button" data-ent="aqua" aria-pressed="false">Aqua Promotions</button>
+        <div class="seg" role="tablist" aria-label="Entity">
+          <button type="button" role="tab" data-ent="quay1" class="active" aria-selected="true">Quay 1</button>
+          <button type="button" role="tab" data-ent="aqua" aria-selected="false">Aqua Promotions</button>
         </div>
         <form id="onboardForm" novalidate></form>
       </div>
     </div>`);
 
     const form = $('#onboardForm', wrap);
-    const seg = $('.segmented', wrap);
+    const seg = $('.seg', wrap);
     seg.addEventListener('click', (e) => {
       const b = e.target.closest('button[data-ent]'); if (!b) return;
       entity = b.dataset.ent;
       seg.querySelectorAll('button').forEach((x) => {
-        x.setAttribute('aria-pressed', String(x === b));
+        const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-selected', String(on));
       });
       renderForm();
     });
@@ -252,7 +239,7 @@
     function fieldText(name, label, opts = {}) {
       const req = opts.required ? ' <span class="req" aria-hidden="true">*</span>' : '';
       const type = opts.type || 'text';
-      const cls = opts.full ? 'field wide' : 'field';
+      const cls = opts.full ? 'field full' : 'field';
       const hint = opts.hint ? `<span class="hint">${esc(opts.hint)}</span>` : '';
       const ro = opts.readonly ? ' readonly' : '';
       const ph = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
@@ -326,33 +313,39 @@
       const canOnboard = USER && USER.canOnboard;
       const brokerOnly = USER && USER.isBroker && !USER.isSuper && !USER.isAdmin;
       const gate = !canOnboard
-        ? `<div class="notice notice-warn">You do not have permission to submit an onboarding request.</div>`
+        ? `<div class="notice warn">You do not have permission to submit an onboarding request.</div>`
         : brokerOnly
-          ? `<div class="notice notice-info">You are submitting as ${esc(USER.name || 'yourself')}. The request is logged under your name; a super or admin oversees account provisioning.</div>`
+          ? `<div class="notice">You are submitting as ${esc(USER.name || 'yourself')}. The request is logged under your name; a super or admin oversees account provisioning.</div>`
           : '';
 
       const roleTitle = entity === 'aqua' ? 'Agreement' : 'Role and contract';
       form.innerHTML = `
-        <div class="fieldset">
+        <div class="form-section">
           <h3 class="fs-title">Person</h3>
-          <div class="field-grid">${common}</div>
+          <div class="form-grid">${common}</div>
         </div>
-        <div class="fieldset">
+        <div class="form-section">
           <h3 class="fs-title">${roleTitle}</h3>
-          <div class="field-grid">${entity === 'aqua' ? aqua : quay1}</div>
+          <div class="form-grid">${entity === 'aqua' ? aqua : quay1}</div>
         </div>
-        <div class="fieldset">
+        <div class="form-section">
           <h3 class="fs-title">Provisioning</h3>
-          <div class="check-grid">${systems}</div>
+          <fieldset>
+            <legend>Provision these systems</legend>
+            <div class="check-grid">${systems}</div>
+          </fieldset>
         </div>
         ${gate}
         <div class="form-actions">
-          <button type="submit" class="btn btn-yellow-solid" id="obSubmit" style="font-size:19px" ${canOnboard ? '' : 'disabled'}>Create contract</button>
+          <button type="submit" class="btn btn-primary" id="obSubmit" ${canOnboard ? '' : 'disabled'}>Create contract</button>
           <button type="reset" class="btn btn-ghost">Clear</button>
         </div>`;
 
-      // Provisioning checkboxes style their checked state via CSS (.check:has(input:checked)),
-      // so no JS class toggle is needed here.
+      // Toggle the is-on styling on every check card.
+      form.querySelectorAll('.check input').forEach((i) => {
+        const sync = () => i.closest('.check').classList.toggle('is-on', i.checked);
+        sync(); i.addEventListener('change', sync);
+      });
       // Quay 1: populate the Team dropdown from divisions.json and auto-fill the senior broker.
       // Both senior fields are editable and auto-fill on team change WITHOUT clobbering a manual
       // edit. If the directory can't load (or is empty), the Team select degrades to a free-text
@@ -487,6 +480,7 @@
       form.querySelectorAll('.check input').forEach((i) => {
         const sys = SYSTEMS.find((s) => i.name === `sys_${s.key}`);
         i.checked = !!(sys && sys.core);
+        i.closest('.check').classList.toggle('is-on', i.checked);
       });
       form.querySelectorAll('[aria-invalid]').forEach((i) => i.removeAttribute('aria-invalid'));
       if (r && r.folderId) statusCache = [];  // force a refresh next time status opens
@@ -511,12 +505,12 @@
             <button type="button" class="btn btn-ghost btn-sm" id="progRefresh">Refresh</button>
           </div>
         </div>
-        <div class="notice notice-info">
-          <span class="pill pill-done">✓ CMA</span> has a CMA account
-          <span class="pill pill-running">Agent</span> full PropData agent
-          <span class="pill pill-running">Spec #</span> property-specialist profile
-          <span class="pill pill-skipped">inactive</span> inactive
-          <span class="pill pill-skipped">no</span> none held
+        <div class="prog-legend">
+          <span class="prog-chip ok">CMA</span> has a CMA account
+          <span class="prog-chip pd">Agent</span> full PropData agent
+          <span class="prog-chip pd">Spec #</span> property-specialist profile
+          <span class="prog-chip off">dimmed</span> inactive
+          <span class="prog-chip none">no</span> none held
         </div>
         <div id="progBody"></div>
       </div>
@@ -559,30 +553,34 @@
       body.innerHTML = `<div class="state"><div class="state-title">Nothing to show</div><div>No team accounts are visible for your login yet.</div></div>`;
       return;
     }
-    const pdPill = (pd) => {
-      if (!pd) return `<span class="pill pill-skipped">no</span>`;
+    const pdChip = (pd) => {
+      if (!pd) return `<span class="prog-chip none">no</span>`;
       const lbl = pd.type === 'agent' ? 'Agent' : `Spec #${esc(pd.number)}`;
-      return `<span class="pill pill-running">${lbl}</span>` + (pd.active ? '' : `<span class="pill pill-skipped">inactive</span>`);
+      const cls = pd.active ? 'pd' : 'off';
+      return `<span class="prog-chip ${cls}">${lbl}</span>` + (pd.active ? '' : `<span class="prog-chip none">inactive</span>`);
     };
-    const cmaPill = (p) => p.cma ? `<span class="pill pill-done">✓ CMA</span>` : `<span class="pill pill-skipped">no</span>`;
-    const rowHtml = (p) => `<div class="person-row${p.senior ? ' sr' : ''}">
-        <span class="person-name">${p.senior ? '<span class="star">★</span>' : '<span class="star dim">·</span>'}${esc(p.name)}${p.isNew ? '<span class="pill pill-new">NEW</span>' : ''}${p.senior ? '<span class="senior-tag">SENIOR</span>' : ''}</span>
-        ${cmaPill(p)}
-        ${pdPill(p.pd)}
+    const cmaChip = (p) => p.cma ? `<span class="prog-chip ok">✓ CMA</span>` : `<span class="prog-chip none">no</span>`;
+    const rowHtml = (p) => `<div class="prog-tr${p.senior ? ' sr' : ''}">
+        <span class="prog-nm">${p.senior ? '<span class="prog-star">★</span>' : '<span class="prog-star dim">·</span>'}<span class="prog-nmtxt">${esc(p.name)}</span>${p.isNew ? '<span class="prog-chip new">NEW</span>' : ''}${p.senior ? '<em>SENIOR</em>' : ''}</span>
+        <span class="prog-cell">${cmaChip(p)}</span>
+        <span class="prog-cell">${pdChip(p.pd)}</span>
       </div>`;
+    const meter = (label, have, total, tone) => `<span class="prog-meter ${tone}"><b>${have}</b>/${total} ${label}</span>`;
     const teamHtml = (t) => {
       const n = t.people.length;
       const nc = t.people.filter((p) => p.cma).length;
       const np = t.people.filter((p) => p.pd).length;
       const head = t.name
-        ? `<div class="card-head">
-             <div><span class="team-name">${esc(t.name)}</span>${t.senior ? ` <span class="team-senior">★ ${esc(t.senior)}</span>` : ''}</div>
-             <div><span class="bubble">${nc}/${n} CMA</span> <span class="bubble">${np}/${n} PropData</span></div>
+        ? `<div class="prog-teamh">
+             <div class="prog-tname">${esc(t.name)}${t.senior ? `<span class="prog-tsr"><span class="prog-star">★</span>${esc(t.senior)}</span>` : ''}</div>
+             <div class="prog-tcount">${meter('CMA', nc, n, 'ok')}${meter('PropData', np, n, 'pd')}</div>
            </div>`
         : '';
-      return `<div class="team-card">${head}${t.people.map(rowHtml).join('')}</div>`;
+      return `<div class="prog-card">${head}
+        <div class="prog-tbl"><div class="prog-th"><span>Broker</span><span>CMA</span><span>PropData</span></div>
+        ${t.people.map(rowHtml).join('')}</div></div>`;
     };
-    body.innerHTML = sections.map((s) => `<div class="team-section">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
+    body.innerHTML = sections.map((s) => `<div class="prog-sech">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
   }
 
   //  2. PROVISIONING STATUS
@@ -610,8 +608,8 @@
   }
 
   const STATUS_CLASS = {
-    pending: 'pill-pending', in_progress: 'pill-running', inprogress: 'pill-running',
-    done: 'pill-done', error: 'pill-error', skipped: 'pill-skipped',
+    pending: 's-pending', in_progress: 's-inprogress', inprogress: 's-inprogress',
+    done: 's-done', error: 's-error', skipped: 's-skipped',
   };
   const STATUS_LABEL = {
     pending: 'Pending', in_progress: 'In progress', inprogress: 'In progress',
@@ -651,13 +649,12 @@
       const entTag = HUB.entTag(o.entity);
       const when = [o.induction_wed, o.induction_thu].filter(Boolean).map((d) => fmtNiceDate(d)).join(' & ');
       return `<div class="pipe-row">
-        ${HUB.avatar(o.name, o.entity)}
         <div class="pipe-main">
           <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
-          <div class="pipe-team">${esc(o.team || '')}${when ? ` · induction ${esc(when)}` : ''}</div>
+          <div class="pipe-team muted">${esc(o.team || '')}${when ? ` · induction ${esc(when)}` : ''}</div>
         </div>
         <div class="pipe-side">
-          <span class="pill pill-done">Induction booked</span>
+          <span class="pill s-done">Induction booked</span>
           <div class="pipe-actions"><button type="button" class="btn btn-ghost btn-sm" data-resend="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Resend induction packet</button></div>
         </div>
       </div>`;
@@ -714,11 +711,11 @@
     const docPill = HUB.docPill;
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
-      const state = (o.approved && o.setup_error) ? { c: 'pill-error', t: 'Setup error · needs attention' }
-        : (o.approved && o.setup_incomplete) ? { c: 'pill-running', t: 'Setting up accounts' }
-        : o.approved ? { c: 'pill-done', t: 'Approved · setting up' }
-        : o.docs_ready ? { c: 'pill-ready', t: 'Ready to approve' }
-        : { c: 'pill-pending', t: 'Waiting on documents' };
+      const state = (o.approved && o.setup_error) ? { c: 's-error', t: 'Setup error · needs attention' }
+        : (o.approved && o.setup_incomplete) ? { c: 's-inprogress', t: 'Setting up accounts' }
+        : o.approved ? { c: 's-done', t: 'Approved · setting up' }
+        : o.docs_ready ? { c: 's-ready', t: 'Ready to approve' }
+        : { c: 's-pending', t: 'Waiting on documents' };
       const docs = `<div class="docs">
         ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}
         ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
@@ -726,10 +723,9 @@
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
       const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
       return `<div class="pipe-row">
-        ${HUB.avatar(o.name, o.entity)}
         <div class="pipe-main">
           <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
-          <div class="pipe-team">${esc(o.team || '')}</div>
+          <div class="pipe-team muted">${esc(o.team || '')}</div>
           ${docs}
         </div>
         <div class="pipe-side">
@@ -777,11 +773,11 @@
       ${canRetry ? '<th aria-label="Retry"></th>' : ''}</tr></thead>`;
     const trs = rows.map((row) => {
       const st = String(row.status || 'pending').toLowerCase().replace(/\s+/g, '_');
-      const cls = STATUS_CLASS[st] || 'pill-pending';
+      const cls = STATUS_CLASS[st] || 's-pending';
       const lbl = STATUS_LABEL[st] || row.status || 'Pending';
       const ent = (row.entity || '').toLowerCase();
-      const entTag = ent === 'aqua' ? '<span class="tag-entity tag-aqua">Aqua</span>'
-        : ent === 'quay1' ? '<span class="tag-entity tag-quay1">Quay 1</span>' : '<span class="muted">-</span>';
+      const entTag = ent === 'aqua' ? '<span class="entity-tag aqua">Aqua</span>'
+        : ent === 'quay1' ? '<span class="entity-tag quay1">Quay 1</span>' : '<span class="muted">-</span>';
       const detail = row.result_json && typeof row.result_json === 'object'
         ? (row.result_json.username || row.result_json.id || row.result_json.error || '')
         : (row.result_json || row.detail || '');
@@ -859,19 +855,16 @@
     // Offboarding: super/admin get the full destructive teardown tree; a broker gets a simple
     // "Request offboarding" form (notify only). Everyone with tool access can open the tab.
     if (!(USER && USER.canOnboard)) {
-      // Remove both the top tab and its mobile bottom-nav twin.
-      document.querySelectorAll('[data-tab="offboard"]').forEach((n) => n.remove());
+      const offBtn = document.querySelector('.tab-btn[data-tab="offboard"]');
+      if (offBtn) offBtn.remove();
     }
-    // Admin Check (accept FICA) is super/admin only - remove the tab (and bottom-nav twin) for everyone else.
+    // Admin Check (accept FICA) is super/admin only - remove the tab for everyone else.
     if (!canAdminCheck()) {
-      document.querySelectorAll('[data-tab="admincheck"]').forEach((n) => n.remove());
+      const acBtn = document.querySelector('.tab-btn[data-tab="admincheck"]');
+      if (acBtn) acBtn.remove();
     }
     document.querySelectorAll('.tab-btn').forEach((b) => b.addEventListener('click', () => route(b.dataset.tab)));
-    // Mobile bottom nav (index.html) routes through the same handler.
-    document.querySelectorAll('.bottom-nav a[data-tab]').forEach((a) => {
-      a.addEventListener('click', (e) => { e.preventDefault(); route(a.dataset.tab); });
-    });
-    route('today');
+    route('onboard');
   }
 
   async function boot() {
