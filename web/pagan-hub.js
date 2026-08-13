@@ -43,38 +43,15 @@
   HUB.$ = $; HUB.esc = esc; HUB.el = el; HUB.toast = toast; HUB.getUser = () => USER;
 
   // ── modules: add a personal view by appending one entry here ────────────────
+  const call = (fn, root) => {
+    if (typeof HUB[fn] === 'function') return HUB[fn](root);
+    root.appendChild(el('<div class="card card-pad"><div class="notice notice-warn">This view failed to load - try a refresh.</div></div>'));
+  };
   const MODULES = [
-    { id: 'overview', label: 'Overview', render: renderOverview },
-    {
-      id: 'vasearches', label: 'VA Searches', render: (root) => {
-        if (typeof HUB.viewVaSearches === 'function') return HUB.viewVaSearches(root);
-        root.appendChild(el('<div class="card card-pad"><div class="notice notice-warn">VA Searches module failed to load.</div></div>'));
-      },
-    },
+    { id: 'dashboard', label: 'Dashboard', render: (root) => call('viewVaDashboard', root) },
+    { id: 'vasearches', label: 'VA Searches', render: (root) => call('viewVaSearches', root) },
     // e.g. { id: 'leads', label: 'My Leads', render: (root) => { ... } },
   ];
-
-  function renderOverview(root) {
-    const wrap = el(`<div class="stack">
-      <div class="section-head"><div>
-        <h2>Welcome back${USER && USER.name ? ', ' + esc(USER.name.split(' ')[0]) : ''}</h2>
-        <p>This is your private hub - only your login can open it. Use the tabs above to jump between your views. It is built to grow: tell me what else you want to keep an eye on and I'll add a tab.</p>
-      </div></div>
-      <div class="grid-2">
-        <div class="card card-pad">
-          <div class="card-head"><h3>VA Searches</h3></div>
-          <p class="muted" style="font-size:12.5px;margin:2px 0 14px">Contact skip-tracing: how many searched, found, not found, changed - plus the raw log and imports.</p>
-          <button type="button" class="btn btn-primary" data-goto="vasearches">Open VA Searches</button>
-        </div>
-        <div class="card card-pad">
-          <div class="card-head"><h3>More coming</h3></div>
-          <p class="muted" style="font-size:12.5px;margin:2px 0 0">This space is yours. Ideas: a leads snapshot, a deals pipeline view, KPIs, reminders. Say the word and it becomes a tab here.</p>
-        </div>
-      </div>
-    </div>`);
-    root.appendChild(wrap);
-    wrap.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => route(b.dataset.goto)));
-  }
 
   // ── router ──────────────────────────────────────────────────────────────────
   function buildNav() {
@@ -141,7 +118,7 @@
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' - ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
     buildNav();
-    route('overview');
+    route('dashboard');
   }
 
   async function boot() {
