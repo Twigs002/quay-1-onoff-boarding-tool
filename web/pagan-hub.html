@@ -52,16 +52,17 @@
     <div class="bar-inner">
       <div class="topbar-row">
         <div class="topbar-left">
-          <img class="brand-logo" src="assets/quay1-logo-white.png"
-               alt="Quay 1 International Realty" width="277" height="120">
-          <div class="topbar-divider" aria-hidden="true"></div>
+          <div class="ph-logo-block">
+            <img class="brand-logo" src="assets/quay1-logo-white.png" alt="Quay 1 International Realty">
+          </div>
           <div class="topbar-titles">
             <h1>Pagan Hub</h1>
             <p>Your private workspace</p>
           </div>
         </div>
         <div class="topbar-right">
-          <button type="button" id="signOutBtn" class="btn btn-onblue btn-sm signout-btn" hidden>
+          <div class="ph-sync" id="phSync" hidden><i></i>Live</div>
+          <button type="button" id="signOutBtn" class="btn btn-primary signout-btn" hidden>
             <span class="topbar-who" id="signOutWho"></span>Sign out
           </button>
         </div>
