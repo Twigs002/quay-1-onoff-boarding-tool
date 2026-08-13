@@ -14,7 +14,7 @@
 
   const PAGE = 100;
   const filter = { entity: 'all', sheet: 'all', outcome: 'all', q: '' };
-  let logRows = [], logTotal = 0, logOffset = 0, searchTimer = null;
+  let logRows = [], logTotal = 0, logOffset = 0, searchTimer = null, delSheetArmed = false;
 
   const who = () => { const u = H.getUser && H.getUser(); return (u && (u.name || u.username)) || 'staff'; };
   const fmt = (n) => (n || 0).toLocaleString();
@@ -97,6 +97,7 @@
             <option value="found_changed">Found · changed</option>
           </select>
           <input id="vaLogQ" type="search" placeholder="Search name..." autocomplete="off" style="flex:1;min-width:160px">
+          <button type="button" class="btn btn-danger btn-sm" id="vaDelSheet" disabled title="Pick a sheet to enable">Delete sheet</button>
         </div>
         <div class="tbl-wrap"><table class="tbl" id="vaLogTbl"></table></div>
         <div class="log-foot" id="vaLogFoot"></div>
@@ -200,10 +201,27 @@
       </div></td>
       <td class="actions" style="white-space:nowrap">
         <button type="button" class="btn btn-primary btn-sm ed-save">Save</button>
+        <button type="button" class="btn btn-ghost btn-sm ed-del">Delete</button>
         <button type="button" class="btn btn-ghost btn-sm ed-cancel">Cancel</button></td>`;
     const found = H.$('.ed-found', tr), outSel = H.$('.ed-outcome', tr);
     found.addEventListener('input', () => { outSel.value = deriveOutcome(rec.existing_number, found.value, false); });
     H.$('.ed-cancel', tr).addEventListener('click', () => renderLog(wrap));
+    // Row delete: two-step (Delete -> Confirm, auto-disarms after 3s) since it's irreversible.
+    const del = H.$('.ed-del', tr); let armed = false;
+    del.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true; del.textContent = 'Confirm delete'; del.classList.remove('btn-ghost'); del.classList.add('btn-danger');
+        setTimeout(() => { if (armed && del.isConnected) { armed = false; del.textContent = 'Delete'; del.classList.add('btn-ghost'); del.classList.remove('btn-danger'); } }, 3000);
+        return;
+      }
+      del.classList.add('loading'); del.disabled = true;
+      try {
+        await VA.deleteRow(rec.id);
+        logRows = logRows.filter((r) => String(r.id) !== String(rec.id)); logTotal = Math.max(0, logTotal - 1);
+        H.toast('Deleted', `${rec.name} removed.`, 'ok');
+        renderLog(wrap); refreshStats(wrap);
+      } catch (err) { del.classList.remove('loading'); del.disabled = false; H.toast('Could not delete', err.message, 'err'); }
+    });
     H.$('.ed-save', tr).addEventListener('click', async () => {
       const patch = {
         found_number: found.value.trim() || null, outcome: outSel.value,
@@ -308,14 +326,49 @@
     finally { btn.classList.remove('loading'); btn.disabled = false; }
   }
 
+  // Reset the "Delete sheet" button to its resting state (disabled unless a
+  // specific sheet is chosen).
+  function syncDelSheetBtn(wrap) {
+    const btn = H.$('#vaDelSheet', wrap); if (!btn) return;
+    delSheetArmed = false; btn.classList.remove('loading'); btn.disabled = filter.sheet === 'all';
+    btn.textContent = 'Delete sheet';
+    btn.title = filter.sheet === 'all' ? 'Pick a sheet to enable' : `Delete the "${filter.sheet}" sheet`;
+  }
+
+  // Two-step sheet delete: first click fetches + shows the count to confirm, second
+  // click deletes. Scoped by the entity toggle (All = every type on that sheet).
+  async function deleteSheetFlow(wrap) {
+    if (filter.sheet === 'all') return;
+    const btn = H.$('#vaDelSheet', wrap);
+    if (!delSheetArmed) {
+      btn.classList.add('loading'); btn.disabled = true;
+      let n; try { n = await VA.countSheet(filter.sheet, filter.entity); }
+      catch (err) { syncDelSheetBtn(wrap); H.toast('Error', err.message, 'err'); return; }
+      btn.classList.remove('loading'); btn.disabled = false; delSheetArmed = true;
+      const scope = filter.entity === 'all' ? '' : ` ${filter.entity}`;
+      btn.textContent = `Delete ${fmt(n)}${scope}? Confirm`;
+      setTimeout(() => { if (delSheetArmed && btn.isConnected) syncDelSheetBtn(wrap); }, 4000);
+      return;
+    }
+    btn.classList.add('loading'); btn.disabled = true;
+    const sheet = filter.sheet;
+    try {
+      const n = await VA.deleteSheet(sheet, filter.entity);
+      H.toast('Sheet deleted', `${fmt(n)} contact(s) removed from "${sheet}".`, 'ok');
+      filter.sheet = 'all';
+      await load(wrap); syncDelSheetBtn(wrap);
+    } catch (err) { syncDelSheetBtn(wrap); H.toast('Could not delete sheet', err.message, 'err'); }
+  }
+
   function wire(wrap) {
     H.$('#vaEntity', wrap).addEventListener('click', (e) => {
       const b = e.target.closest('button[data-e]'); if (!b) return;
       filter.entity = b.dataset.e;
       H.$('#vaEntity', wrap).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
-      refreshStats(wrap); fetchFirstPage(wrap);
+      syncDelSheetBtn(wrap); refreshStats(wrap); fetchFirstPage(wrap);
     });
-    H.$('#vaLogSheet', wrap).addEventListener('change', (e) => { filter.sheet = e.target.value; fetchFirstPage(wrap); });
+    H.$('#vaLogSheet', wrap).addEventListener('change', (e) => { filter.sheet = e.target.value; syncDelSheetBtn(wrap); fetchFirstPage(wrap); });
+    H.$('#vaDelSheet', wrap).addEventListener('click', () => deleteSheetFlow(wrap));
     H.$('#vaLogOutcome', wrap).addEventListener('change', (e) => { filter.outcome = e.target.value; fetchFirstPage(wrap); });
     H.$('#vaLogQ', wrap).addEventListener('input', (e) => {
       filter.q = e.target.value.trim();
