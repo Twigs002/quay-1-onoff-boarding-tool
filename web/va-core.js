@@ -148,10 +148,30 @@
     const { error } = await sb().from(TABLE).update(patch).eq('id', id);
     if (error) throw new Error(error.message);
   }
+  async function deleteRow(id) {
+    const { error } = await sb().from(TABLE).delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+  // Count rows on a sheet (scoped by entity) - shown in the delete confirmation.
+  async function countSheet(sheet, entity) {
+    let q = sb().from(TABLE).select('*', { count: 'exact', head: true }).eq('sheet', sheet);
+    if (entity && entity !== 'all') q = q.eq('entity_type', entity);
+    const { count, error } = await q;
+    if (error) throw new Error(error.message);
+    return count || 0;
+  }
+  // Delete every row on a sheet (scoped by entity when set). Returns rows deleted.
+  async function deleteSheet(sheet, entity) {
+    let q = sb().from(TABLE).delete({ count: 'exact' }).eq('sheet', sheet);
+    if (entity && entity !== 'all') q = q.eq('entity_type', entity);
+    const { error, count } = await q;
+    if (error) throw new Error(error.message);
+    return count || 0;
+  }
 
   window.VA = {
     TABLE, OUTCOME, ENTITY, sb, digits, deriveOutcome,
     counts, perSheet, distinctSheets, fetchLogPage, fetchAllMatching,
-    candidatesByNames, insertRows, updateRow,
+    candidatesByNames, insertRows, updateRow, deleteRow, countSheet, deleteSheet,
   };
 })();
