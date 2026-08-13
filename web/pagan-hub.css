@@ -1,0 +1,163 @@
+/* ===========================================================
+   Pagan Hub - premium layer over the shared Quay 1 stylesheet.
+   Loaded ONLY by pagan-hub.html. Reuses the brand tokens from
+   styles.css (--blue, --blue-900, --gold/--yellow, --green,
+   --red) and adds a refined executive dashboard skin: deep-navy
+   chrome, gold hairlines, elevated tiles, donut + bar meters.
+   =========================================================== */
+
+:root {
+  --hub-navy1: #1A2A55;
+  --hub-navy2: #2E477F;
+  --hub-gold: #FDC503;
+  --hub-good: #1E7A4B;
+  --hub-good-soft: #E7F5EC;
+  --hub-bad: #D20A03;
+  --hub-bad-soft: #FDEBEA;
+  --hub-wait: #8A93A5;
+  --hub-wait-soft: #EEF1F6;
+  --hub-ring: 0 1px 2px rgba(20, 32, 66, .05), 0 10px 30px -12px rgba(20, 32, 66, .18);
+}
+
+/* ---------- Atmosphere ---------- */
+body {
+  background:
+    radial-gradient(1100px 520px at 88% -8%, rgba(253, 197, 3, .10), transparent 60%),
+    radial-gradient(900px 520px at -6% 4%, rgba(61, 91, 166, .12), transparent 55%),
+    var(--canvas);
+  background-attachment: fixed;
+}
+
+/* ---------- Chrome ---------- */
+.topbar {
+  background: linear-gradient(120deg, var(--hub-navy1), var(--hub-navy2) 62%, #3A57A0);
+  border-bottom: 2px solid var(--hub-gold);
+  box-shadow: 0 8px 28px -16px rgba(20, 32, 66, .6);
+}
+.topbar-titles h1 { letter-spacing: .02em; }
+.topbar-titles p { color: rgba(255, 255, 255, .72); font-weight: 600; }
+
+/* Pill tab-nav */
+.tab-nav {
+  gap: 6px;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .14);
+  padding: 5px;
+  border-radius: var(--r-pill);
+  width: fit-content;
+}
+.tab-nav .tab-btn {
+  border: 0; background: transparent; color: rgba(255, 255, 255, .82);
+  font-weight: 700; font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 9px 18px; border-radius: var(--r-pill); cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.tab-nav .tab-btn:hover { color: #fff; background: rgba(255, 255, 255, .12); }
+.tab-nav .tab-btn.active {
+  background: var(--hub-gold); color: #2A2100;
+  box-shadow: 0 6px 16px -6px rgba(253, 197, 3, .6);
+}
+
+/* Section heading accent */
+.section-head h2 { position: relative; padding-left: 14px; }
+.section-head h2::before {
+  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 5px;
+  border-radius: 3px; background: linear-gradient(var(--hub-gold), #E0A800);
+}
+
+/* ---------- Entrance motion (staggered) ---------- */
+@keyframes hub-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.hub-in > * { opacity: 0; animation: hub-rise .5s cubic-bezier(.22, 1, .36, 1) forwards; }
+.hub-in > *:nth-child(1) { animation-delay: .02s; }
+.hub-in > *:nth-child(2) { animation-delay: .08s; }
+.hub-in > *:nth-child(3) { animation-delay: .14s; }
+.hub-in > *:nth-child(4) { animation-delay: .20s; }
+.hub-in > *:nth-child(5) { animation-delay: .26s; }
+.hub-in > *:nth-child(6) { animation-delay: .32s; }
+@media (prefers-reduced-motion: reduce) { .hub-in > * { animation: none; opacity: 1; } }
+
+/* ---------- KPI tiles ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.kpi {
+  position: relative; overflow: hidden; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 18px 20px 20px; box-shadow: var(--hub-ring);
+}
+.kpi::after {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 4px;
+  background: var(--kpi-accent, var(--blue));
+}
+.kpi-label { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.kpi-value { font-size: 40px; font-weight: 800; line-height: 1.02; color: var(--blue-900); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 6px; font-weight: 600; }
+.kpi.good { --kpi-accent: var(--hub-good); }
+.kpi.bad { --kpi-accent: var(--hub-bad); }
+.kpi.gold { --kpi-accent: var(--hub-gold); }
+.kpi.good .kpi-value { color: var(--hub-good); }
+.kpi.bad .kpi-value { color: var(--hub-bad); }
+
+/* ---------- Chart card + donut ---------- */
+.chart-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: stretch; }
+.va-donut-wrap { display: flex; align-items: center; gap: 20px; }
+.va-donut { position: relative; width: 168px; height: 168px; flex: none; }
+.va-donut svg { transform: rotate(-90deg); display: block; }
+.va-donut .donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+}
+.donut-center .big { font-size: 30px; font-weight: 800; color: var(--blue-900); line-height: 1; font-variant-numeric: tabular-nums; }
+.donut-center .cap { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+.legend { display: flex; flex-direction: column; gap: 12px; }
+.legend-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.legend-dot { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.legend-row b { font-variant-numeric: tabular-nums; color: var(--blue-900); }
+.legend-row .lg-name { color: var(--muted); font-weight: 600; min-width: 92px; }
+.legend-row .lg-pct { margin-left: auto; color: var(--faint); font-weight: 700; }
+
+/* ---------- Bar meters ---------- */
+.bars { display: flex; flex-direction: column; gap: 14px; }
+.bar-row { display: grid; grid-template-columns: 130px 1fr 84px; align-items: center; gap: 12px; }
+.bar-name { font-size: 12px; font-weight: 700; color: var(--blue-900); }
+.bar-track { height: 12px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 999px; width: 0; transition: width .7s cubic-bezier(.22, 1, .36, 1); }
+.bar-fill.good { background: linear-gradient(90deg, #2A9A63, var(--hub-good)); }
+.bar-fill.bad { background: linear-gradient(90deg, #E8564F, var(--hub-bad)); }
+.bar-fill.pending { background: linear-gradient(90deg, #AEB6C4, var(--hub-wait)); }
+.bar-fill.changed { background: linear-gradient(90deg, #F0C33B, #E0A800); }
+.bar-meta { font-size: 12px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-meta b { color: var(--blue-900); }
+
+/* ---------- Success-rate hero ring ---------- */
+.rate-hero { display: flex; align-items: center; gap: 22px; }
+.rate-ring { width: 116px; height: 116px; flex: none; position: relative; }
+.rate-ring svg { transform: rotate(-90deg); }
+.rate-ring .rr-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; color: var(--hub-good); font-variant-numeric: tabular-nums; }
+
+/* ---------- Entity split mini-cards ---------- */
+.split-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mini { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px 16px; background: var(--card-2); }
+.mini-top { display: flex; align-items: center; justify-content: space-between; }
+.mini-top .t { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.mini-num { font-size: 24px; font-weight: 800; color: var(--blue-900); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.mini-bar { height: 8px; border-radius: 999px; background: var(--line-soft); overflow: hidden; margin-top: 10px; }
+.mini-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #2A9A63, var(--hub-good)); }
+
+/* ---------- Per-sheet table niceties ---------- */
+.sheet-rate { display: inline-flex; align-items: center; gap: 8px; }
+.sheet-rate .mini-track { width: 70px; height: 7px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.sheet-rate .mini-track > span { display: block; height: 100%; background: linear-gradient(90deg, #2A9A63, var(--hub-good)); }
+
+/* ---------- Log: load-more + count ---------- */
+.log-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
+.log-count { font-size: 12px; color: var(--faint); font-weight: 600; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .split-2 { grid-template-columns: 1fr; }
+  .bar-row { grid-template-columns: 110px 1fr 72px; }
+}
+@media (max-width: 560px) {
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+}

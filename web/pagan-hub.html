@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="pagan-hub.css">
   <!-- Shared Quay 1 app switcher (superuser-only dropdown on the flag). -->
   <script src="https://twigs002.github.io/quay-dashboard-v2/quay-nav.js" defer></script>
 </head>
@@ -75,9 +76,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="config.js"></script>
   <script src="auth.js"></script>
-  <!-- pagan-hub.js MUST load before app.vasearches.js: it defines window.HUB, which
-       the VA Searches module binds to at load time. -->
+  <!-- pagan-hub.js MUST load before the app.va* modules: it defines window.HUB,
+       which they bind to at load time. va-core.js (window.VA) is the shared data
+       layer both modules use, so it loads before them too. -->
   <script src="pagan-hub.js"></script>
+  <script src="va-core.js"></script>
+  <script src="app.vadashboard.js"></script>
   <script src="app.vasearches.js"></script>
 </body>
 </html>
