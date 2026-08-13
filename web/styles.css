@@ -509,6 +509,7 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .pipe-subhead { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; }
 .pipe-list { display: flex; flex-direction: column; gap: 10px; }
 .pipe-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--card); flex-wrap: wrap; }
+.pipe-main { flex: 1 1 auto; min-width: 0; }   /* name + meta + docs column: take the space, allow truncation */
 .pipe-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .pipe-team { font-size: 12.5px; margin-top: 2px; }
 .docs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
