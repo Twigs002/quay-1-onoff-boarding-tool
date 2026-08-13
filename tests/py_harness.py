@@ -231,12 +231,16 @@ def test_dry_run_fail_safe():
     saved = os.environ.get("DRY_RUN")
 
     def dry_for(val):
+        # Exercise the parser directly against os.environ rather than reloading the
+        # whole config module: a reload re-runs _load_dotenv(), which setdefault()s
+        # DRY_RUN from worker/.env (DRY_RUN=0) whenever the var is unset - so the
+        # "unset" (None) case would wrongly read .env's live value. The fail-safe we
+        # are testing lives in _dry_run_from_env(), which reads os.environ only.
         if val is None:
             os.environ.pop("DRY_RUN", None)
         else:
             os.environ["DRY_RUN"] = val
-        importlib.reload(config)
-        return config.DRY_RUN
+        return config._dry_run_from_env()
 
     try:
         # exact live-set (case/space-insensitive) -> LIVE (dry OFF)
