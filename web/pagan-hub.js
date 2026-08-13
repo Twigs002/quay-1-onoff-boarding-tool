@@ -115,7 +115,8 @@
     const gate = $('#loginGate'); if (gate) gate.remove();
     if (window.QuayNav) window.QuayNav.mount({ isSuper: !!(USER && USER.isSuper), current: 'pagan-hub' });
     const so = $('#signOutBtn'); so.hidden = false;
-    $('#signOutWho').textContent = USER && USER.name ? USER.name + ' - ' : '';
+    const sync = $('#phSync'); if (sync) sync.hidden = false;
+    $('#signOutWho').textContent = USER && USER.name ? USER.name + ' · ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
     buildNav();
     route('dashboard');
