@@ -124,13 +124,20 @@
     return all;
   }
 
-  // Fetch candidate rows for a set of names (bulk import matching), one query.
+  // Fetch candidate rows for a set of names (bulk import matching). Matching is
+  // EXACT on name (`.in` is case/space-sensitive) - fine for results pasted back
+  // from the same source sheet. Names are chunked so a big paste never overflows
+  // the request URL.
   async function candidatesByNames(names, entity, sheet) {
-    let q = sb().from(TABLE).select('*').in('name', names).eq('entity_type', entity);
-    if (sheet && sheet !== 'all') q = q.eq('sheet', sheet);
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
-    return data || [];
+    const CHUNK = 150, out = [];
+    for (let i = 0; i < names.length; i += CHUNK) {
+      let q = sb().from(TABLE).select('*').in('name', names.slice(i, i + CHUNK)).eq('entity_type', entity);
+      if (sheet && sheet !== 'all') q = q.eq('sheet', sheet);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      out.push(...(data || []));
+    }
+    return out;
   }
 
   async function insertRows(rows) {

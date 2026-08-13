@@ -143,12 +143,18 @@
   }
 
   async function loadMore(wrap) {
-    logOffset += PAGE;
+    const nextOffset = logOffset + PAGE;
     const btn = H.$('#vaLoadMore', wrap); if (btn) { btn.classList.add('loading'); btn.disabled = true; }
     try {
-      const { rows, total } = await VA.fetchLogPage(filter, logOffset, PAGE);
-      logRows = logRows.concat(rows); logTotal = total;
-    } catch (err) { H.toast('Could not load more', err.message, 'err'); }
+      const { rows, total } = await VA.fetchLogPage(filter, nextOffset, PAGE);
+      // Only advance the offset on success, else a failed page would be skipped
+      // permanently (next click would jump to offset + 2*PAGE).
+      logOffset = nextOffset; logRows = logRows.concat(rows); logTotal = total;
+    } catch (err) {
+      H.toast('Could not load more', err.message, 'err');
+      if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
+      return;
+    }
     renderLog(wrap);
   }
 
@@ -238,8 +244,9 @@
     if (!parsed.length) { H.toast('No results', 'Paste at least one "name, number" line.', 'err'); return; }
     const btn = H.$('#vaImpBtn', wrap); btn.classList.add('loading'); btn.disabled = true;
     try {
-      // Fetch candidate rows for exactly the pasted names in one query, then match
-      // locally (case-insensitive, prefer a still-pending row).
+      // Fetch candidate rows for the pasted names (chunked), then match locally,
+      // preferring a still-pending row. Matching is exact on name - paste results
+      // back from the same sheet so the casing lines up.
       const names = [...new Set(parsed.map((p) => p.name))];
       const cands = await VA.candidatesByNames(names, type, onlySheet);
       const byName = new Map();
