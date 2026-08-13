@@ -31,6 +31,37 @@
     });
     return out;
   }
+  // Richer parser for "Add a sheet": a header row (Record ID / ID Number / Name /
+  // Number, any order) maps columns by name; without a header it falls back to the
+  // positional `name, number`. Returns [{name, id_number, record_id, num}].
+  function parseContacts(text) {
+    const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+    const split = (l) => l.split(/[\t,;]/).map((s) => s.trim());
+    const first = split(lines[0]).map((s) => s.toLowerCase());
+    const looksHeader = first.some((h) => /record|hubspot|\bid\b|id ?number|name|company|contact|number|phone|cell|mobile/.test(h)) && !VA.digits(first.join(''));
+    const idx = { name: -1, id_number: -1, record_id: -1, num: -1 };
+    let start = 0;
+    if (looksHeader) {
+      first.forEach((h, i) => {
+        if (idx.record_id < 0 && /record|hubspot/.test(h)) idx.record_id = i;
+        else if (idx.id_number < 0 && /id/.test(h)) idx.id_number = i;
+        else if (idx.name < 0 && /name|company|contact/.test(h)) idx.name = i;
+        else if (idx.num < 0 && /number|phone|cell|mobile/.test(h)) idx.num = i;
+      });
+      start = 1;
+    } else { idx.name = 0; idx.num = 1; }
+    const out = [];
+    for (let i = start; i < lines.length; i++) {
+      const c = split(lines[i]);
+      const get = (k) => (idx[k] >= 0 ? (c[idx[k]] || '') : '');
+      const rec = { name: get('name'), id_number: get('id_number'), record_id: get('record_id'), num: get('num') };
+      if (!rec.name && !rec.id_number && !rec.record_id) continue;
+      out.push(rec);
+    }
+    return out;
+  }
+
   function pill(outcome) { const o = OUTCOME[outcome] || OUTCOME.pending; return `<span class="pill ${o.pill}">${H.esc(o.label)}</span>`; }
   function cssId(v) { return String(v).replace(/["\\]/g, '\\$&'); }
 
@@ -53,15 +84,15 @@
       <div class="grid-2">
         <div class="card card-pad">
           <div class="card-head"><h3>Add a sheet to search</h3></div>
-          <p class="muted" style="font-size:12px;margin:2px 0 12px">One contact per line: <code>name</code> or <code>name, number-on-record</code>. Or upload a CSV. These land as <strong>pending</strong> to be worked.</p>
+          <p class="muted" style="font-size:12px;margin:2px 0 12px">Paste or upload a CSV with a header row: <code>Record ID, ID Number, Name</code>. Company vs person is auto-detected from the ID (13 digits = person, a 9-10 digit reg = company). Rows land as <strong>pending</strong>; ones with a Record ID + ID Number are picked up by the laptop auto-search.</p>
           <div class="field-grid">
             <div class="field"><label for="vaAddSheet">Sheet name <span class="req">*</span></label>
               <input id="vaAddSheet" type="text" autocomplete="off" placeholder="e.g. Aug batch 3"></div>
-            <div class="field"><label for="vaAddType">Contact type</label>
+            <div class="field"><label for="vaAddType">Type if no ID</label>
               <select id="vaAddType"><option value="company">Company</option><option value="person">Natural person</option></select></div>
           </div>
           <div class="field wide"><label for="vaAddRows">Contacts</label>
-            <textarea id="vaAddRows" placeholder="Acme Holdings, 021 555 0100&#10;Blue Sky Trading&#10;..."></textarea></div>
+            <textarea id="vaAddRows" placeholder="Record ID, ID Number, Name&#10;4493821, 0000000800817, Giyeong Kim&#10;6341403, 010477607, Cape & Transvaal Land"></textarea></div>
           <div class="field wide"><label for="vaAddCsv" class="hint">...or upload a CSV</label>
             <input id="vaAddCsv" type="file" accept=".csv,text/csv"></div>
           <button type="button" class="btn btn-primary" id="vaAddBtn">Add to search list</button>
@@ -242,13 +273,27 @@
     const sheet = H.$('#vaAddSheet', wrap).value.trim();
     const type = H.$('#vaAddType', wrap).value;
     if (!sheet) { H.toast('Sheet name needed', 'Name the batch so you can filter by it later.', 'err'); return; }
-    const parsed = parseLines(H.$('#vaAddRows', wrap).value);
+    const parsed = parseContacts(H.$('#vaAddRows', wrap).value);
     if (!parsed.length) { H.toast('No contacts', 'Paste at least one contact (or upload a CSV).', 'err'); return; }
-    const rows = parsed.map((p) => ({ entity_type: type, name: p.name, sheet, existing_number: p.num || null, outcome: 'pending', created_by: who() }));
+    const rows = parsed.map((p) => {
+      const idn = (p.id_number || '').trim(), d = VA.digits(idn);
+      // Entity is auto-derived from the ID (13 digits = person, 9-10 digit reg =
+      // company) - same rule the KYC engine uses - falling back to the picker.
+      const ent = idn ? (d.length === 13 ? 'person' : d.length >= 9 ? 'company' : type) : type;
+      const rid = String(p.record_id || '').replace(/\D/g, '');
+      const row = { entity_type: ent, name: (p.name || '').trim() || (rid ? 'Record ' + rid : '(unnamed)'), sheet, outcome: 'pending', created_by: who() };
+      if (idn) row.id_number = idn;
+      if (p.num) row.existing_number = p.num.trim();
+      if (rid) row.source_id = 'hubspot:' + rid;   // enables auto-search + dedupe
+      return row;
+    });
+    const ready = rows.filter((r) => r.id_number && r.source_id).length;
     const btn = H.$('#vaAddBtn', wrap); btn.classList.add('loading'); btn.disabled = true;
     try {
-      await VA.insertRows(rows);
-      H.toast('Sheet added', `${fmt(rows.length)} ${ENTITY[type].toLowerCase()} contact(s) queued on "${sheet}".`, 'ok');
+      await VA.upsertRows(rows);
+      const extra = ready === rows.length ? 'all ready for auto-search'
+        : ready ? `${fmt(ready)} ready for auto-search` : 'add ID Number + Record ID to enable auto-search';
+      H.toast('Sheet added', `${fmt(rows.length)} contact(s) queued on "${sheet}" · ${extra}.`, 'ok');
       H.$('#vaAddSheet', wrap).value = ''; H.$('#vaAddRows', wrap).value = ''; H.$('#vaAddCsv', wrap).value = '';
       await load(wrap);
     } catch (err) { H.toast('Could not add sheet', err.message, 'err'); }

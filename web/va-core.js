@@ -144,6 +144,12 @@
     const { error } = await sb().from(TABLE).insert(rows);
     if (error) throw new Error(error.message);
   }
+  // Insert, but skip rows whose source_id already exists (re-import friendly). Rows
+  // with a null source_id never conflict, so they always insert.
+  async function upsertRows(rows) {
+    const { error } = await sb().from(TABLE).upsert(rows, { onConflict: 'source_id', ignoreDuplicates: true });
+    if (error) throw new Error(error.message);
+  }
   async function updateRow(id, patch) {
     const { error } = await sb().from(TABLE).update(patch).eq('id', id);
     if (error) throw new Error(error.message);
@@ -172,6 +178,6 @@
   window.VA = {
     TABLE, OUTCOME, ENTITY, sb, digits, deriveOutcome,
     counts, perSheet, distinctSheets, fetchLogPage, fetchAllMatching,
-    candidatesByNames, insertRows, updateRow, deleteRow, countSheet, deleteSheet,
+    candidatesByNames, insertRows, upsertRows, updateRow, deleteRow, countSheet, deleteSheet,
   };
 })();
