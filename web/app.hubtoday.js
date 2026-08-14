@@ -32,13 +32,20 @@
     { key: 'recruitment', label: 'Recruitment', href: GM('Recruitment/Indeed') },
     { key: 'self_signup', label: 'Self sign-ups', href: GM('Self sign up form') },
   ];
-  const SYSTEMS = [
-    { key: 'va_bridge', label: 'VA auto-search', live: 'va_rate', sub: 'success rate' },
-    { key: 'intro_emails', label: 'Intro emails today' },
-    { key: 'dialfire', label: 'Dialfire report' },
-    { key: 'data_orders', label: 'Data orders open' },
+  const PIPELINE = [
+    { key: 'data_jobs', label: 'Data jobs open', live: 'data_open', href: '#datatracker', sub: 'KF data queue' },
+    { key: 'leads_action', label: 'Leads to action' },
+    { key: 'deals_live', label: 'Live deals' },
+    { key: 'deals_stale', label: 'Stale deals' },
     { key: 'onboarding', label: 'Onboarding in progress' },
     { key: 'dealflow', label: 'Dealflow synced' },
+  ];
+  const SYSTEMS = [
+    { key: 'va_bridge', label: 'VA auto-search', live: 'va_rate', sub: 'success rate' },
+    { key: 'market_reports', label: 'Market reports' },
+    { key: 'dialfire', label: 'Dialfire report' },
+    { key: 'intro_emails', label: 'Intro emails today' },
+    { key: 'automation_health', label: 'Automations healthy' },
   ];
 
   function greeting() {
@@ -68,20 +75,23 @@
   async function load(wrap) {
     const host = (id) => H.$(id, wrap);
     let rows = [], live = {};
+    const client = sb();
     try {
-      const client = sb();
-      const [sig, va] = await Promise.all([
+      const [sig, va, dj] = await Promise.all([
         client ? client.from('hub_signals').select('*') : Promise.resolve({ data: [] }),
         (VA && VA.counts) ? VA.counts('all').catch(() => null) : Promise.resolve(null),
+        client ? client.from('data_jobs').select('id', { count: 'exact', head: true }).not('status', 'in', '(done,blocked)').then((r) => r).catch(() => null) : Promise.resolve(null),
       ]);
       rows = (sig && sig.data) || [];
       if (va) { live.va_pending = va.pending; live.va_rate = `${Math.round((va.successRate || 0) * 100)}%`; }
+      if (dj && !dj.error && dj.count != null) live.data_open = dj.count;
     } catch (_) { /* show scaffold with no live values */ }
     const sigMap = {};
     rows.forEach((r) => { sigMap[`${r.domain}:${r.key}`] = r; });
     const render = (arr, domain) => arr.map((i) => tile(Object.assign({ domain }, i), sigMap, live)).join('');
     host('#tNeeds').innerHTML = render(NEEDS, 'inbox');
     host('#tQueues').innerHTML = render(QUEUES, 'requests');
+    host('#tPipeline').innerHTML = render(PIPELINE, 'pipeline');
     host('#tSystems').innerHTML = render(SYSTEMS, 'systems');
     wrap.querySelectorAll('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
@@ -103,6 +113,9 @@
 
       <div><div class="ph-label" style="margin:8px 2px 10px">Request queues</div>
         <div class="ph-tiles" id="tQueues"></div></div>
+
+      <div><div class="ph-label" style="margin:8px 2px 10px">Data &amp; pipeline</div>
+        <div class="ph-tiles" id="tPipeline"></div></div>
 
       <div><div class="ph-label" style="margin:8px 2px 10px">Systems &amp; automations</div>
         <div class="ph-tiles" id="tSystems"></div></div>
