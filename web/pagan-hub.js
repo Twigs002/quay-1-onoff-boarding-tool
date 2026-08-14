@@ -50,6 +50,7 @@
   const MODULES = [
     { id: 'today', label: 'Today', render: (root) => call('viewHubToday', root) },
     { id: 'datatracker', label: 'Data Tracker', render: (root) => call('viewDataTracker', root) },
+    { id: 'allocations', label: 'Allocations', render: (root) => call('viewKfAllocations', root) },
     { id: 'dashboard', label: 'VA Dashboard', render: (root) => call('viewVaDashboard', root) },
     { id: 'vasearches', label: 'VA Searches', render: (root) => call('viewVaSearches', root) },
     // e.g. { id: 'leads', label: 'My Leads', render: (root) => { ... } },
