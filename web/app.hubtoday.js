@@ -34,9 +34,9 @@
   ];
   const PIPELINE = [
     { key: 'data_jobs', label: 'Data jobs open', live: 'data_open', href: '#datatracker', sub: 'KF data queue' },
-    { key: 'leads_action', label: 'Leads to action' },
-    { key: 'deals_live', label: 'Live deals' },
-    { key: 'deals_stale', label: 'Stale deals' },
+    { key: 'leads_action', label: 'Leads to action', live: 'leads_action', href: 'https://twigs002.github.io/quay-leads/' },
+    { key: 'deals_live', label: 'Live deals', live: 'deals_live', href: 'https://twigs002.github.io/quay-deals-live/' },
+    { key: 'deals_stale', label: 'Uncalled deals', live: 'deals_stale', href: 'https://twigs002.github.io/quay-leads/' },
     { key: 'onboarding', label: 'Onboarding in progress' },
     { key: 'dealflow', label: 'Dealflow synced' },
   ];
@@ -76,15 +76,21 @@
     const host = (id) => H.$(id, wrap);
     let rows = [], live = {};
     const client = sb();
+    const REASSIGN = ['External Lead', 'Calling Lead', 'Inbound Lead'];
+    const cnt = (build) => (client ? build(client).then((r) => r).catch(() => null) : Promise.resolve(null));
     try {
-      const [sig, va, dj] = await Promise.all([
+      const [sig, va, dj, la, dl, ds] = await Promise.all([
         client ? client.from('hub_signals').select('*') : Promise.resolve({ data: [] }),
         (VA && VA.counts) ? VA.counts('all').catch(() => null) : Promise.resolve(null),
-        client ? client.from('data_jobs').select('id', { count: 'exact', head: true }).not('status', 'in', '(done,blocked)').then((r) => r).catch(() => null) : Promise.resolve(null),
+        cnt((c) => c.from('data_jobs').select('*', { count: 'exact', head: true }).not('status', 'in', '(done,blocked)')),
+        cnt((c) => c.from('leads_enriched').select('*', { count: 'exact', head: true }).eq('worked', false)),
+        cnt((c) => c.from('hs_deal_state').select('*', { count: 'exact', head: true })),
+        cnt((c) => c.from('hs_deal_state').select('*', { count: 'exact', head: true }).in('current_stage', REASSIGN).or('num_calls.eq.0,num_calls.is.null')),
       ]);
       rows = (sig && sig.data) || [];
       if (va) { live.va_pending = va.pending; live.va_rate = `${Math.round((va.successRate || 0) * 100)}%`; }
-      if (dj && !dj.error && dj.count != null) live.data_open = dj.count;
+      const setc = (o, k) => { if (o && !o.error && o.count != null) live[k] = o.count; };
+      setc(dj, 'data_open'); setc(la, 'leads_action'); setc(dl, 'deals_live'); setc(ds, 'deals_stale');
     } catch (_) { /* show scaffold with no live values */ }
     const sigMap = {};
     rows.forEach((r) => { sigMap[`${r.domain}:${r.key}`] = r; });
