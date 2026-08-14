@@ -37,7 +37,7 @@
     { key: 'leads_action', label: 'Leads to action', live: 'leads_action', href: 'https://twigs002.github.io/quay-leads/' },
     { key: 'deals_live', label: 'Live deals', live: 'deals_live', href: 'https://twigs002.github.io/quay-deals-live/' },
     { key: 'deals_stale', label: 'Uncalled deals', live: 'deals_stale', href: 'https://twigs002.github.io/quay-leads/' },
-    { key: 'onboarding', label: 'Onboarding in progress' },
+    { key: 'onboarding', label: 'Onboarding in progress', live: 'onboarding', href: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/' },
     { key: 'dealflow', label: 'Dealflow synced' },
   ];
   const SYSTEMS = [
@@ -72,6 +72,23 @@
       : `<div class="ph-tile">${inner}</div>`;
   }
 
+  // Onboarding-in-progress count via the boarding tool's status endpoint (reuses the
+  // shared config.js LIFECYCLE_ENDPOINT + Pagan's Supabase JWT). Null on any failure.
+  async function onboardingCount() {
+    const ep = (window.QUAY_CFG || {}).LIFECYCLE_ENDPOINT;
+    if (!ep || !window.AUTH || !window.AUTH.getAccessToken) return null;
+    try {
+      const tok = await window.AUTH.getAccessToken();
+      if (!tok) return null;
+      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ kind: 'status', accessToken: tok }), signal: ctrl.signal });
+      clearTimeout(timer);
+      const j = await res.json();
+      return Array.isArray(j.onboarding) ? j.onboarding.length : null;
+    } catch (_) { return null; }
+  }
+
   async function load(wrap) {
     const host = (id) => H.$(id, wrap);
     let rows = [], live = {};
@@ -95,14 +112,20 @@
     const sigMap = {};
     rows.forEach((r) => { sigMap[`${r.domain}:${r.key}`] = r; });
     const render = (arr, domain) => arr.map((i) => tile(Object.assign({ domain }, i), sigMap, live)).join('');
-    host('#tNeeds').innerHTML = render(NEEDS, 'inbox');
-    host('#tQueues').innerHTML = render(QUEUES, 'requests');
-    host('#tPipeline').innerHTML = render(PIPELINE, 'pipeline');
-    host('#tSystems').innerHTML = render(SYSTEMS, 'systems');
-    wrap.querySelectorAll('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
-      e.preventDefault();
-      const t = document.querySelector(`.tab-btn[data-tab="${a.dataset.goto}"]`); if (t) t.click();
-    }));
+    const paint = () => {
+      host('#tNeeds').innerHTML = render(NEEDS, 'inbox');
+      host('#tQueues').innerHTML = render(QUEUES, 'requests');
+      host('#tPipeline').innerHTML = render(PIPELINE, 'pipeline');
+      host('#tSystems').innerHTML = render(SYSTEMS, 'systems');
+      wrap.querySelectorAll('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const t = document.querySelector(`.tab-btn[data-tab="${a.dataset.goto}"]`); if (t) t.click();
+      }));
+    };
+    paint();
+    // Onboarding is live via the boarding status endpoint - fetched in the background
+    // (can be a cold Apps Script exec) and painted in when it returns.
+    onboardingCount().then((n) => { if (n != null) { live.onboarding = n; paint(); } });
     const synced = rows.length ? `Live · ${rows.length} signals` : 'Scaffold only - run the collector to go live';
     const sc = host('#tSynced'); if (sc) sc.textContent = synced;
   }
