@@ -48,7 +48,8 @@
     root.appendChild(el('<div class="card card-pad"><div class="notice notice-warn">This view failed to load - try a refresh.</div></div>'));
   };
   const MODULES = [
-    { id: 'dashboard', label: 'Dashboard', render: (root) => call('viewVaDashboard', root) },
+    { id: 'today', label: 'Today', render: (root) => call('viewHubToday', root) },
+    { id: 'dashboard', label: 'VA Dashboard', render: (root) => call('viewVaDashboard', root) },
     { id: 'vasearches', label: 'VA Searches', render: (root) => call('viewVaSearches', root) },
     // e.g. { id: 'leads', label: 'My Leads', render: (root) => { ... } },
   ];
@@ -119,7 +120,7 @@
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' · ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
     buildNav();
-    route('dashboard');
+    route('today');
   }
 
   async function boot() {

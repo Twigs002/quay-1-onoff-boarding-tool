@@ -197,6 +197,25 @@ button { font-family: var(--font); cursor: pointer; }
 /* Form fields (add/import cards) - round to match, keep styles.css layout */
 .field input, .field select, .field textarea { border-radius: 12px; }
 
+/* ---------- Today command centre ---------- */
+.ph-faint { color: var(--q-faint); font-weight: 600; }
+.ph-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.ph-tile { display: block; background: var(--q-card); border: 1px solid transparent; border-radius: var(--r-md); padding: 16px 18px; text-decoration: none; color: inherit; transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+a.ph-tile { cursor: pointer; }
+a.ph-tile:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); border-color: var(--q-line); transform: translateY(-1px); }
+.ph-tile-label { font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--q-faint); }
+.ph-tile-num { font-size: 30px; font-weight: 800; color: var(--q-blue-900); margin-top: 8px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.ph-tile-num.bad { color: var(--q-red); }
+.ph-tile-sub { font-size: 11px; font-weight: 600; color: var(--q-muted); margin-top: 6px; min-height: 14px; }
+.ph-stamp { color: var(--q-faint); font-weight: 600; }
+.ph-ask { background: var(--q-blue); border-radius: var(--r-lg); padding: 20px 22px; }
+.ph-ask-row { display: flex; gap: 10px; margin-top: 10px; }
+.ph-ask-row input { flex: 1; border: 0; border-radius: var(--r-pill); padding: 12px 18px; font-family: var(--font); font-size: 13px; color: var(--q-blue-900); }
+.ph-ask-row input:disabled { background: #fff; opacity: .8; }
+.ph-ask-note { font-size: 11px; color: var(--q-sky); margin-top: 8px; font-weight: 600; }
+@media (max-width: 900px) { .ph-tiles { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .ph-tiles { grid-template-columns: 1fr 1fr; } }
+
 /* Subtle staggered entrance */
 @keyframes ph-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .hub-in > * { animation: ph-rise .45s cubic-bezier(.22, 1, .36, 1) both; }
