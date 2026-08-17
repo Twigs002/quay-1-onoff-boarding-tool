@@ -32,7 +32,7 @@
     const wrap = H.el(`<div class="stack hub-in">
       <div class="section-head">
         <div><h2>P24 Budget</h2>
-          <p class="ph-sub">Property24 spend against each team's monthly allocation - what's spent, what's left, and where it's going.</p></div>
+          <p class="ph-sub">Property24 spend against each team's monthly allocation - what's spent, what's left, where it's going. Spends update automatically from your P24 approval emails.</p></div>
         <div class="segmented" id="pbMonth" role="group" aria-label="Month">
           <button type="button" id="pbPrev">◀</button>
           <button type="button" aria-pressed="true" id="pbLabel" style="min-width:110px">${monthLabel(month)}</button>
@@ -40,17 +40,6 @@
         </div>
       </div>
       <div class="kpi-grid" id="pbStats"></div>
-
-      <div class="card card-pad">
-        <div class="card-head"><h3>Log a P24 spend</h3></div>
-        <div class="field-grid">
-          <div class="field"><label for="pbTeam">Team</label><select id="pbTeam"></select></div>
-          <div class="field"><label for="pbAmount">Amount (R) <span class="req">*</span></label><input id="pbAmount" type="number" min="0" step="0.01" placeholder="e.g. 828"></div>
-          <div class="field"><label for="pbDate">Date</label><input id="pbDate" type="date"></div>
-          <div class="field"><label for="pbRef">Listing / suburb</label><input id="pbRef" type="text" placeholder="e.g. Zonnebloem boost"></div>
-        </div>
-        <button type="button" class="btn btn-primary" id="pbAdd">Log spend</button>
-      </div>
 
       <div class="card">
         <div class="card-head" style="padding:16px 18px 0"><h3>By team — ${monthLabel(month)}</h3>
@@ -64,7 +53,6 @@
       </div>
     </div>`);
     root.appendChild(wrap);
-    H.$('#pbDate', wrap).value = new Date().toISOString().slice(0, 10);
     wire(wrap);
     load(wrap);
   }
@@ -86,7 +74,6 @@
       teams.innerHTML = `<tbody><tr><td><div class="state"><div class="state-title">Could not load P24 budget</div><div>${H.esc(err.message)}${H.esc(hint)}</div></div></td></tr></tbody>`;
       H.$('#pbStats', wrap).innerHTML = ''; return;
     }
-    fillTeamSelect(wrap);
     render(wrap);
   }
 
@@ -195,7 +182,6 @@
   }
 
   function wire(wrap) {
-    H.$('#pbAdd', wrap).addEventListener('click', () => addSpend(wrap));
     H.$('#pbExport', wrap).addEventListener('click', () => exportCsv(wrap));
     H.$('#pbPrev', wrap).addEventListener('click', () => shiftMonth(wrap, -1));
     H.$('#pbNext', wrap).addEventListener('click', () => shiftMonth(wrap, 1));
