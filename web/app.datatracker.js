@@ -122,7 +122,7 @@
     return rows.filter((r) => {
       if (filter.status !== 'all' && r.status !== filter.status) return false;
       if (filter.type !== 'all' && r.job_type !== filter.type) return false;
-      if (filter.q) { const h = `${r.title} ${r.team} ${r.area}`.toLowerCase(); if (!h.includes(filter.q)) return false; }
+      if (filter.q) { const h = `${r.title || ''} ${r.team || ''} ${r.area || ''}`.toLowerCase(); if (!h.includes(filter.q)) return false; }
       return true;
     });
   }

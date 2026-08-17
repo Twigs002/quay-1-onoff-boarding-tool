@@ -100,7 +100,7 @@
       if (filter.type !== 'all' && r.title_type !== filter.type) return false;
       if (filter.status !== 'all' && r.status !== filter.status) return false;
       if (filter.team !== 'all' && r.team !== filter.team) return false;
-      if (filter.q) { const h = `${r.suburb} ${r.cma_suburb} ${r.extension_name}`.toLowerCase(); if (!h.includes(filter.q)) return false; }
+      if (filter.q) { const h = `${r.suburb || ''} ${r.cma_suburb || ''} ${r.extension_name || ''}`.toLowerCase(); if (!h.includes(filter.q)) return false; }
       return true;
     });
   }
