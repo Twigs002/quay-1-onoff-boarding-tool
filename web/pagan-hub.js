@@ -48,7 +48,7 @@
     root.appendChild(el('<div class="card card-pad"><div class="notice notice-warn">This view failed to load - try a refresh.</div></div>'));
   };
   const MODULES = [
-    { id: 'today', label: 'Today', render: (root) => call('viewHubToday', root) },
+    { id: 'overview', label: 'Overview', render: (root) => call('viewHubToday', root) },
     { id: 'datatracker', label: 'Data Tracker', render: (root) => call('viewDataTracker', root) },
     { id: 'allocations', label: 'Allocations', render: (root) => call('viewKfAllocations', root) },
     { id: 'p24budget', label: 'P24 Budget', render: (root) => call('viewP24Budget', root) },
@@ -123,7 +123,7 @@
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' · ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
     buildNav();
-    route('today');
+    route(MODULES[0].id);
   }
 
   async function boot() {
