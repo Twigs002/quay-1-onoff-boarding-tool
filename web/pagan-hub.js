@@ -1,29 +1,24 @@
-/* Pagan Hub - a private, single-user workspace.
+/* Admin Dashboard - a private workspace for super admins.
  *
  * A standalone page (pagan-hub.html) separate from the shared On/Offboarding tool.
- * It reuses the same Supabase PIN login (auth.js) but then hard-gates on IDENTITY:
- * only Pagan gets in; any other valid staff login is signed straight back out.
+ * It reuses the same Supabase PIN login (auth.js) but then hard-gates on ROLE:
+ * only super admins get in; any other valid staff login is signed straight back out.
  *
  * It provides the minimal `window.HUB` surface that feature modules expect
  * ($/esc/el/toast/getUser), then renders them from a small MODULES registry so new
- * personal views are a one-line add. First module: VA Searches (app.vasearches.js,
- * loaded AFTER this file so it can bind to window.HUB).
+ * admin views are a one-line add. Modules load AFTER this file so they can bind to
+ * window.HUB.
  *
- * "Only Pagan" is enforced in two places: this client gate (convenience) AND
+ * "Super admins only" is enforced in two places: this client gate (convenience) AND
  * Postgres RLS on va_search_records (the real control - see
- * supabase/migrations/0002_va_search_pagan_only.sql). The client gate alone is not
+ * supabase/migrations/0005_va_search_super_admin.sql). The client gate alone is not
  * security; the RLS policy is.
  */
 (() => {
   'use strict';
 
-  // Who counts as Pagan. Matched against the signed-in staff row (username = staff.id,
-  // email = staff.email). Adjust here if the login identifier ever changes; keep it in
-  // sync with the RLS policy in migration 0002.
-  const PAGAN = { usernames: ['pagan'], emails: ['pagan@quay1.co.za'] };
-  const isPagan = (u) => !!u && (
-    PAGAN.usernames.includes(String(u.username || '').toLowerCase()) ||
-    PAGAN.emails.includes(String(u.email || '').toLowerCase()));
+  // Super admins only. Mirrors the RLS in migration 0005.
+  const isAllowed = (u) => !!u && !!u.isSuper;
 
   // ── minimal HUB surface (mirrors the helpers app.js exposes) ────────────────
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -48,9 +43,7 @@
     root.appendChild(el('<div class="card card-pad"><div class="notice notice-warn">This view failed to load - try a refresh.</div></div>'));
   };
   const MODULES = [
-    { id: 'today', label: 'Today', render: (root) => call('viewHubToday', root) },
     { id: 'datatracker', label: 'Data Tracker', render: (root) => call('viewDataTracker', root) },
-    { id: 'allocations', label: 'Allocations', render: (root) => call('viewKfAllocations', root) },
     { id: 'dashboard', label: 'VA Dashboard', render: (root) => call('viewVaDashboard', root) },
     { id: 'vasearches', label: 'VA Searches', render: (root) => call('viewVaSearches', root) },
     // e.g. { id: 'leads', label: 'My Leads', render: (root) => { ... } },
@@ -92,9 +85,9 @@
       const r = await window.AUTH.signIn(u, pin);
       pin = ''; paint();
       if (!r.ok) { showErr(r.error || 'Sign-in failed.'); return; }
-      if (!isPagan(r.user)) {           // valid staff, but not Pagan - refuse + sign out
+      if (!isAllowed(r.user)) {           // valid staff, but not a super admin - refuse + sign out
         await window.AUTH.signOut();
-        showErr('This hub is private to Pagan.');
+        showErr('This dashboard is restricted to super admins.');
         return;
       }
       USER = r.user; onSignedIn();
@@ -122,7 +115,7 @@
     $('#signOutWho').textContent = USER && USER.name ? USER.name + ' · ' : '';
     so.addEventListener('click', async () => { await window.AUTH.signOut(); location.reload(); }, { once: true });
     buildNav();
-    route('today');
+    route(MODULES[0].id);
   }
 
   async function boot() {
@@ -130,8 +123,8 @@
     initLoginGate();
     try {
       const u = await window.AUTH.getSession();
-      if (u && isPagan(u)) { USER = u; onSignedIn(); }
-      else if (u) { await window.AUTH.signOut(); }   // a non-Pagan session must not linger here
+      if (u && isAllowed(u)) { USER = u; onSignedIn(); }
+      else if (u) { await window.AUTH.signOut(); }   // a non-super-admin session must not linger here
     } catch (_) { /* stay on the gate */ }
   }
 

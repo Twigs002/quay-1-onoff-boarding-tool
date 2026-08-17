@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pagan Hub</title>
+  <title>Admin Dashboard</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,14 +14,14 @@
   <script src="https://twigs002.github.io/quay-dashboard-v2/quay-nav.js" defer></script>
 </head>
 <body class="pre-auth">
-  <!-- Login gate - same PIN login as every other Quay 1 tool (auth.js). The hub
-       additionally checks the signed-in identity is Pagan (pagan-hub.js); anyone
-       else is signed straight back out. -->
+  <!-- Login gate - same PIN login as every other Quay 1 tool (auth.js). The
+       dashboard additionally checks the signed-in staff is a super admin
+       (pagan-hub.js); anyone else is signed straight back out. -->
   <div id="loginGate" class="login-gate">
     <div class="login-box">
       <img class="login-logo" src="assets/quay1-logo-white.png" alt="Quay 1 International Realty" width="200">
-      <h2 class="login-title">Pagan Hub</h2>
-      <p class="login-sub">Private workspace. Sign in with your usual username &amp; PIN.</p>
+      <h2 class="login-title">Admin Dashboard</h2>
+      <p class="login-sub">Sign in with your usual username &amp; PIN.</p>
       <label class="visually-hidden" for="loginUser">Username</label>
       <input id="loginUser" class="login-user" type="text" autocomplete="username"
              autocapitalize="none" autocorrect="off" placeholder="username">
@@ -44,7 +44,7 @@
         <button class="key" data-d="0">0</button>
         <button class="key alt" data-clear aria-label="Clear PIN">Clear</button>
       </div>
-      <p class="login-foot">Private to Pagan.</p>
+      <p class="login-foot">Super admin access only.</p>
     </div>
   </div>
 
@@ -56,8 +56,8 @@
             <img class="brand-logo" src="assets/quay1-logo-white.png" alt="Quay 1 International Realty">
           </div>
           <div class="topbar-titles">
-            <h1>Pagan Hub</h1>
-            <p>Your private workspace</p>
+            <h1>Admin Dashboard</h1>
+            <p>Super admin workspace</p>
           </div>
         </div>
         <div class="topbar-right">
@@ -82,9 +82,7 @@
        layer both modules use, so it loads before them too. -->
   <script src="pagan-hub.js"></script>
   <script src="va-core.js"></script>
-  <script src="app.hubtoday.js"></script>
   <script src="app.datatracker.js"></script>
-  <script src="app.kfalloc.js"></script>
   <script src="app.vadashboard.js"></script>
   <script src="app.vasearches.js"></script>
 </body>
