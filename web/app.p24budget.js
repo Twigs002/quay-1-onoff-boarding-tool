@@ -24,6 +24,7 @@
     ['Dino', 'dino@quay1.co.za', 5500, 1100, 2], ['Nelio', 'nelio@quay1.co.za', 8000, 1600, 3],
     ['Storm', 'storm@quay1.co.za', 5500, 1100, 2], ['Jono', 'jonathan@quay1.co.za', 7250, 1450, 3],
     ['Gaelle', 'gaelle@quay1.co.za', 5500, 1100, 2],
+    ['Company', 'pagan@quay1.co.za', 0, 0, 0],   // Pagan-as-requestor (auto-captured P24 spend)
   ];
 
   let allocs = [], spend = [], month = monthKey(new Date());
@@ -43,7 +44,7 @@
 
       <div class="card">
         <div class="card-head" style="padding:16px 18px 0"><h3>By team — ${monthLabel(month)}</h3>
-          <button type="button" class="btn btn-ghost btn-sm" id="pbExport">Export CSV</button></div>
+          <span style="display:flex;gap:8px"><button type="button" class="btn btn-ghost btn-sm" id="pbSeedTop">Sync teams</button><button type="button" class="btn btn-ghost btn-sm" id="pbExport">Export CSV</button></span></div>
         <div class="tbl-wrap"><table class="tbl" id="pbTeams"></table></div>
       </div>
 
@@ -103,8 +104,11 @@
       return;
     }
     const body = allocs.map((r) => {
-      const sp = byTeam[r.team] || 0, alloc = Number(r.monthly_allocation || 0), left = alloc - sp;
-      const p = alloc ? Math.round((sp / alloc) * 100) : 0, o = sp > alloc;
+      const sp = byTeam[r.team] || 0, alloc = Number(r.monthly_allocation || 0);
+      if (alloc <= 0) {   // Company / no-budget bucket: show spend only, no cap/%.
+        return `<tr><td class="who">${H.esc(r.team)}</td><td class="muted">—</td><td>${R(sp)}</td><td class="muted">—</td><td class="muted">no cap</td></tr>`;
+      }
+      const left = alloc - sp, p = Math.round((sp / alloc) * 100), o = sp > alloc;
       return `<tr><td class="who">${H.esc(r.team)}</td><td>${R(alloc)}</td><td>${R(sp)}</td>
         <td class="${o ? '' : 'muted'}" style="${o ? 'color:var(--q-red);font-weight:700' : ''}">${R(left)}</td>
         <td><span class="sheet-rate"><span class="mini-track"><span style="width:${Math.min(100, p)}%;${o ? 'background:var(--q-red)' : ''}"></span></span>${p}%</span></td></tr>`;
@@ -182,6 +186,7 @@
   }
 
   function wire(wrap) {
+    const st = H.$('#pbSeedTop', wrap); if (st) st.addEventListener('click', () => seed(wrap, st));
     H.$('#pbExport', wrap).addEventListener('click', () => exportCsv(wrap));
     H.$('#pbPrev', wrap).addEventListener('click', () => shiftMonth(wrap, -1));
     H.$('#pbNext', wrap).addEventListener('click', () => shiftMonth(wrap, 1));
