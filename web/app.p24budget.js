@@ -86,7 +86,7 @@
     const totalSpent = spend.reduce((a, s) => a + Number(s.amount || 0), 0);
     const left = totalAlloc - totalSpent;
     const pct = totalAlloc ? Math.round((totalSpent / totalAlloc) * 100) : 0;
-    const over = allocs.filter((r) => (byTeam[r.team] || 0) > Number(r.monthly_allocation || 0)).length;
+    const over = allocs.filter((r) => Number(r.monthly_allocation || 0) > 0 && (byTeam[r.team] || 0) > Number(r.monthly_allocation || 0)).length;
     H.$('#pbStats', wrap).innerHTML =
       `<div class="kpi kpi-hero"><div class="kpi-label">Budget left</div><div class="hero-row"><span class="hero-num">${R(left)}</span></div><div class="kpi-sub">${R(totalSpent)} of ${R(totalAlloc)} spent · ${pct}%</div></div>`
       + `<div class="kpi"><div class="kpi-label">Monthly budget</div><div class="kpi-value">${R(totalAlloc)}</div><div class="kpi-sub">${allocs.length} teams</div></div>`
@@ -125,29 +125,6 @@
       <td class="actions"><button type="button" class="btn btn-ghost btn-sm" data-del="${H.esc(s.id)}">Delete</button></td></tr>`).join('');
     H.$('#pbSpend', wrap).innerHTML = head + `<tbody>${body}</tbody>`;
     H.$('#pbSpend', wrap).querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => delSpend(wrap, b)));
-  }
-
-  function fillTeamSelect(wrap) {
-    const names = allocs.map((a) => a.team).concat(['Admin', 'Pagan']);
-    H.$('#pbTeam', wrap).innerHTML = names.map((n) => `<option value="${H.esc(n)}">${H.esc(n)}</option>`).join('');
-  }
-
-  async function addSpend(wrap) {
-    const amount = parseFloat(H.$('#pbAmount', wrap).value);
-    if (!(amount > 0)) { H.toast('Amount needed', 'Enter the spend amount.', 'err'); return; }
-    const d = H.$('#pbDate', wrap).value || new Date().toISOString().slice(0, 10);
-    const row = { team: H.$('#pbTeam', wrap).value, amount, spent_on: d, month: d.slice(0, 7),
-      listing_ref: H.$('#pbRef', wrap).value.trim() || null, created_by: who() };
-    const btn = H.$('#pbAdd', wrap); btn.classList.add('loading'); btn.disabled = true;
-    try {
-      const { error } = await sb().from('p24_spend').insert(row);
-      if (error) throw new Error(error.message);
-      H.toast('Spend logged', `${R(amount)} · ${row.team}`, 'ok');
-      H.$('#pbAmount', wrap).value = ''; H.$('#pbRef', wrap).value = '';
-      if (row.month !== month) { month = row.month; H.$('#pbLabel', wrap).textContent = monthLabel(month); }
-      await load(wrap);
-    } catch (err) { H.toast('Could not log', err.message, 'err'); }
-    finally { btn.classList.remove('loading'); btn.disabled = false; }
   }
 
   async function delSpend(wrap, b) {
