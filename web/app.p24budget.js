@@ -27,7 +27,7 @@
     ['Company', 'pagan@quay1.co.za', 0, 0, 0],   // Pagan-as-requestor (auto-captured P24 spend)
   ];
 
-  let allocs = [], spend = [], month = monthKey(new Date());
+  let allocs = [], spend = [], allMonths = [], month = monthKey(new Date());
 
   function viewP24Budget(root) {
     const wrap = H.el(`<div class="stack hub-in">
@@ -49,6 +49,11 @@
       </div>
 
       <div class="card">
+        <div class="card-head" style="padding:16px 18px 0"><h3>By month</h3></div>
+        <div class="tbl-wrap"><table class="tbl" id="pbMonths"></table></div>
+      </div>
+
+      <div class="card">
         <div class="card-head" style="padding:16px 18px 0"><h3>Spends this month</h3></div>
         <div class="tbl-wrap"><table class="tbl" id="pbSpend"></table></div>
       </div>
@@ -63,13 +68,14 @@
     teams.innerHTML = `<tbody><tr><td><div class="skeleton"></div></td></tr></tbody>`;
     try {
       const c = sb();
-      const [a, s] = await Promise.all([
+      const [a, s, ms] = await Promise.all([
         c.from('p24_allocations').select('*').order('monthly_allocation', { ascending: false }),
         c.from('p24_spend').select('*').eq('month', month).order('spent_on', { ascending: false }),
+        c.from('p24_spend').select('month,amount'),
       ]);
       if (a.error) throw new Error(a.error.message);
       if (s.error) throw new Error(s.error.message);
-      allocs = a.data || []; spend = s.data || [];
+      allocs = a.data || []; spend = s.data || []; allMonths = ms.error ? [] : (ms.data || []);
     } catch (err) {
       const hint = /relation|does not exist|schema cache/i.test(err.message) ? ' Apply 0008_p24_budget.sql first.' : '';
       teams.innerHTML = `<tbody><tr><td><div class="state"><div class="state-title">Could not load P24 budget</div><div>${H.esc(err.message)}${H.esc(hint)}</div></div></td></tr></tbody>`;
@@ -93,7 +99,28 @@
       + `<div class="kpi searched"><div class="kpi-label">Spent</div><div class="kpi-value">${R(totalSpent)}</div><div class="kpi-sub">${spend.length} spends logged</div></div>`
       + `<div class="kpi ${over ? 'bad' : ''}"><div class="kpi-label">Over budget</div><div class="kpi-value">${over}</div><div class="kpi-sub">teams past allocation</div></div>`;
     renderTeams(wrap, byTeam);
+    renderMonths(wrap, totalAlloc);
     renderSpend(wrap);
+  }
+
+  function renderMonths(wrap, budget) {
+    const by = {};
+    allMonths.forEach((s) => { by[s.month] = (by[s.month] || 0) + Number(s.amount || 0); });
+    const months = Object.keys(by).sort().reverse();
+    const head = `<thead><tr><th>Month</th><th>Spent</th><th>Budget</th><th>Left</th><th>Used</th></tr></thead>`;
+    const host = H.$('#pbMonths', wrap);
+    if (!months.length) { host.innerHTML = head + `<tbody><tr><td colspan="5"><div class="state"><div class="state-title">No spend recorded yet</div></div></td></tr></tbody>`; return; }
+    const body = months.map((m) => {
+      const sp = by[m], left = budget - sp, p = budget ? Math.round((sp / budget) * 100) : 0, o = sp > budget;
+      return `<tr><td class="who"><a data-month="${m}" style="cursor:pointer;color:var(--q-blue)">${monthLabel(m)}</a></td>
+        <td>${R(sp)}</td><td class="muted">${R(budget)}</td>
+        <td class="${o ? '' : 'muted'}" style="${o ? 'color:var(--q-red);font-weight:700' : ''}">${R(left)}</td>
+        <td><span class="sheet-rate"><span class="mini-track"><span style="width:${Math.min(100, p)}%;${o ? 'background:var(--q-red)' : ''}"></span></span>${p}%</span></td></tr>`;
+    }).join('');
+    host.innerHTML = head + `<tbody>${body}</tbody>`;
+    host.querySelectorAll('[data-month]').forEach((a) => a.addEventListener('click', () => {
+      month = a.dataset.month; H.$('#pbLabel', wrap).textContent = monthLabel(month); load(wrap);
+    }));
   }
 
   function renderTeams(wrap, byTeam) {
