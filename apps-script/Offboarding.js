@@ -51,7 +51,7 @@ function requestOffboardNotify_(body, ctx) {
     (reason ? '\n\nReason: ' + reason : '') +
     '\n\nPlease action the offboarding when you have a moment.\n\nThanks,\nThe Quay 1 On/Offboarding Tool';
   try {
-    GmailApp.sendEmail(to.join(','), subject, plain, { name: 'Quay 1' });
+    sendMail_(to.join(','), subject, plain, { name: 'Quay 1' });
     logAudit_('offboard_notify_sent', { name: name, team: team, by: by });
     return { ok: true, to: to };
   } catch (err) {
@@ -190,7 +190,7 @@ function _alertOffboardError_(r) {
   try {
     var company = CFG.COMPANY.quay1;
     var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
-    GmailApp.createDraft(to, company.name + ' - offboarding FAILED (manual completion needed): ' +
+    draftMail_(to, company.name + ' - offboarding FAILED (manual completion needed): ' +
       (r.full_name || r.quay_email),
       'Offboarding for ' + (r.full_name || r.quay_email) + ' (' + r.quay_email + ') ended in ERROR ' +
       'and needs manual completion.\n\n' +
@@ -225,7 +225,7 @@ function _draftOffboardNotice_(oq) {
   try {
     var company = CFG.COMPANY.quay1;
     var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
-    GmailApp.createDraft(to, company.name + ' - offboarding scheduled: ' + (oq.full_name || oq.quay_email),
+    draftMail_(to, company.name + ' - offboarding scheduled: ' + (oq.full_name || oq.quay_email),
       'Offboarding scheduled for ' + (oq.full_name || oq.quay_email) + ' (' + oq.quay_email + ').\n' +
       'Fires at ' + oq.fire_at + '. Requested by ' + oq.requested_by + '.\n' +
       'Systems: ' + (oq.systems || []).join(', ') + '.\nThere is no cancel window.',

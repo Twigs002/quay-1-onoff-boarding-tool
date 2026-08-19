@@ -89,7 +89,7 @@ function draftSignatureEmail_(p) {
       '<p>Please let me know if there\'s an error or if you need any assistance!</p>' +
       '<p>Thanks,<br>The Quay 1 Team</p>' +
     '</div>';
-  GmailApp.createDraft(p.email, p.first + ' - Your Quay 1 Email Signature',
+  draftMail_(p.email, p.first + ' - Your Quay 1 Email Signature',
     'Please view the HTML version of this email to copy your signature.',
     { htmlBody: body, name: 'Quay 1' });
   return 'Signature draft created for ' + p.email + ' (banner: ' + p.bannerUrl + ')';

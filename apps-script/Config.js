@@ -56,6 +56,12 @@ var PROP = {
   // a full-status agent's FICA headshot is shared with it at enqueue so the worker can download the
   // photo and build the branded profile picture. Unset -> no share (worker falls back to the logo).
   WORKER_SA_EMAIL: 'WORKER_SA_EMAIL',
+  // Outbound sender identity. When set to a verified "Send mail as" alias on the account that RUNS
+  // this script (e.g. onboarding@quay1.co.za), ALL app mail goes out from that address as
+  // CFG.OUTBOUND_NAME with a matching Reply-To (see mailIdentity_ in Util.js). UNSET -> mail keeps
+  // sending from the executing account (current behaviour), so this is safe to deploy before the
+  // alias exists; arming is a one-line property change once the alias is verified in Gmail.
+  OUTBOUND_FROM: 'OUTBOUND_FROM',
 };
 
 /** Feature-flag Script-Property keys (read via flag_ / the named helpers below). */
@@ -76,6 +82,9 @@ var FLAG = {
 /** Non-secret constants shared across modules. */
 var CFG = {
   DOMAIN: 'quay1.co.za',
+
+  // Display name used for ALL outbound app mail once OUTBOUND_FROM (a send-as alias) is armed.
+  OUTBOUND_NAME: 'Onboarding Team',
 
   // Company-wide Google group EVERY onboarded broker is added to (on top of their team group).
   COMPANY_GROUP: 'champions@quay1.co.za',

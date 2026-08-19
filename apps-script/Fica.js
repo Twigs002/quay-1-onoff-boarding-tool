@@ -165,7 +165,7 @@ function ficaUpload_(body) {
   if (isEmail_(meta.email)) {
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
     try {
-      GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,
+      sendMail_(meta.email, company.name + ' - documents received, we are checking them - ' + name,
         'Hi ' + firstName_(name) + ',\n\nThank you for submitting your documents to ' +
         company.name + '. Our admin team is now checking them. Please look out for another ' +
         'email shortly confirming your induction day.\n\n' +

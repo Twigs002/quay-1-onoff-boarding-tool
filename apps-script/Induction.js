@@ -100,7 +100,7 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
       var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name +
         ' induction is booked for ' + fmtDate_(wed) + ' and ' + fmtDate_(thu) + '.' +
         loginText + hubText + propdataText + linksText + '\n\nWarm regards,\nThe ' + company.name + ' Team';
-      GmailApp.sendEmail(o.email,
+      sendMail_(o.email,
         'Your ' + company.name + ' Induction Packet' + (o.name ? ' - ' + o.name : ''),
         plain, {
           name: company.name,
@@ -112,7 +112,7 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
     // gets access and no one has to chase it. Suppressed when internal mail is off (ccEnabled_).
     if (hub && !hub.recorded && isEmail_(hub.username) && ccEnabled_()) {
       try {
-        GmailApp.sendEmail(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
+        sendMail_(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
           'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
           ' is about to start, but we do not have a HubSpot login recorded for your team. Please reply with ' +
           'your team HubSpot password and who the verification code should go to, as soon as possible.\n\n' +
@@ -124,7 +124,7 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
     // + Marthinus directly since there is no team email to send to. Same ccEnabled_() gate as above.
     if (!hub && ccEnabled_()) {
       try {
-        GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
+        sendMail_(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
           'Hi,\n\n' + (o.name || 'A new starter') + ' is joining team "' + (o.team || '(none)') +
           '", but that team name was not found in the "HubSpot Logins" tab, so their induction packet ' +
           'could not include a login. Please add or correct the row for this team.\n\n' +
@@ -239,7 +239,7 @@ function tuesdayDigest_() {
   var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
   var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
     ' booked, ' + buckets.unbooked.length + ' awaiting)';
-  GmailApp.sendEmail(to, subject,
+  sendMail_(to, subject,
     'Induction status. Booked this week: ' + buckets.dueThisWeek.length +
     '. Awaiting booking: ' + buckets.unbooked.length + '.',
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });

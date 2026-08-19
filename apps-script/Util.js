@@ -123,3 +123,32 @@ function _acquireLock_() {
     releaseLock: function () { _LOCK_DEPTH--; if (real) real.releaseLock(); },
   };
 }
+
+// --------------------------------------------------------------------------- outbound mail identity
+/**
+ * Apply the shared outbound-sender identity to a GmailApp options object. When the OUTBOUND_FROM
+ * Script Property is set (a verified "Send mail as" alias on the account that runs this script),
+ * ALL app mail goes out as CFG.OUTBOUND_NAME <that address> with a matching Reply-To. Left UNSET,
+ * the options are returned unchanged, so mail keeps sending from the executing account (current
+ * behaviour) - safe to deploy before the alias exists; arming is a one-line property change.
+ * Any Reply-To already on the options (e.g. the HubSpot login reply-to) is preserved.
+ */
+function mailIdentity_(opts) {
+  var o = opts || {};
+  var from = optProp_(PROP.OUTBOUND_FROM);
+  if (!from) return o;
+  o.from = from;
+  o.name = CFG.OUTBOUND_NAME || o.name;
+  if (!o.replyTo) o.replyTo = from;
+  return o;
+}
+
+/** GmailApp.sendEmail through the shared sender identity (mailIdentity_). Same signature. */
+function sendMail_(to, subject, body, opts) {
+  return GmailApp.sendEmail(to, subject, body, mailIdentity_(opts || {}));
+}
+
+/** GmailApp.createDraft through the shared sender identity (mailIdentity_). Same signature. */
+function draftMail_(to, subject, body, opts) {
+  return GmailApp.createDraft(to, subject, body, mailIdentity_(opts || {}));
+}

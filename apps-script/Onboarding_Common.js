@@ -68,7 +68,7 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
     };
     if (ccList) opts.cc = ccList;
     if (pdfFile) opts.attachments = [pdfFile.getAs('application/pdf')];
-    GmailApp.sendEmail(toEmail, subject, plain, opts);
+    sendMail_(toEmail, subject, plain, opts);
     return true;
   } catch (err) {
     logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
@@ -136,7 +136,7 @@ function _remindContract_(folderId, ctx) {
     var opts = { name: company.name, htmlBody: agreementEmailHtml_(company, first, ficaUrl) };
     if (ccEnabled_() && isEmail_(o.senior_email)) opts.cc = o.senior_email;
     if (pdf) opts.attachments = [pdf.getAs('application/pdf')];
-    GmailApp.sendEmail(o.email, subject, plain, opts);
+    sendMail_(o.email, subject, plain, opts);
     setOnboardingCell_(folderId, ONB_COL.reminded_at, nowIso_());
     logAudit_('contract_reminder_sent', { folderId: folderId, to: o.email, by: (ctx && ctx.email) || '' });
     return { ok: true, sent: true, to: o.email, reminded_at: nowIso_() };
