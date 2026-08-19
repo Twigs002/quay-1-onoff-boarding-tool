@@ -428,8 +428,14 @@
     if (name === 'candidate_email' || name === 'email' || name === 'senior_email') {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email address.';
     }
-    // id_number is left to a not-empty check only: SA IDs, foreign passports (all-digit or
-    // alphanumeric, varying lengths) are all valid here, so a strict format check falsely blocks people.
+    // id_number: a 13-digit SA ID, OR a foreign passport (letters+digits, varying lengths). We reject
+    // a value with no digit at all (a surname like "Wilkinson" mis-typed into this field) and any value
+    // with a space (e.g. a full name pasted in), while still allowing all-digit or alphanumeric passports.
+    if (name === 'id_number') {
+      if (/^\d{13}$/.test(v)) return '';                         // SA ID
+      if (/^[A-Za-z0-9]+$/.test(v) && /\d/.test(v)) return '';   // passport: alphanumeric, has a digit, no spaces
+      return 'Enter a 13-digit SA ID, or a passport number (letters and numbers, no spaces).';
+    }
     if (name === 'commission') {
       return /^\d{1,3}(\.\d+)?$/.test(v) && Number(v) <= 100 ? '' : 'Enter a number between 0 and 100.';
     }
