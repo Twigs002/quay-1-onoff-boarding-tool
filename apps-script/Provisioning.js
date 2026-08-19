@@ -356,7 +356,7 @@ function _sendInductionInvite_(folderId, o) {
     var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
     var link = inductionLink_(folderId);
     if (!link) logAudit_('induction_invite_no_link', { folderId: folderId });   // WEBAPP_URL unset -> dead link
-    GmailApp.sendEmail(o.email, 'Pick your ' + company.name + ' induction week' + (o.name ? ' - ' + o.name : ''),
+    sendMail_(o.email, 'Pick your ' + company.name + ' induction week' + (o.name ? ' - ' + o.name : ''),
       'Hi ' + firstName_(o.name) + ',\n\nWelcome aboard. Please pick your ' + company.name +
       ' induction week here: ' + link + '\n\nWarm regards,\nThe ' + company.name + ' Team',
       { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
@@ -379,7 +379,7 @@ function declineFica_(folderId, reason, ctx) {
   var ficaUrl = ficaLink_(folderId);
   var why = String(reason || '').trim();
   try {
-    GmailApp.sendEmail(o.email, 'Action needed on your ' + company.name + ' FICA documents',
+    sendMail_(o.email, 'Action needed on your ' + company.name + ' FICA documents',
       'Hi ' + firstName_(o.name) + ',\n\n' +
       'We were unable to accept your FICA documents' + (why ? ' for the following reason:\n\n' + why : '.') +
       '\n\nPlease re-submit using your personal, secure link: ' + ficaUrl +
@@ -422,12 +422,12 @@ function _requestManualAccount_(folderId, o, systems, spec) {
     if (DRY_RUN_()) {
       // Test mode: DRAFT only, and DELIBERATELY do NOT stamp spec.col - stamping would permanently
       // suppress the real send once armed (mirrors provisioned_at staying unstamped in test mode).
-      GmailApp.createDraft(recipients.join(','), subject, plain, opts);
+      draftMail_(recipients.join(','), subject, plain, opts);
       logAudit_(spec.system + '_request_drafted', { folderId: folderId, to: recipients.join(','), name: name });
       return false;
     }
     // Live (user asked for these to auto-send): send once and stamp so it never re-sends.
-    GmailApp.sendEmail(recipients.join(','), subject, plain, opts);
+    sendMail_(recipients.join(','), subject, plain, opts);
     setOnboardingCell_(folderId, spec.col, nowIso_());
     logAudit_(spec.system + '_request_sent', { folderId: folderId, to: recipients.join(','), name: name });
     return true;

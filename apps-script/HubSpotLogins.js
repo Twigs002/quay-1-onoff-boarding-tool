@@ -107,7 +107,7 @@ function previewHubSpotLoginRequests() {
   var rows = _hsLoginRows_();
   if (!rows.length) throw new Error('no teams found in "' + HS_LOGINS_TAB + '"');
   var t = rows[0];
-  GmailApp.createDraft(HS_PREVIEW_TO, _hsSubject_(t.team), _hsBody_(t.team, t.username),
+  draftMail_(HS_PREVIEW_TO, _hsSubject_(t.team), _hsBody_(t.team, t.username),
     { name: 'Quay 1', replyTo: HS_REPLY_TO });
   return 'Preview draft created for team "' + t.team + '". Check your Gmail Drafts before running sendHubSpotLoginRequests().';
 }
@@ -123,7 +123,7 @@ function sendHubSpotLoginRequests() {
   rows.forEach(function (t) {
     if (t.updated) { skipped++; return; }             // already responded / done
     if (!isEmail_(t.username)) { noEmail++; return; }  // no valid team email to send to
-    GmailApp.sendEmail(t.username, _hsSubject_(t.team), _hsBody_(t.team, t.username),
+    sendMail_(t.username, _hsSubject_(t.team), _hsBody_(t.team, t.username),
       { name: 'Quay 1', replyTo: HS_REPLY_TO });
     sent++;
   });
@@ -156,7 +156,7 @@ function sendHubSpotLoginReminders() {
   rows.forEach(function (t) {
     if (t.updated) { skipped++; return; }
     if (!isEmail_(t.username)) { noEmail++; return; }
-    GmailApp.sendEmail(t.username, 'Reminder: ' + _hsSubject_(t.team), _hsReminderBody_(t.team, t.username),
+    sendMail_(t.username, 'Reminder: ' + _hsSubject_(t.team), _hsReminderBody_(t.team, t.username),
       { name: 'Quay 1', replyTo: HS_REPLY_TO });
     sent++;
   });
@@ -172,7 +172,7 @@ function previewHubSpotLoginReminder() {
   var t = null;
   for (var i = 0; i < rows.length; i++) { if (!rows[i].updated && isEmail_(rows[i].username)) { t = rows[i]; break; } }
   if (!t) throw new Error('no outstanding teams to remind');
-  GmailApp.createDraft(HS_PREVIEW_TO, 'Reminder: ' + _hsSubject_(t.team),
+  draftMail_(HS_PREVIEW_TO, 'Reminder: ' + _hsSubject_(t.team),
     _hsReminderBody_(t.team, t.username), { name: 'Quay 1', replyTo: HS_REPLY_TO });
   return 'Reminder preview draft created for team "' + t.team + '". Check Gmail Drafts, then run sendHubSpotLoginReminders().';
 }
@@ -196,7 +196,7 @@ function quarterlyHubSpotLoginRefresh() {
   var sent = 0, noEmail = 0;
   rows.forEach(function (t) {
     if (!isEmail_(t.username)) { noEmail++; return; }
-    GmailApp.sendEmail(t.username, _hsSubject_(t.team, dl), _hsRefreshBody_(t.team, t.username, dl),
+    sendMail_(t.username, _hsSubject_(t.team, dl), _hsRefreshBody_(t.team, t.username, dl),
       { name: 'Quay 1', replyTo: HS_REPLY_TO });
     sent++;
   });
