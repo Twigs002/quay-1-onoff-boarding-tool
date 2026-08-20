@@ -98,7 +98,7 @@ a { color: var(--blue-800); }
   font-size: var(--hdr-title); font-weight: 800; margin: 0; letter-spacing: .04em;
   color: #fff; text-transform: uppercase;
 }
-.topbar-titles p { margin: 2px 0 0; font-size: 12.5px; color: rgba(255,255,255,.78); }
+.topbar-titles p { margin: 2px 0 0; font-size: 13px; font-weight: 500; color: rgba(255,255,255,.78); }
 .topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* ─── Tab nav ───────────────────────────────────────────────── */
