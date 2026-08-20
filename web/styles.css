@@ -360,6 +360,7 @@ body.pre-auth .main { display: none !important; }
   :root { --hdr-logo: 42px; --hdr-pad-y: 12px; --hdr-title: 16px; --hdr-h: 66px; }
   .form-grid { grid-template-columns: 1fr; }
   .topbar-titles p { display: none; }
+  .topbar-divider { display: none; }
   .offb-summary dl { grid-template-columns: 1fr; gap: 2px 0; }
   .offb-summary dt { margin-top: 8px; }
   /* Let the header shrink instead of pushing the sign-out button off-screen */
