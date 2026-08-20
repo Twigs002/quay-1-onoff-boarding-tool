@@ -240,3 +240,11 @@ function listOnboarding_(filterFn) {
   });
   return out;
 }
+
+/** True for existing staff imported from the old tracker. These carry status "Migrated (legacy)"
+ *  (written only by scripts/migrate_legacy_candidates.py) and are already onboarded, so they must
+ *  not appear in the active tool: the tracker/approval pipeline, the induction digest, or the teams
+ *  roster. Match is exact but trimmed + case-insensitive; the migration script is the sole writer. */
+function _isMigratedLegacy_(o) {
+  return String(o && o.status || '').trim().toLowerCase() === 'migrated (legacy)';
+}
