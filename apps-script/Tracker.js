@@ -83,6 +83,10 @@ var ONB_COL = {
   // acceptance of a Dialfire-entitled starter). Idempotency marker so re-accepting never re-sends.
   // Mirrors cma_requested_at. See _maybeRequestDialfire_.
   dialfire_requested_at: 54,
+  // When the shared quay-clock `staff` row was created for this hire (Clock.js), so they can clock
+  // in / hold app access on day one. Idempotency marker so a re-run never double-creates the row.
+  // Mirrors provisioned_at. See clockStaffCreate_.
+  clock_created_at: 55,
 };
 
 var ONB_HEADERS = [
@@ -98,6 +102,7 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
+  'Clock staff created at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

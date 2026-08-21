@@ -96,6 +96,7 @@ function _personFor_(folderId) {
   var o = readOnboardingByFolder_(folderId) || {};
   return {
     folderId: folderId,
+    entity: o.entity || 'quay1',            // clock designation mapping is entity-aware (Clock.js)
     full_name: o.name || '',
     first_name: firstName_(o.name || ''),
     last_name: lastName_(o.name || ''),
@@ -147,6 +148,20 @@ function provisionAll_(folderId, systems, ctx) {
   var browser = systems.filter(function (s) { return CFG.WORKER_SYSTEMS.indexOf(s) >= 0; });
   enqueueBrowserSystems_(person, browser, 'create');
   browser.forEach(function (s) { results[s] = 'pending'; });
+
+  // Create the shared quay-clock staff row so the hire can clock in / hold app access on day one
+  // (before this an admin hand-entered it). Runs for EVERY provisioned hire regardless of `systems`
+  // (it is not a provisionable "system" - it is the staff-directory identity). Fully non-fatal and
+  // idempotent: gated by clockSyncEnabled_() + DRY_RUN inside, it never throws and never blocks the
+  // rest of provisioning. Stamp clock_created_at only on a real (live) create so a re-run retries.
+  try {
+    var clock = clockStaffCreate_(person);
+    results.clock = clock.already ? 'exists' : (clock.dryRun ? 'pending' : (clock.ok ? 'done' : 'error'));
+    if (clock.ok && !clock.dryRun) setOnboardingCell_(person.folderId, ONB_COL.clock_created_at, nowIso_());
+  } catch (e) {
+    results.clock = 'error';
+    logAudit_('clock_staff_step_failed', { folderId: person.folderId, error: String(e) });
+  }
 
   // dryRun: in test mode the inline provisioners only log; nothing real was created, so callers must
   // NOT mark the row permanently provisioned (it must still run for real once armed). anyError: an
