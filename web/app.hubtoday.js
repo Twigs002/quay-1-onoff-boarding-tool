@@ -26,7 +26,7 @@
     const host = H.$('#ovList', wrap);
     const c = sb();
     const q = (build, fallback) => (c ? build(c).then((r) => (r && !r.error ? r : fallback)).catch(() => fallback) : Promise.resolve(fallback));
-    const cnt = (t, f) => q((cl) => { let x = cl.from(t); f && (x = f(x)); return x.select('*', { count: 'exact', head: true }); }, { count: null });
+    const cnt = (t, f) => q((cl) => { let x = cl.from(t).select('*', { count: 'exact', head: true }); f && (x = f(x)); return x; }, { count: null });
 
     const [va, djOpen, djAwait, allocs, spend, sig, leads, deals, stale] = await Promise.all([
       (VA && VA.counts) ? VA.counts('all').catch(() => null) : Promise.resolve(null),
