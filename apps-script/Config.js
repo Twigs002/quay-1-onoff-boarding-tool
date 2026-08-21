@@ -71,6 +71,10 @@ var FLAG = {
   // CMA/Dialfire approver requests, and the HubSpot team-login alert. Default ON. Set to 0 for a
   // clean end-to-end test so a run never emails real colleagues; candidate-facing mail still sends.
   CC_ENABLED: 'CC_ENABLED',
+  // Create the shared quay-clock `staff` row when a hire is provisioned so they can clock in / hold
+  // app access on day one (Clock.js). Independent of DRY_RUN so the clock write can be armed on its
+  // own, and gated by BOTH this flag and DRY_RUN. Default OFF (safe): Clock.js dry-logs until set.
+  CLOCK_SYNC_ENABLED: 'CLOCK_SYNC_ENABLED',
 };
 
 /** Non-secret constants shared across modules. */
@@ -243,6 +247,8 @@ function hubspotSeatEnabled_() { return flag_(FLAG.HUBSPOT_SEAT_ENABLED, false);
 function propdataLive_() { return flag_(FLAG.PROPDATA_LIVE, false); }
 /** HR-sheet mirror armed? Default OFF (safe) - Hr.js dry-logs until this is set. */
 function hrSyncEnabled_() { return flag_(FLAG.HR_SYNC_ENABLED, false); }
+/** quay-clock staff-row creation armed? Default OFF (safe) - Clock.js dry-logs until this is set. */
+function clockSyncEnabled_() { return flag_(FLAG.CLOCK_SYNC_ENABLED, false); }
 /** Internal-directed mail (CC/BCC + approver requests + HubSpot alert) allowed? Default ON. */
 function ccEnabled_() { return flag_(FLAG.CC_ENABLED, true); }
 /** Turn internal CC/BCC + approver/HubSpot emails OFF (for a clean test). Candidate mail still sends. */
