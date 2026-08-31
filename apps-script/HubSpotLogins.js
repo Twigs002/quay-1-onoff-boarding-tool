@@ -76,6 +76,13 @@ function _hsRefreshBody_(team, username, deadline) {
     'Thanks,\nThe Quay 1 Team';
 }
 
+/** A reply-by date ~7 days out, formatted like the hardcoded HS_DEADLINE ("Friday 5 September"), in
+ *  the script timezone. Used by the reminder sends so a follow-up never ships a stale past date. */
+function _hsDynamicDeadline_() {
+  return Utilities.formatDate(new Date(new Date().getTime() + 7 * 24 * 3600 * 1000),
+    Session.getScriptTimeZone(), 'EEEE d MMMM');
+}
+
 /**
  * One-off: add helper@quay1.co.za as an alias of claude@quay1.co.za so team replies to helper@ land
  * in the Claude-connected mailbox (for the auto sheet update). Run once from the editor by a Workspace
@@ -133,12 +140,14 @@ function sendHubSpotLoginRequests() {
   return msg;
 }
 
-/** Friendly-reminder wording for teams that have not yet responded. */
-function _hsReminderBody_(team, username) {
+/** Friendly-reminder wording for teams that have not yet responded. `deadline` defaults to the
+ *  hardcoded HS_DEADLINE for back-compat, but the senders below pass a dynamic (~1 week out) date so
+ *  a reminder can never ship a stale deadline. */
+function _hsReminderBody_(team, username, deadline) {
   return 'Hi ' + team + ' team,\n\n' +
     'Just a friendly reminder on this one - we have not yet had your HubSpot login details back.\n\n' +
     'We have your HubSpot username on file:\n  ' + (username || '(not on file)') + '\n\n' +
-    'When you have a moment, please reply by close of business on ' + HS_DEADLINE + ' with:\n' +
+    'When you have a moment, please reply by close of business on ' + (deadline || HS_DEADLINE) + ' with:\n' +
     '  1. Your HubSpot password\n' +
     '  2. Who the login / verification code should go to (name of the person who receives it)\n\n' +
     'This just helps us keep every team\'s HubSpot access properly accounted for. Thank you!\n\n' +
@@ -152,11 +161,12 @@ function _hsReminderBody_(team, username) {
  */
 function sendHubSpotLoginReminders() {
   var rows = _hsLoginRows_();
+  var dl = _hsDynamicDeadline_();
   var sent = 0, skipped = 0, noEmail = 0;
   rows.forEach(function (t) {
     if (t.updated) { skipped++; return; }
     if (!isEmail_(t.username)) { noEmail++; return; }
-    GmailApp.sendEmail(t.username, 'Reminder: ' + _hsSubject_(t.team), _hsReminderBody_(t.team, t.username),
+    GmailApp.sendEmail(t.username, 'Reminder: ' + _hsSubject_(t.team, dl), _hsReminderBody_(t.team, t.username, dl),
       { name: 'Quay 1', replyTo: HS_REPLY_TO });
     sent++;
   });
@@ -172,8 +182,9 @@ function previewHubSpotLoginReminder() {
   var t = null;
   for (var i = 0; i < rows.length; i++) { if (!rows[i].updated && isEmail_(rows[i].username)) { t = rows[i]; break; } }
   if (!t) throw new Error('no outstanding teams to remind');
-  GmailApp.createDraft(HS_PREVIEW_TO, 'Reminder: ' + _hsSubject_(t.team),
-    _hsReminderBody_(t.team, t.username), { name: 'Quay 1', replyTo: HS_REPLY_TO });
+  var dl = _hsDynamicDeadline_();
+  GmailApp.createDraft(HS_PREVIEW_TO, 'Reminder: ' + _hsSubject_(t.team, dl),
+    _hsReminderBody_(t.team, t.username, dl), { name: 'Quay 1', replyTo: HS_REPLY_TO });
   return 'Reminder preview draft created for team "' + t.team + '". Check Gmail Drafts, then run sendHubSpotLoginReminders().';
 }
 
