@@ -52,7 +52,7 @@ var HR_HEADERS = [
   'ID Received', 'Agreement Received', 'Ryan Greeff Signed', 'Welcome Email Sent',
   'Calender Check: BIRTHDAY', 'Calender Check: WORK ANNIVERSARY', 'Next of Kin Name',
   'Next of Kin Contact Number', 'Next of Kin Relationship', 'Next of Kin Email',
-  'FFC CERTIFICATE NUMBER', 'Team working',
+  'FFC CERTIFICATE NUMBER', 'Team working', 'FFC Status',
 ];
 
 /** The tracking tab carries one extra trailing status column so HR can see promotion state without
@@ -177,11 +177,43 @@ function _hrBuildRow_(o) {
     'Next of Kin Email': o.nok_email,
     'FFC CERTIFICATE NUMBER': o.ffc_number,
     'Team working': o.team,
+    // FFC status (full/candidate/none) - a Quay 1 concept only, so blank for Aqua contractors.
+    'FFC Status': (String(o.entity) === 'quay1' ? String(o.ffc_status || '') : ''),
   };
   return HR_HEADERS.map(function (h) { var v = map[h]; return v == null ? '' : String(v); });
 }
 
 // ---------------------------------------------------------------- tab + row helpers
+
+/**
+ * Editor one-off: add the "FFC Status" header column to the EXISTING live HR tabs so their layout
+ * matches the updated HR_HEADERS (auto-created tabs already get it). Adds it to the shared tracking
+ * tab and the Quay 1 destination tab only - FFC is a Quay 1 concept, so the Aqua tab is left alone.
+ * The tracking tab has a trailing "Tracking status" column sitting where FFC Status now goes, so we
+ * INSERT a column there to push it right (no data lost); the destination tab just gets the header
+ * appended. Idempotent - skips a tab that already has the header. Existing rows are NOT backfilled
+ * (they populate on their next sync); run from the editor after deploying the code. Gated by HR sync.
+ */
+function migrateHrAddFfcStatus() {
+  if (!hrSyncEnabled_()) { Logger.log('HR sync is OFF - not touching the HR sheet'); return 'HR sync OFF'; }
+  var ffcCol = HR_HEADERS.indexOf('FFC Status') + 1;
+  if (!ffcCol) { Logger.log('deploy the code first - FFC Status not in HR_HEADERS'); return 'FFC Status not in HR_HEADERS'; }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var out = [];
+  [HR_TAB.tracking, HR_TAB.quay1].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { out.push(name + ': tab not found'); return; }
+    if (String(sh.getRange(1, ffcCol).getValue()).trim() === 'FFC Status') { out.push(name + ': already has FFC Status'); return; }
+    if (sh.getMaxColumns() < ffcCol) sh.insertColumnsAfter(sh.getMaxColumns(), ffcCol - sh.getMaxColumns());
+    var occupant = String(sh.getRange(1, ffcCol).getValue()).trim();
+    if (occupant) { sh.insertColumnBefore(ffcCol); }   // preserve whatever is there (e.g. Tracking status)
+    sh.getRange(1, ffcCol).setValue('FFC Status').setFontWeight('bold');
+    out.push(name + ': FFC Status set at col ' + ffcCol + (occupant ? ' (inserted; preserved "' + occupant + '")' : ''));
+  });
+  logAudit_('hr_add_ffc_status', { result: out });
+  Logger.log(out.join('\n'));
+  return out.join(' | ');
+}
 
 /** Get a tab by name; create it (with the HR_HEADERS header row, + the tracking status column for
  *  the tracking tab) when missing and `createIfMissing`. Returns null if absent and not creating. */
