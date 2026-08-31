@@ -626,6 +626,36 @@ function fixAnneGroups() {
 }
 
 /**
+ * Editor one-off: re-queue Anne's failed PropData row with the correct surname. Her create was
+ * enqueued BEFORE fixAnneData, so the stored payload has last_name:"" - retryRow_ only flips the row
+ * to pending, it does not rebuild the payload, so a plain retry would create the profile with no
+ * surname. This patches last_name -> "Wilkinson" in the stored payload and sets status pending. Run it
+ * AFTER the worker (with the tolerant designation match) is redeployed. Safe to delete after use.
+ */
+function fixAnnePropdataPayload() {
+  var folderId = '17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo';
+  var t = _pqTab_();
+  var last = t.getLastRow();
+  if (last < 2) return 'queue empty';
+  var vals = t.getRange(2, 1, last - 1, PQ_HEADERS.length).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][PQ_COL.folderId]) === folderId && String(vals[i][PQ_COL.system]) === 'propdata') {
+      var row = i + 2;
+      var payload = {};
+      try { payload = JSON.parse(vals[i][PQ_COL.payload_json] || '{}'); } catch (e) { /* keep {} */ }
+      payload.last_name = 'Wilkinson';
+      t.getRange(row, PQ_COL.payload_json + 1).setNumberFormat('@').setValue(JSON.stringify(payload));
+      t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
+      logAudit_('fix_anne_propdata', { row: row, payload: payload });
+      Logger.log('Anne propdata row ' + row + ': last_name="Wilkinson", status -> pending');
+      return 'requeued row ' + row;
+    }
+  }
+  return 'no propdata row found for Anne';
+}
+
+/**
  * Editor one-off: fix Anne Wilkinson's misfiled record. At contract intake her name was split - "Anne"
  * landed in Name and her surname "Wilkinson" was dropped into the ID number field, so her real SA ID
  * was missing everywhere. This corrects, in order:

@@ -194,6 +194,24 @@ function _hrBuildRow_(o) {
  * appended. Idempotent - skips a tab that already has the header. Existing rows are NOT backfilled
  * (they populate on their next sync); run from the editor after deploying the code. Gated by HR sync.
  */
+/** Editor diagnostic: log row 1 (headers) of each HR tab with absolute column numbers, so we can see
+ *  the TRUE live layout vs HR_HEADERS. Read-only. Run from the editor and paste the log. */
+function dumpHrHeaders() {
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var out = [];
+  [HR_TAB.tracking, HR_TAB.quay1, HR_TAB.aqua].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { out.push(name + ': NOT FOUND'); return; }
+    var last = sh.getLastColumn();
+    var hdr = sh.getRange(1, 1, 1, last).getValues()[0];
+    var cells = hdr.map(function (h, i) { return (i + 1) + ':' + String(h == null ? '' : h).trim(); });
+    out.push('=== ' + name + ' (' + last + ' cols) ===\n' + cells.join('  |  '));
+  });
+  var msg = out.join('\n\n');
+  Logger.log(msg);
+  return msg;
+}
+
 function migrateHrAddFfcStatus() {
   if (!hrSyncEnabled_()) { Logger.log('HR sync is OFF - not touching the HR sheet'); return 'HR sync OFF'; }
   var ffcCol = HR_HEADERS.indexOf('FFC Status') + 1;
