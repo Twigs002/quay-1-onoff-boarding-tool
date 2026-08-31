@@ -248,3 +248,60 @@ function listOnboarding_(filterFn) {
 function _isMigratedLegacy_(o) {
   return String(o && o.status || '').trim().toLowerCase() === 'migrated (legacy)';
 }
+
+// ---------------------------------------------------------------- ID data-quality repair
+// Historical rows can carry a mangled id_number - most often a post-2000 SA ID (starts with 0)
+// whose leading zero was dropped when the cell held it as a number (13 -> 12 digits), or a value
+// with a stray space / text-force apostrophe. New writes go through _putOnb_ (text format), so this
+// is a one-off/occasional repair of legacy + hand-edited rows (incl. "Migrated (legacy)" imports).
+// The classify/repair logic is saIdRepair_ (Hr.js), guarded by BOTH the SA-ID checksum and a valid
+// decoded birthday so a coincidence is never "fixed". Run repairMangledIds() from the editor.
+
+/** Repair mangled id_number cells on the Onboarding tab (column C). Scans the raw column - including
+ *  migrated-legacy rows, the likeliest offenders - and rewrites repairable cells as text. Writes only
+ *  when `apply === true`; otherwise it previews (logs what it WOULD change). Returns a summary with a
+ *  `review` list of numeric values it could NOT confidently repair, for a human to check. */
+function repairOnboardingIds_(apply) {
+  var summary = { apply: apply === true, scanned: 0, repaired: 0, normalized: 0, review: [] };
+  var sh = _onbTab_();
+  var last = sh.getLastRow();
+  if (last < 2) return summary;
+  var col = ONB_COL.id_number;
+  var lock = _acquireLock_();
+  lock.waitLock(20000);
+  try {
+    var vals = sh.getRange(2, col, last - 1, 1).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      var raw = vals[i][0];
+      if (raw === '' || raw == null) continue;
+      summary.scanned++;
+      var r = saIdRepair_(raw);
+      if (r.action === 'repaired' || r.action === 'normalized') {
+        var rowNum = i + 2;
+        if (summary.apply) _putOnb_(sh, rowNum, col, r.value);
+        summary[r.action]++;
+        logAudit_('id_repair', { row: rowNum, from: String(raw), to: r.value, action: r.action, apply: summary.apply });
+      } else if (r.action === 'unfixable') {
+        summary.review.push({ row: i + 2, value: String(raw) });
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  logAudit_('id_repair_summary', summary);
+  return summary;
+}
+
+/**
+ * Editor entry point: repair mangled ID numbers on the Onboarding tab and (when HR sync is armed) the
+ * HR sheet's automated tabs. SAFE BY DEFAULT - call with no argument to PREVIEW (nothing is written,
+ * the intended changes are logged via logAudit_ and returned). Review the summary + audit log, then
+ * re-run as `repairMangledIds(true)` to apply. Kept off the global DRY_RUN flag on purpose, so fixing
+ * ID text never also arms account provisioning. Idempotent: an already-clean ID is left untouched.
+ */
+function repairMangledIds(apply) {
+  var out = { apply: apply === true, onboarding: repairOnboardingIds_(apply), hr: repairHrIds_(apply) };
+  Logger.log((out.apply ? 'ID repair APPLIED:\n' : 'ID repair PREVIEW (no writes - call repairMangledIds(true) to apply):\n') +
+    JSON.stringify(out, null, 2));
+  return out;
+}
