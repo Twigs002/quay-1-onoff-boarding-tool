@@ -84,8 +84,8 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
     if (!teamLogin) logAudit_('induction_hubspot_missing', { folderId: folderId, team: o.team, matched: !!hub, recorded: !!(hub && hub.recorded) });
     if (isEmail_(o.email)) {
       var loginText = cred ? ('\n\nYour first-login details:\nEmail: ' + (cred.email || '-') +
-        '\nTemporary password: ' + (cred.temp_password || '-') +
-        '\n(You will be asked to set your own password when you first sign in.)') : '';
+        '\nPassword: ' + (cred.temp_password || '-') +
+        '\n(On first sign-in, please switch on 2-step verification to keep your account secure.)') : '';
       // Never silently omit the HubSpot line - when it is not on record yet, say so instead of
       // leaving the candidate to wonder why it is missing.
       var hubText = teamLogin ? ('\n\nYour team HubSpot login:\nUsername: ' + (teamLogin.username || '-') +

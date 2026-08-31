@@ -532,30 +532,29 @@ function _pushGroup_(arr, email) {
   arr.push(email);
 }
 
-/** A random, per-user temporary password that meets Google's complexity rules (mixed case + digit +
- *  symbol, 14 chars). Not derived from any personal detail, so it cannot be guessed from a name.
- *  changePasswordAtNextLogin forces the broker to set their own on first sign-in. */
-function _randomTempPw_() {
-  var upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ', lower = 'abcdefghijkmnpqrstuvwxyz';
-  var digit = '23456789', sym = '!@#$%*?';
-  var all = upper + lower + digit + sym;
-  var pick = function (set) { return set.charAt(Math.floor(Math.random() * set.length)); };
-  var out = pick(upper) + pick(lower) + pick(digit) + pick(sym);  // guarantee one of each class
-  for (var i = 0; i < 10; i++) out += pick(all);
-  return out.split('').sort(function () { return Math.random() - 0.5; }).join('');
+/** The standard broker password: "G" + first name (capitalised) + "002", e.g. "GAnne002". Set as a
+ *  PERMANENT password per the team's standing convention - the broker keeps this and is NOT forced to
+ *  change it at first sign-in (googleCreate_ sets changePasswordAtNextLogin false). Non-alphanumerics
+ *  are stripped from the first name so the value always meets Google's password rules. */
+function _standardPw_(firstName) {
+  var f = String(firstName || 'User').replace(/[^A-Za-z0-9]/g, '');
+  if (!f) f = 'User';
+  f = f.charAt(0).toUpperCase() + f.slice(1).toLowerCase();
+  return 'G' + f + '002';
 }
 
 /**
  * Create the Google Workspace user. DRY_RUN (default): log + return the payload it WOULD send.
  * Live: Users.insert first@quay1.co.za (fallback first.surname@ on 409), then Members.insert
- * per group. Random per-user temp password (see _randomTempPw_), changePasswordAtNextLogin.
+ * per group. Standard "G<First>002" PERMANENT password (see _standardPw_); the broker is not forced
+ * to change it at first sign-in.
  */
 function googleCreate_(person) {
   var first = String(person.first_name || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
   var last = String(person.last_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   var primary = first + '@' + CFG.DOMAIN;
   var fallback = (first + (last ? '.' + last : '')) + '@' + CFG.DOMAIN;
-  var tempPw = _randomTempPw_();  // random per user; handed over via the private Credentials tab, never guessable
+  var tempPw = _standardPw_(person.first_name);  // standard "G<First>002" permanent password (team convention)
   var groups = _groupsForTeam_(person.team);
 
   if (DRY_RUN_()) {
@@ -568,7 +567,7 @@ function googleCreate_(person) {
     primaryEmail: primary,
     name: { givenName: person.first_name || 'User', familyName: person.last_name || (person.first_name || 'User') },
     password: tempPw,
-    changePasswordAtNextLogin: true,
+    changePasswordAtNextLogin: false,
   };
   try {
     AdminDirectory.Users.insert(body);

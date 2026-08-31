@@ -322,10 +322,10 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
     ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #DCE8F6;border-left:4px solid #3D5BA6;border-radius:12px;background:#F3F7FC"><tr><td style="padding:18px 20px">' +
         '<div style="font-size:12px;color:#5A6B85">Email &amp; Google Workspace</div>' +
         '<div style="font-size:16px;font-weight:700;color:#17223D;padding:2px 0 12px;font-family:\'SF Mono\',Menlo,Consolas,monospace">' + htmlEsc_(cred.email || '-') + '</div>' +
-        '<div style="font-size:12px;color:#5A6B85">Temporary password</div>' +
+        '<div style="font-size:12px;color:#5A6B85">Password</div>' +
         '<div style="font-size:16px;font-weight:700;color:#17223D;padding:2px 0 12px;font-family:\'SF Mono\',Menlo,Consolas,monospace">' + htmlEsc_(cred.temp_password || '-') + '</div>' +
         '<div style="margin-top:4px;background:#FFF6D6;border:1px solid #F2DC8E;border-radius:9px;padding:12px 14px;font-size:13px;line-height:1.55;color:#6B5A16">' +
-          '<b>On first sign-in</b> you will be asked to set your own password and switch on 2-step verification (2FA).<br><br>' +
+          '<b>On first sign-in</b>, please switch on 2-step verification (2FA) to keep your account secure.<br><br>' +
           '<b>To switch on 2-step verification:</b> sign in at <a href="https://mail.google.com" style="color:#3D5BA6">mail.google.com</a> with the details above, open <b>myaccount.google.com/security</b>, choose <b>2-Step Verification &rarr; Get started</b>, then follow the prompts to confirm a code sent to your phone. It takes about a minute and keeps your account secure.' +
         '</div>' +
       '</td></tr></table>'
