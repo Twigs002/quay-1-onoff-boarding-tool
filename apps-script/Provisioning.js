@@ -625,6 +625,63 @@ function fixAnneGroups() {
   return retryGroupsForFolder_('17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo');
 }
 
+/**
+ * Editor one-off: fix Anne Wilkinson's misfiled record. At contract intake her name was split - "Anne"
+ * landed in Name and her surname "Wilkinson" was dropped into the ID number field, so her real SA ID
+ * was missing everywhere. This corrects, in order:
+ *   1. the source Onboarding row (name -> "Anne Wilkinson", id_number -> her real 13-digit SA ID);
+ *   2. the existing HR rows IN PLACE (tracking + New Brokers) - matched on the old "Wilkinson" key so
+ *      no duplicates are created - rebuilt from the corrected data;
+ *   3. her Google account display name (givenName/familyName), which was built from the split name.
+ * Idempotent-ish: re-running after step 1 finds no "Wilkinson"-keyed HR row and just reports that.
+ * Safe to delete after use.
+ */
+function fixAnneData() {
+  var folderId = '17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo';
+  var NEW_NAME = 'Anne Wilkinson', FIRST = 'Anne', LAST = 'Wilkinson';
+  var NEW_ID = '5608150046089';   // verified: 13-digit, Luhn-valid, decodes to 1956-08-15
+  var OLD_ID = 'Wilkinson';       // the surname currently misfiled in the id_number field
+  var log = [];
+
+  // 1) Source of truth: the Onboarding tracker row.
+  setOnboardingCell_(folderId, ONB_COL.name, NEW_NAME);
+  setOnboardingCell_(folderId, ONB_COL.id_number, NEW_ID);
+  var o = readOnboardingByFolder_(folderId) || {};
+  log.push('Onboarding row: name="' + o.name + '", id_number="' + o.id_number + '"');
+
+  // 2) The already-written HR rows: overwrite in place, matched by the OLD misfiled key.
+  if (hrSyncEnabled_()) {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+    [HR_TAB.tracking, HR_TAB.quay1].forEach(function (tabName) {
+      var sh = ss.getSheetByName(tabName);
+      if (!sh) { log.push(tabName + ': tab not found'); return; }
+      var row = _hrFindRowByKey_(sh, keyCol, OLD_ID);
+      if (!row) { log.push(tabName + ': no row keyed "' + OLD_ID + '" (already fixed?)'); return; }
+      sh.getRange(row, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([_hrBuildRow_(o)]);
+      log.push(tabName + ': corrected row ' + row);
+    });
+  } else {
+    log.push('HR sync OFF - HR rows left untouched');
+  }
+
+  // 3) Google account display name (was built from the split name).
+  var cred = _credentialFor_(folderId);
+  var email = cred && cred.email ? String(cred.email).trim() : '';
+  if (isEmail_(email)) {
+    try {
+      AdminDirectory.Users.update({ name: { givenName: FIRST, familyName: LAST } }, email);
+      log.push('Google account ' + email + ' name -> ' + NEW_NAME);
+    } catch (e) { log.push('Google name update FAILED: ' + String(e)); }
+  } else {
+    log.push('no Google account email on file - skipped name update');
+  }
+
+  logAudit_('fix_anne_data', { folderId: folderId, log: log });
+  Logger.log(log.join('\n'));
+  return log.join(' | ');
+}
+
 // ---------------------------------------------------------------- Credentials ledger
 // A superuser-readable record of every Google account created (email + temp password), so ops can
 // hand a broker their login without digging through the Provisioning Queue's payload_json. It lives
