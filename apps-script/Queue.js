@@ -277,6 +277,9 @@ function retryRow_(queueId, ctx) {
       }
       var row = i + 2;
       t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      // Reset the attempts counter, else the worker sees it already at the cap (3) and immediately
+      // re-marks the row 'error' without running - so a retry of an EXHAUSTED row would never execute.
+      t.getRange(row, PQ_COL.attempts + 1).setValue(0);
       t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
       return { ok: true };
     }

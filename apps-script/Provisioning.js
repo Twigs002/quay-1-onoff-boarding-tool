@@ -646,6 +646,7 @@ function fixAnnePropdataPayload() {
       payload.last_name = 'Wilkinson';
       t.getRange(row, PQ_COL.payload_json + 1).setNumberFormat('@').setValue(JSON.stringify(payload));
       t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      t.getRange(row, PQ_COL.attempts + 1).setValue(0);   // clear the maxed-out (3/3) counter so it runs
       t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
       logAudit_('fix_anne_propdata', { row: row, payload: payload });
       Logger.log('Anne propdata row ' + row + ': last_name="Wilkinson", status -> pending');
