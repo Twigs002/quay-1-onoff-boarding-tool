@@ -324,7 +324,7 @@ badLink + bookedMsg +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - we look forward to welcoming you.</p>' +
 '</div><script>' +
-'var ENDPOINT=' + JSON.stringify(endpoint) + ';var FOLDER_ID=' + JSON.stringify(folderId) + ';' +
+'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
 'var KNOWN=' + (known ? 'true' : 'false') + ';' +
 'var form=document.getElementById("indForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
 'if(!KNOWN&&btn){btn.disabled=true;}' +

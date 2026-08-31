@@ -40,8 +40,11 @@ function emailShell_(company, kicker, innerHtml) {
 function agreementEmailHtml_(company, first, ficaUrl) {
   var B = CFG.BRAND;
   var ficaBtn = ficaUrl
-    ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
-        '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:12px 22px;font-size:14.5px;font-weight:700;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Submit my FICA documents</a>' +
+    ? '<div style="font-size:13.5px;font-weight:700;color:' + B.goldInk + ';margin:14px 0 10px;text-align:center">Ready? Click the button below to upload your documents securely.</div>' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px"><tr><td align="center">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:11px;background:' + B.gold + ';box-shadow:0 2px 6px rgba(0,0,0,0.14)">' +
+          '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:16px 40px;font-size:17px;font-weight:800;letter-spacing:.2px;color:' + B.goldInk + ';text-decoration:none;border-radius:11px">&#128228;&nbsp; Submit my FICA documents</a>' +
+        '</td></tr></table>' +
       '</td></tr></table>'
     : '';
   var inner =
@@ -70,6 +73,33 @@ function agreementEmailHtml_(company, first, ficaUrl) {
     '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
     '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
   return emailShell_(company, company.kicker, inner);
+}
+
+/** 12-hour FICA follow-up: nudge the person to upload via their secure link, not by email reply. */
+function ficaFollowUpHtml_(company, first, ficaUrl) {
+  var B = CFG.BRAND;
+  var ficaBtn = ficaUrl
+    ? '<div style="font-size:13.5px;font-weight:700;color:' + B.goldInk + ';margin:14px 0 10px;text-align:center">Click the button below to upload your documents securely.</div>' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px"><tr><td align="center">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:11px;background:' + B.gold + ';box-shadow:0 2px 6px rgba(0,0,0,0.14)">' +
+          '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:16px 40px;font-size:17px;font-weight:800;letter-spacing:.2px;color:' + B.goldInk + ';text-decoration:none;border-radius:11px">&#128228;&nbsp; Submit my FICA documents</a>' +
+        '</td></tr></table>' +
+      '</td></tr></table>'
+    : '';
+  var inner =
+    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">A quick follow-up on your FICA documents. To keep your information secure and to get your setup moving, please upload your documents using your personal, secure link.</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr>' +
+      '<td style="padding:14px 16px">' +
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">Please use the link, not an email reply</div>' +
+        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">Uploading through your secure link is the only way your documents reach our system. Documents sent as an email reply, or as attachments to this message, will not be picked up. If you have already uploaded via the link, thank you, and please ignore this note.</div>' +
+        ficaBtn +
+      '</td>' +
+    '</tr></table>' +
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">If anything is unclear or you need a hand, simply reply to this email and we will gladly help.</p>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'FICA documents required', inner);
 }
 
 /** FICA received acknowledgement email. */

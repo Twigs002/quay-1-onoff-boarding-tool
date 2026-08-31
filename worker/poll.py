@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import sys
 import json
+import fcntl
 
 import config
 import programs_mirror
@@ -30,6 +31,25 @@ from provisioners import REGISTRY
 from provisioners.base import Person, Skip
 
 log = get_logger("poll")
+
+# Held open for the whole process lifetime: closing the handle releases the flock, so it must outlive
+# main(). A module global keeps it referenced.
+_LOCK_FH = None
+
+
+def _acquire_singleton_lock() -> bool:
+    """Take an exclusive, non-blocking file lock so only ONE poll.py runs at a time. Overlapping runs
+    could both win the CAS on the same row (the compare-and-set narrows but does not close that window),
+    double-provisioning a candidate. Returns False if another instance already holds the lock."""
+    global _LOCK_FH
+    fh = open(config.LOCK_PATH, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    _LOCK_FH = fh
+    return True
 
 
 def _dispatch(qr: QueueRow) -> dict:
@@ -122,11 +142,24 @@ def main() -> int:
     if config.DRY_RUN:
         log.info("DRY_RUN is ON - no real account will be created or deactivated")
 
+    if not _acquire_singleton_lock():
+        log.info("another worker instance already holds %s - exiting", config.LOCK_PATH)
+        return 0
+
     try:
         bus = SheetBus()
     except Exception as e:                      # noqa: BLE001
         log.error("cannot open the sheet bus: %s", e)
         return 1
+
+    # Recover any row a previous run stranded in_progress (crash/kill/sleep) before claiming fresh work.
+    try:
+        stale = bus.reap_stale_in_progress(config.STALE_IN_PROGRESS_MIN)
+        if stale:
+            log.warning("reaped %d stale in_progress row(s) back to pending: %s",
+                        len(stale), [qr.queue_id for qr in stale])
+    except Exception as e:                      # noqa: BLE001 - reaping must never abort the pass
+        log.error("stale-in_progress reaper failed (continuing): %s", e)
 
     rows = bus.pending_provisioning()
     if config.MAX_ROWS_PER_PASS > 0:

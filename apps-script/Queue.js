@@ -338,6 +338,15 @@ function setOffboardStatus_(offbId, status, googleResult, workerResult) {
   }
 }
 
+/** Live status (H) for one OQ row, trimmed + lowercased; '' if the row is gone. Read fresh from the
+ *  sheet (not a snapshot) so an atomic scheduled -> firing claim can compare-and-set under a lock. */
+function offboardStatus_(offbId) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (!row) return '';
+  return String(t.getRange(row, OQ_COL.status + 1).getValue() || '').trim().toLowerCase();
+}
+
 /** Record the one-shot trigger id (K) for an OQ row. */
 function setOffboardTrigger_(offbId, triggerId) {
   var t = _oqTab_();

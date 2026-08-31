@@ -83,6 +83,11 @@ var ONB_COL = {
   // acceptance of a Dialfire-entitled starter). Idempotency marker so re-accepting never re-sends.
   // Mirrors cma_requested_at. See _maybeRequestDialfire_.
   dialfire_requested_at: 54,
+  // FICA follow-up nudge (appended, no shift): contract_emailed_at is stamped when the contract
+  // welcome email actually sends (_emailContract_); fica_followup_at is the idempotency marker for
+  // the automatic 12-hour "please submit via the secure link" nudge (ficaFollowUpSweep_). Empty
+  // until each fires. See Onboarding_Common.js.
+  contract_emailed_at: 55, fica_followup_at: 56,
 };
 
 var ONB_HEADERS = [
@@ -98,6 +103,7 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
+  'Contract emailed at', 'FICA follow-up at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by
