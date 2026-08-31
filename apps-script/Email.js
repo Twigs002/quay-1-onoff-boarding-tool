@@ -396,8 +396,8 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
       // Where
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #DCE8F6;border-radius:12px;background:#F5F8FD"><tr>' +
         '<td valign="middle" style="padding:15px 8px 15px 18px"><div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A96AE">Where</div>' +
-        '<div style="font-size:15px;font-weight:700;color:#17223D;padding-top:3px">&#128205; 277 Lower Main Road, Observatory, Cape Town</div></td>' +
-        '<td valign="middle" align="right" style="padding:15px 18px 15px 6px;white-space:nowrap"><a href="https://www.google.com/maps/dir/?api=1&destination=277+Lower+Main+Road,+Observatory,+Cape+Town" style="display:inline-block;text-decoration:none;background:#3D5BA6;color:#ffffff;font-size:13px;font-weight:700;padding:11px 16px;border-radius:9px">Get directions &nbsp;&rarr;</a></td></tr></table>' +
+        '<div style="font-size:15px;font-weight:700;color:#17223D;padding-top:3px">&#128205; 200 Main Rd, Claremont, Cape Town, 7708</div></td>' +
+        '<td valign="middle" align="right" style="padding:15px 18px 15px 6px;white-space:nowrap"><a href="https://www.google.com/maps/dir/?api=1&destination=200+Main+Rd,+Claremont,+Cape+Town,+7708" style="display:inline-block;text-decoration:none;background:#3D5BA6;color:#ffffff;font-size:13px;font-weight:700;padding:11px 16px;border-radius:9px">Get directions &nbsp;&rarr;</a></td></tr></table>' +
       // Holy grail
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #E1E9F5;border-radius:12px;background:#FBFCFF"><tr><td style="padding:15px 18px">' +
         '<div style="font-size:15px;font-weight:800;color:#17223D;margin:0 0 4px">Your first two weeks: the Holy Grail &#9875;</div>' +
