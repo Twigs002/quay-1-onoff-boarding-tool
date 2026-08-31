@@ -215,6 +215,9 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     setup[r.folderId] = s;
   });
   listOnboarding_().forEach(function (o) {
+    // Existing staff imported from the old tracker are already onboarded; keep them out of the
+    // active pipeline so they never appear in the tracker or surface as "ready to approve".
+    if (_isMigratedLegacy_(o)) return;
     var s = setup[o.folderId] || { incomplete: false, error: false };
     // Drop only when fully set up: provisioned AND no create row is still pending or errored.
     if (o.provisioned_at && !s.incomplete) return;

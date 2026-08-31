@@ -233,3 +233,95 @@ function saIdBirthday_(idNumber) {
   var p = function (n) { return (n < 10 ? '0' : '') + n; };
   return year + '-' + p(mm) + '-' + p(dd);
 }
+
+/** Luhn check over all 13 digits (the 13th is the check digit). SA IDs are Luhn-valid; this lets the
+ *  repair below distinguish a genuinely dropped leading zero from a coincidental short number. */
+function saIdChecksumOk_(id) {
+  var s = String(id || '');
+  if (!/^\d{13}$/.test(s)) return false;
+  var sum = 0, alt = false;
+  for (var i = s.length - 1; i >= 0; i--) {
+    var d = parseInt(s.charAt(i), 10);
+    if (alt) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+/**
+ * Classify + repair a stored ID/passport value WITHOUT touching a sheet (pure, so it is testable and
+ * reused by both the Onboarding and HR repair scans). Returns { value, action }:
+ *   'blank'      - empty; nothing to do.
+ *   'passport'   - contains a letter; a passport, left exactly as-is.
+ *   'ok'         - already a clean, checksum-valid 13-digit SA ID; no change.
+ *   'normalized' - a valid 13-digit SA ID that carried spaces / dashes / a leading text-force
+ *                  apostrophe; `value` is the cleaned 13 digits (safe to rewrite).
+ *   'repaired'   - fewer than 13 digits whose leading zero(s) were dropped by a numeric Sheet cell;
+ *                  `value` is the zero-restored 13-digit ID. Only returned when the restored ID is
+ *                  BOTH Luhn-valid AND decodes to a real birthday, so a coincidence cannot be "fixed".
+ *   'unfixable'  - numeric but no leading-zero padding yields a valid SA ID (13-digit bad checksum, or
+ *                  too short/garbled). Left untouched and surfaced for a human to check.
+ * Post-2000 SA IDs start with 0 (e.g. 06...), so a numeric cell silently drops that zero to 12 digits;
+ * a year-2000 ID (00...) can lose two. That is the mangling this restores.
+ */
+function saIdRepair_(raw) {
+  var s = String(raw == null ? '' : raw).trim();
+  if (!s) return { value: s, action: 'blank' };
+  var t = s.replace(/^'/, '').replace(/[\s.\-]/g, ''); // drop text-force apostrophe + separators
+  if (/[^0-9]/.test(t)) return { value: s, action: 'passport' };
+  if (/^\d{13}$/.test(t)) {
+    if (!saIdChecksumOk_(t)) return { value: s, action: 'unfixable' };
+    return { value: t, action: (t === s ? 'ok' : 'normalized') };
+  }
+  if (t.length >= 11 && t.length < 13) {
+    for (var pad = 1; pad <= 13 - t.length; pad++) {
+      var cand = '';
+      for (var z = 0; z < pad; z++) cand += '0';
+      cand += t;
+      if (saIdChecksumOk_(cand) && saIdBirthday_(cand)) return { value: cand, action: 'repaired' };
+    }
+  }
+  return { value: s, action: 'unfixable' };
+}
+
+/**
+ * Repair mangled Identification Number cells IN PLACE across the HR sheet's automated tabs (tracking +
+ * both destination tabs). In-place (same row, same key column), so it never desyncs a row keyed on the
+ * old value. Writes only when `apply === true` AND HR sync is armed (hrSyncEnabled_) - the same gate as
+ * every other HR write; otherwise it previews. Called by repairMangledIds(); returns a per-tab summary.
+ */
+function repairHrIds_(apply) {
+  var armed = apply === true && hrSyncEnabled_();
+  var summary = { apply: armed, tabs: {} };
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+  var ss;
+  try { ss = SpreadsheetApp.openById(hrSheetId_()); }
+  catch (e) { logAudit_('hr_id_repair_failed', { error: String(e) }); summary.error = String(e); return summary; }
+
+  Object.keys(HR_TAB).forEach(function (k) {
+    var name = HR_TAB[k];
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var t = { scanned: 0, repaired: 0, normalized: 0, review: [] };
+    summary.tabs[name] = t;
+    var last = sh.getLastRow();
+    if (last < 2) return;
+    var vals = sh.getRange(2, keyCol, last - 1, 1).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      var raw = vals[i][0];
+      if (raw === '' || raw == null) continue;
+      t.scanned++;
+      var r = saIdRepair_(raw);
+      if (r.action === 'repaired' || r.action === 'normalized') {
+        t[r.action]++;
+        if (armed) sh.getRange(i + 2, keyCol).setNumberFormat('@').setValue(r.value);
+        logAudit_('hr_id_repair', { tab: name, row: i + 2, from: String(raw), to: r.value, action: r.action, apply: armed });
+      } else if (r.action === 'unfixable') {
+        t.review.push({ row: i + 2, value: String(raw) });
+      }
+    }
+  });
+  logAudit_('hr_id_repair_summary', summary);
+  return summary;
+}

@@ -204,6 +204,7 @@ function _programsMergeOnboarding_(tree, cma, pd) {
   rows.forEach(function (o) {
     if (!o || !o.name || !o.team) return;             // need a name + a team to place them
     if (/declined/i.test(o.status || '')) return;     // dropped/rejected candidates are not on a roster
+    if (_isMigratedLegacy_(o)) return;                // existing staff from the old tracker: not new starters
     var found;
     try { found = ensureTeamForOnboard_(tree, o.team, o.senior_email); } catch (e) { found = null; }
     if (!found || !found.team) return;

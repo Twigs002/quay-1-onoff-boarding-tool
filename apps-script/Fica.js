@@ -107,8 +107,14 @@ function ficaUpload_(body) {
   }
 
   // Right-to-work gate: a candidate whose ID is not a 13-digit SA ID must attach a work permit.
+  // Trust the ID the candidate types on this form (idVal_) as the source of truth, not the value
+  // captured at contract creation (meta.id_number). The stored value can be silently broken - most
+  // often a post-2000 SA ID whose leading zero is lost when a Sheet cell holds it as a number, or a
+  // typo/space entered on the contract - which would otherwise reject a candidate who typed a perfect
+  // 13-digit ID. This mirrors the FICA page's client-side check, which already gates on the typed ID.
+  var effectiveId = idVal_ || meta.id_number;
   var hasPermit = prepared.some(function (p) { return p.label === 'PERMIT'; });
-  if (!isSaId_(meta.id_number) && !hasPermit) {
+  if (!isSaId_(effectiveId) && !hasPermit) {
     return { ok: false, error: 'a work permit document is required (your ID is not a 13-digit South African ID).' };
   }
 
@@ -135,7 +141,7 @@ function ficaUpload_(body) {
   // HR Information Sheet fields the candidate supplies here. Read the top-level machine key, falling
   // back to the human-readable detail label. Birthday auto-derives from a 13-digit SA ID when blank.
   var pick = function (key, label) { return String((body && body[key]) || d[label] || '').trim(); };
-  var birthday = pick('birthday', 'Birthday') || saIdBirthday_(meta.id_number);
+  var birthday = pick('birthday', 'Birthday') || saIdBirthday_(effectiveId);
 
   // Persist FFC status/number, the derived PropData profile type, and the HR fields onto the row.
   upsertOnboardingRow_({

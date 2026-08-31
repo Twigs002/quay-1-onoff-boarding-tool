@@ -230,7 +230,7 @@ function tuesdayDigest_() {
   var weekStart = _mondayOfThisWeek_();
   var weekEnd = _addDays_(weekStart, 6);
   var buckets = { dueThisWeek: [], unbooked: [] };
-  listOnboarding_(function (o) { return o.entity === 'quay1'; }).forEach(function (o) {
+  listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
     if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
     else if (!o.induction_wed && !o.induction_thu) buckets.unbooked.push(o);
