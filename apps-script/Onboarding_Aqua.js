@@ -25,6 +25,17 @@ function onboardAqua_(body, ctx) {
   var name = String(f.name || f.full_name || '').trim();
   var id = String(f.id_number || '').trim();
   if (!name || !id) return { ok: false, error: 'name and id_number are required' };
+  // Guard the ID field against a mis-entered name (see onboardQuay1_): a 13-digit SA ID or an
+  // alphanumeric passport both contain a digit; a pure word does not. Reject a 13-digit bad checksum.
+  var idClean = id.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9]+$/.test(idClean) || !/\d/.test(idClean)) {
+    return { ok: false, error: 'ID/passport number "' + id + '" looks like a name, not an ID. ' +
+      'Enter a 13-digit SA ID or a passport number (letters and digits, no spaces).' };
+  }
+  if (/^\d{13}$/.test(idClean) && !saIdChecksumOk_(idClean)) {
+    return { ok: false, error: 'That 13-digit SA ID fails its checksum - please re-check the number.' };
+  }
+  id = idClean; f.id_number = idClean;   // normalise both: `id` writes the row, f.id_number fills the doc
   if (!isEmail_(f.email)) return { ok: false, error: 'a valid contractor email is required' };
   var typeErr = _aquaValidateType_(f);
   if (typeErr) return { ok: false, error: typeErr };

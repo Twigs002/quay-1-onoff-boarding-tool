@@ -31,6 +31,19 @@ function onboardQuay1_(body, ctx) {
   var f = (body && body.fields) || body || {};
   var c = _quay1Fields_(f);
   if (!c.full_name || !c.id_number) return { ok: false, error: 'full_name and id_number are required' };
+  // Guard the ID field against a mis-entered NAME (a surname once landed here, leaving the real ID
+  // missing everywhere downstream). A valid entry is a 13-digit SA ID or an alphanumeric passport -
+  // both contain at least one digit; a pure word/name does not. Also strip spaces and reject a
+  // 13-digit value that fails the SA ID checksum (a likely typo). Passports keep their letters.
+  var idClean = c.id_number.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9]+$/.test(idClean) || !/\d/.test(idClean)) {
+    return { ok: false, error: 'ID/passport number "' + c.id_number + '" looks like a name, not an ID. ' +
+      'Enter a 13-digit SA ID or a passport number (letters and digits, no spaces).' };
+  }
+  if (/^\d{13}$/.test(idClean) && !saIdChecksumOk_(idClean)) {
+    return { ok: false, error: 'That 13-digit SA ID fails its checksum - please re-check the number.' };
+  }
+  c.id_number = idClean;
   if (!isEmail_(c.candidate_email)) return { ok: false, error: 'a valid candidate email is required' };
 
   var folder = _entityFolder_(prop_(PROP.QUAY1_PARENT_FOLDER, true), c.full_name, c.id_number);
