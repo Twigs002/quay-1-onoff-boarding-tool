@@ -589,6 +589,42 @@ function googleCreate_(person) {
   return { email: email, tempPw: tempPw, groups: groups };
 }
 
+/**
+ * Repair helper: (re)add an already-provisioned candidate to their Google groups (the company group +
+ * the derived team group), for cases where a group-add was silently skipped at provision time (e.g.
+ * the team group did not exist yet). Reads the account email from the Credentials tab. Idempotent -
+ * "already a member" is treated as success. NOTE: this can only ADD to groups that EXIST; creating a
+ * missing group needs the admin.directory.group scope (not granted), so a missing group is reported
+ * for you to create in admin.google.com, then re-run. Run from the editor. Returns a per-group summary.
+ */
+function retryGroupsForFolder_(folderId) {
+  var o = readOnboardingByFolder_(folderId) || {};
+  var cred = _credentialFor_(folderId);
+  var email = cred && cred.email ? String(cred.email).trim() : '';
+  if (!isEmail_(email)) { var m = 'No Google account email on file for ' + folderId + ' - was this person provisioned?'; Logger.log(m); return m; }
+  var groups = _groupsForTeam_(o.team);
+  var out = [];
+  groups.forEach(function (grp) {
+    try {
+      AdminDirectory.Members.insert({ email: email, role: 'MEMBER' }, grp);
+      out.push('ADDED ' + email + ' -> ' + grp);
+    } catch (e) {
+      var msg = String(e);
+      if (/member already exists|duplicate|409/i.test(msg)) { out.push('already in ' + grp); }
+      else if (/not\s*found|notFound|404|does not exist/i.test(msg)) { out.push('GROUP MISSING: ' + grp + ' - create it in admin.google.com, then re-run'); }
+      else { out.push('FAILED ' + grp + ': ' + msg); }
+    }
+  });
+  logAudit_('retry_groups', { folderId: folderId, email: email, team: o.team, result: out });
+  Logger.log(out.join('\n'));
+  return out.join(' | ');
+}
+
+/** Editor one-off: re-add Anne Wilkinson to her Google groups (Betties). Safe to delete after use. */
+function fixAnneGroups() {
+  return retryGroupsForFolder_('17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo');
+}
+
 // ---------------------------------------------------------------- Credentials ledger
 // A superuser-readable record of every Google account created (email + temp password), so ops can
 // hand a broker their login without digging through the Provisioning Queue's payload_json. It lives
