@@ -42,10 +42,69 @@ function bookInduction_(body) {
   var thu = _isoDate_(_addDays_(monday, 3));
   setInduction_(folderId, wed, thu);
 
-  // Send the induction packet (dates + logins) to the candidate. Never throws - dates are saved above.
-  _sendInductionPacket_(folderId, meta, wed, thu);
+  // On booking, send only the lightweight "induction confirmed" email (dates + venue, NO logins).
+  // The full packet WITH logins is sent on the induction Wednesday morning by inductionPacketSweep_.
+  // Re-booking a different week resets the marker so the packet re-targets the new Wednesday.
+  try { setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, ''); } catch (e) { /* non-fatal */ }
+  _sendInductionConfirmed_(folderId, meta, wed, thu);
 
   return { ok: true, wed: wed, thu: thu };
+}
+
+/**
+ * Send the lightweight "induction confirmed" email (dates + venue + what-to-bring, NO logins) that
+ * goes out the moment a candidate books. CC the senior broker (when internal mail is on). Wrapped so a
+ * send failure never breaks booking - the dates are already saved by the caller.
+ */
+function _sendInductionConfirmed_(folderId, o, wed, thu) {
+  o = o || {};
+  try {
+    if (!isEmail_(o.email)) return;
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name + ' induction is confirmed for ' +
+      fmtDate_(wed) + ' and ' + fmtDate_(thu) + ', 09:00 - 12:00 each morning.\n\n' +
+      'Where: ' + INDUCTION_VENUE.address + '.\n\n' +
+      'On the morning of your first day we will send a second email with your logins and everything ' +
+      'else you need.\n\nWarm regards,\nThe ' + company.name + ' Team';
+    GmailApp.sendEmail(o.email,
+      'Your ' + company.name + ' induction is confirmed' + (o.name ? ' - ' + o.name : ''),
+      plain, {
+        name: company.name,
+        htmlBody: inductionConfirmedHtml_(company, o, { wed: wed, thu: thu }),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
+      });
+    logAudit_('induction_confirmed_sent', { folderId: folderId, wed: wed, thu: thu });
+  } catch (e) {
+    logAudit_('induction_confirmed_failed', { folderId: folderId, error: String(e) });
+  }
+}
+
+/**
+ * Trigger target (daily ~06:00, Africa/Johannesburg): send the FULL induction packet (with logins) to
+ * every candidate whose induction Wednesday is TODAY and who has not already been sent it. Stamps
+ * induction_packet_sent_at so it fires once. This is what decouples logins from booking - booking only
+ * sends the "confirmed" email; the credentials land the morning of day 1. Installed by setupTriggers().
+ */
+function inductionPacketSweep_() {
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var sent = 0, skipped = 0;
+  listOnboarding_(function (o) {
+    return !_isMigratedLegacy_(o) &&
+      String(o.induction_wed || '').slice(0, 10) === today &&
+      !String(o.induction_packet_sent_at || '').trim();
+  }).forEach(function (o) {
+    var folderId = o.folderId;
+    try {
+      _sendInductionPacket_(folderId, o, o.induction_wed, o.induction_thu);
+      setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, nowIso_());
+      sent++;
+    } catch (e) {
+      skipped++;
+      logAudit_('induction_packet_sweep_failed', { folderId: folderId, error: String(e) });
+    }
+  });
+  logAudit_('induction_packet_sweep', { date: today, sent: sent, skipped: skipped });
+  return 'Induction packet sweep for ' + today + ': sent ' + sent + ', errors ' + skipped + '.';
 }
 
 /**

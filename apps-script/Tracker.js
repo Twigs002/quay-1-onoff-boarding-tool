@@ -88,6 +88,10 @@ var ONB_COL = {
   // the automatic 12-hour "please submit via the secure link" nudge (ficaFollowUpSweep_). Empty
   // until each fires. See Onboarding_Common.js.
   contract_emailed_at: 55, fica_followup_at: 56,
+  // The full induction packet (with logins) auto-sends at 06:00 on the induction Wednesday via
+  // inductionPacketSweep_ (Induction.js). This is the send-once idempotency marker; booking only sends
+  // the lightweight "induction confirmed" email now, not the logins. Empty until the packet fires.
+  induction_packet_sent_at: 57,
 };
 
 var ONB_HEADERS = [
@@ -103,7 +107,7 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
-  'Contract emailed at', 'FICA follow-up at',
+  'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

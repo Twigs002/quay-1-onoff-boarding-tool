@@ -275,6 +275,105 @@ function inductionInviteHtml_(company, first, bookUrl) {
 }
 
 /** Induction packet: welcome + induction dates + new Google login + what to bring. */
+/** The induction venue - SINGLE SOURCE OF TRUTH for the address, rendered by both the "induction
+ *  confirmed" email and the full packet. Update here only. */
+var INDUCTION_VENUE = {
+  address: '200 Main Rd, Claremont, Cape Town, 7708',
+  mapsQuery: '200+Main+Rd,+Claremont,+Cape+Town,+7708',
+};
+
+/** The "Where" address block (map pin + Get-directions button), shared by both induction emails. */
+function _inductionWhereBlock_() {
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #DCE8F6;border-radius:12px;background:#F5F8FD"><tr>' +
+    '<td valign="middle" style="padding:15px 8px 15px 18px"><div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A96AE">Where</div>' +
+    '<div style="font-size:15px;font-weight:700;color:#17223D;padding-top:3px">&#128205; ' + htmlEsc_(INDUCTION_VENUE.address) + '</div></td>' +
+    '<td valign="middle" align="right" style="padding:15px 18px 15px 6px;white-space:nowrap"><a href="https://www.google.com/maps/dir/?api=1&destination=' + INDUCTION_VENUE.mapsQuery + '" style="display:inline-block;text-decoration:none;background:#3D5BA6;color:#ffffff;font-size:13px;font-weight:700;padding:11px 16px;border-radius:9px">Get directions &nbsp;&rarr;</a></td></tr></table>';
+}
+
+/** One induction-morning card (calendar badge + agenda), shared by both induction emails. */
+function _inductionDayCardHtml_(iso, header, bullets) {
+  var DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var MONF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var mm = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  var badgeDow = '', badgeDay = '-', badgeMon = '', fullLine = '';
+  if (mm) {
+    var y = +mm[1], mo = +mm[2], d = +mm[3];
+    var dt = new Date(y, mo - 1, d);
+    badgeDow = DOW[dt.getDay()].slice(0, 3).toUpperCase();
+    badgeDay = String(d); badgeMon = MON[mo - 1];
+    fullLine = DOW[dt.getDay()] + ', ' + d + ' ' + MONF[mo - 1] + ' ' + y;
+  }
+  var lis = (bullets || []).map(function (b) {
+    return '<li style="position:relative;padding-left:16px;font-size:13px;line-height:1.45;color:#33415A;margin:0 0 5px;list-style:none"><span style="position:absolute;left:0;color:#3D5BA6;font-weight:700">&bull;</span>' + htmlEsc_(b) + '</li>';
+  }).join('');
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 12px;border:1px solid #DCE8F6;border-radius:12px;overflow:hidden;background:#EAF2FB"><tr>' +
+    '<td width="6" style="width:6px;background:#FDC503;font-size:0;line-height:0">&nbsp;</td>' +
+    '<td width="92" valign="middle" style="width:92px;padding:14px 6px;text-align:center;border-right:1px solid #D4E2F3">' +
+      '<div style="font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#3D5BA6">' + badgeDow + '</div>' +
+      '<div style="font-size:24px;font-weight:800;color:#1B2536;line-height:1.15">' + badgeDay + '</div>' +
+      '<div style="font-size:11px;font-weight:600;color:#5A6B85;text-transform:uppercase">' + badgeMon + '</div></td>' +
+    '<td valign="top" style="padding:14px 18px">' +
+      '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#3D5BA6;margin:0 0 3px">' + htmlEsc_(header) + '</div>' +
+      '<div style="font-size:13px;color:#5A6B85;margin:0 0 9px">' + htmlEsc_(fullLine) + ' &nbsp;|&nbsp; <b style="color:#1B2536">09:00 - 12:00</b></div>' +
+      '<ul style="margin:0;padding:0">' + lis + '</ul>' +
+    '</td></tr></table>';
+}
+
+/** Standard Day 1 / Day 2 agenda cards for the induction dates (same content in both emails). */
+function _inductionAgendaHtml_(wed, thu) {
+  return _inductionDayCardHtml_(wed, 'Day 1 - Getting Started (with Kat)', [
+    'An introduction to Quay 1: our culture, values, and how we operate',
+    'An introduction to Flow (our Broker App) and how you will use it day-to-day',
+    'An overview of our marketing resources, document systems, and training materials',
+    'Who to contact across the business, so you always know where to go for support',
+  ]) + _inductionDayCardHtml_(thu, 'Day 2 - Programs (with Pagan)', ['HubSpot', 'PropData', 'Flow', 'CMA']);
+}
+
+/**
+ * The "induction confirmed" email, sent the moment a candidate books their week (bookInduction_).
+ * Deliberately carries NO logins/credentials - dates, venue and what-to-bring only. The full packet
+ * (with logins) follows on the induction Wednesday morning (inductionPacketSweep_).
+ */
+function inductionConfirmedHtml_(company, o, induction) {
+  o = o || {}; induction = induction || {};
+  var first = firstName_(o.name || '') || 'there';
+  var team = o.team || '-';
+  var senior = o.senior_name || '-';
+  var sec = function (t) { return '<div style="font-size:12px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#3D5BA6;margin:22px 0 12px">' + htmlEsc_(t) + '</div>'; };
+  var check = function (txt) {
+    return '<tr><td width="28" valign="top" style="padding:2px 0 0"><div style="width:20px;height:20px;border-radius:50%;background:#3D5BA6;color:#ffffff;text-align:center;line-height:20px;font-size:12px;font-weight:700">&#10003;</div></td><td style="padding:1px 0 0 10px;font-size:14px;line-height:1.5;color:#1B2536">' + txt + '</td></tr>' +
+      '<tr><td colspan="2" style="height:10px;font-size:0;line-height:0">&nbsp;</td></tr>';
+  };
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#DCE7F5;margin:0;padding:0"><tr><td align="center" style="padding:26px 12px">' +
+    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:Montserrat,Arial,Helvetica,sans-serif">' +
+    '<tr><td style="background:#3D5BA6;padding:30px 40px 26px;text-align:center">' +
+      '<img src="https://twigs002.github.io/quay-hubspot/assets/quay1-logo-white.png" width="180" alt="' + htmlEsc_(company.name) + '" style="display:block;margin:0 auto 20px;width:180px;max-width:60%;height:auto">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#98C5ED;margin:0 0 8px">Induction confirmed</div>' +
+      '<div style="font-size:27px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:.5px;line-height:1.12">See you soon,<br>' + htmlEsc_(first) + '</div></td></tr>' +
+    '<tr><td style="padding:32px 40px 24px">' +
+      '<p style="margin:0 0 20px;font-size:15px;line-height:1.62;color:#5A6B85">Your induction is booked - here are the details. On the morning of your first day we will send a second email with your logins and everything else you need, so keep an eye on this inbox.</p>' +
+      sec('Your induction &middot; two mornings, 09:00 - 12:00') + _inductionAgendaHtml_(induction.wed, induction.thu) +
+      _inductionWhereBlock_() +
+      sec('Before your first day') +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EAF2FB;border:1px solid #DCE8F6;border-radius:14px"><tr><td style="padding:18px 20px">' +
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' +
+          check('Come with a charged laptop') +
+          check('Say hi to your senior broker, ' + htmlEsc_(senior)) +
+          check('Know your team: ' + htmlEsc_(team)) +
+          check('Bring a copy of your ID') +
+          check('A clear self-portrait for your email signature') +
+        '</table></td></tr></table>' +
+      '<p style="margin:22px 0 0;font-size:14px;line-height:1.6;color:#5A6B85;border-top:1px solid #E3E9F2;padding-top:20px">Any question at all, just reply to this email. We cannot wait to welcome you.</p>' +
+      '<p style="margin:22px 0 0;font-size:15px;color:#1B2536">Warmly,</p>' +
+      '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:#3D5BA6">The ' + htmlEsc_(company.name) + ' Team</p>' +
+    '</td></tr>' +
+    '<tr><td style="background:#2E4680;padding:24px 40px 26px;text-align:center">' +
+      '<div style="font-size:13px;color:#ffffff;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin:0 0 3px">' + htmlEsc_(company.name) + '</div>' +
+      '<div style="font-size:12px;color:#98C5ED;font-style:italic">Navigating Success</div></td></tr>' +
+    '</table></td></tr></table>';
+}
+
 function inductionPacketHtml_(company, o, induction, cred, hubspot) {
   o = o || {};
   induction = induction || {};
@@ -393,11 +492,8 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
       sec('Your Quay 1 logins') + loginPanel + hubPanel + propdataNote +
       // Induction
       sec('Your induction · two mornings, 09:00 - 12:00') + day1 + day2 +
-      // Where
-      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #DCE8F6;border-radius:12px;background:#F5F8FD"><tr>' +
-        '<td valign="middle" style="padding:15px 8px 15px 18px"><div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A96AE">Where</div>' +
-        '<div style="font-size:15px;font-weight:700;color:#17223D;padding-top:3px">&#128205; 200 Main Rd, Claremont, Cape Town, 7708</div></td>' +
-        '<td valign="middle" align="right" style="padding:15px 18px 15px 6px;white-space:nowrap"><a href="https://www.google.com/maps/dir/?api=1&destination=200+Main+Rd,+Claremont,+Cape+Town,+7708" style="display:inline-block;text-decoration:none;background:#3D5BA6;color:#ffffff;font-size:13px;font-weight:700;padding:11px 16px;border-radius:9px">Get directions &nbsp;&rarr;</a></td></tr></table>' +
+      // Where (shared block - single source of truth for the venue, see INDUCTION_VENUE)
+      _inductionWhereBlock_() +
       // Holy grail
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #E1E9F5;border-radius:12px;background:#FBFCFF"><tr><td style="padding:15px 18px">' +
         '<div style="font-size:15px;font-weight:800;color:#17223D;margin:0 0 4px">Your first two weeks: the Holy Grail &#9875;</div>' +

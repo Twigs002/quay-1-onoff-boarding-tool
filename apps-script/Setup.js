@@ -50,7 +50,7 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
     if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_' ||
-        fn === 'ficaFollowUpSweep_') ScriptApp.deleteTrigger(t);
+        fn === 'ficaFollowUpSweep_' || fn === 'inductionPacketSweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
@@ -64,8 +64,13 @@ function setupTriggers() {
   // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
   ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
     .everyHours(1).create();
+  // Induction packet: every morning ~06:00 (Africa/Johannesburg), send the full packet WITH logins to
+  // anyone whose induction Wednesday is that day. Booking itself only sends the "confirmed" email now.
+  ScriptApp.newTrigger('inductionPacketSweep_').timeBased()
+    .everyDays(1).atHour(6).create();
   return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime).';
+    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), ' +
+    'induction packet sweep (daily ~06:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */
