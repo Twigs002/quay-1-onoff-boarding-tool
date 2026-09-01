@@ -58,6 +58,8 @@ I_FIRST = "#input-field-first_name"
 I_LAST = "#input-field-last_name"
 I_EMAIL = "#input-field-email"
 I_CELL = "#input-cell_number"
+I_LOGIN_EMAIL = "#input-field-user"            # Profile > Login Email (the PDMS login, separate from Email)
+F_USER_GROUP = "#field-group"                  # Profile > User Group react-select
 FILE_PHOTO = "#image"                          # profile-picture <input type=file>, hidden
 
 # Fixed PDMS field values for a Quay 1 agent (see module docstring).
@@ -66,6 +68,7 @@ STATUS_ACTIVE = "Active"
 COUNTRY_CODE = "+27 (ZA)"
 DESIGNATION_FULL = "Non-Principal Property Practitioner"
 DESIGNATION_CANDIDATE = "-"  # a real, selectable PDMS option for non-full-FFC agents (actively picked)
+USER_GROUP = "Agent"  # Profile > User Group: every broker/specialist we create is a PDMS "Agent"
 
 _LOGIN_URL = "https://manage.propdata.net/login"
 
@@ -215,6 +218,11 @@ class PropDataProvisioner(Provisioner):
             # everyone else gets "-" - both go through the same _rs selection + verification.
             if designation:
                 self._rs(page, page.locator(F_DESIGNATION), designation, "Designation")
+
+            # Profile: without these the record saves but the agent has no login and no user group,
+            # so the profile is incomplete. Login Email = the same quay address; User Group = "Agent".
+            page.locator(I_LOGIN_EMAIL).fill(email)
+            self._rs(page, page.locator(F_USER_GROUP), USER_GROUP, "User Group")
 
             # Profile Picture (best-effort: PDMS's marketing/help popups can overlay the section).
             photo_added = self._try_photo(page, _resolve_photo(person))
