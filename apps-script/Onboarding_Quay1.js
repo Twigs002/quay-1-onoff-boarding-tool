@@ -212,6 +212,26 @@ function installNewContractTemplates() {
   return report.join(' | ');
 }
 
+/**
+ * Editor one-off: generate a Sale AND a Rental sample contract from the new templates into a throwaway
+ * Drive folder, so you can eyeball the merged result before it goes live. Logs the folder + both doc
+ * URLs. Delete the "Contract token test" folder afterwards. Run after installNewContractTemplates().
+ */
+function testGenerateNewContracts() {
+  var folder = DriveApp.createFolder('Contract token test');
+  var sale = genQuay1Contract_(folder, {
+    full_name: 'Test Candidate', id_number: '9001015800089', start_date: '2026-04-01',
+    senior_broker: 'Jane Senior', commission: '30', deal_type: 'sale', activity: 'sell_res_broker'
+  });
+  var rental = genQuay1Contract_(folder, {
+    full_name: 'Test Candidate', id_number: '9001015800089', start_date: '2026-04-01',
+    senior_broker: 'Jane Senior', commission: '75', deal_type: 'rental', activity: 'rent_res_broker'
+  });
+  var out = 'Test folder: ' + folder.getUrl() + '\nSale doc: ' + sale.url + '\nRental doc: ' + rental.url;
+  Logger.log(out);
+  return out;
+}
+
 /** Save any base64 files the candidate submitted at contract-gen time into the folder. */
 function _saveUploadedFiles_(folder, files) {
   (files || []).forEach(function (fl) {
