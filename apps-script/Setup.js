@@ -44,16 +44,21 @@ function setupHub() {
   return msg;
 }
 
-/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00)
- *  and the offboarding stuck-row reaper (every 15 min). */
+/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00 and
+ *  again ~14:00), the provisioning batch, the FICA/induction sweeps, and the offboarding reaper. */
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_' ||
-        fn === 'ficaFollowUpSweep_' || fn === 'inductionPacketSweep_') ScriptApp.deleteTrigger(t);
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayDigestAfternoon_' || fn === 'reapOffboarding_' ||
+        fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
+        fn === 'inductionPacketSweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
+  // Second send of the same induction digest at 14:00 (Africa/Johannesburg): after the booking cut-off
+  // and one hour before the 15:00 provisioning batch, so the team gets the final post-cutoff picture.
+  ScriptApp.newTrigger('tuesdayDigestAfternoon_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(14).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
   // Deferred provisioning: create accounts once a week for everyone approved (signed contract + FICA
@@ -69,8 +74,8 @@ function setupTriggers() {
   // anyone whose induction Wednesday is that day. Booking itself only sends the "confirmed" email now.
   ScriptApp.newTrigger('inductionPacketSweep_').timeBased()
     .everyDays(1).atHour(6).create();
-  return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), ' +
+  return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), offboarding reaper ' +
+    '(every 15 min), provisioning batch (Tuesday ~15:00), FICA follow-up sweep (hourly, daytime), ' +
     'induction packet sweep (daily ~06:00).';
 }
 

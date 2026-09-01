@@ -351,10 +351,25 @@ function progressReport_(folderId) {
 }
 
 /**
- * Tuesday digest of Quay1 candidates and their induction status. Auto-send is permitted for this
- * scoped onboarding-pipeline digest (SPEC section 6). Installed via setupTriggers() (Setup.js).
+ * Tuesday MORNING induction digest (~07:00). Trigger target - gives the team the day's picture so they
+ * can chase unbooked candidates before the booking cut-off. Subject unchanged from the original digest.
  */
-function tuesdayDigest_() {
+function tuesdayDigest_() { _sendInductionDigest_(''); }
+
+/**
+ * Tuesday 2pm induction digest (14:00). Trigger target - the SAME digest sent again right after the
+ * booking cut-off and one hour before the 15:00 provisioning batch, so the team has the final,
+ * post-cutoff picture of who booked. Subject is tagged "[2pm update]" so it is distinct in the inbox.
+ */
+function tuesdayDigestAfternoon_() { _sendInductionDigest_('2pm'); }
+
+/**
+ * Shared body for the Tuesday induction digest of Quay1 candidates and their induction status. `slot`
+ * tags the subject so the morning and afternoon sends are distinguishable ('' = morning, no tag;
+ * '2pm' = afternoon). Auto-send is permitted for this scoped onboarding-pipeline digest (SPEC section
+ * 6). Installed (both sends) via setupTriggers() (Setup.js).
+ */
+function _sendInductionDigest_(slot) {
   var weekStart = _mondayOfThisWeek_();
   var weekEnd = _addDays_(weekStart, 6);
   var buckets = { dueThisWeek: [], unbooked: [] };
@@ -365,7 +380,8 @@ function tuesdayDigest_() {
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
-  var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
+  var tag = (slot === '2pm') ? ' [2pm update]' : '';
+  var subject = company.name + ' - induction digest' + tag + ' (' + buckets.dueThisWeek.length +
     ' booked, ' + buckets.unbooked.length + ' awaiting)';
   GmailApp.sendEmail(to, subject,
     'Induction status. Booked this week: ' + buckets.dueThisWeek.length +
