@@ -389,6 +389,37 @@ function _sendInductionDigest_(slot) {
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
 }
 
+/**
+ * READ-ONLY diagnostic (editor Run): dumps how the digest currently classifies every Quay1 candidate,
+ * so we can see WHY someone booked is not showing as booked - raw induction_wed/thu, the parsed date,
+ * the current-week window, and which bucket they land in (or HIDDEN = has a date but outside this
+ * calendar week, or unparseable). Also prints the Aqua/Quay1 parent folder ids. Sends nothing.
+ */
+function debugDigest() {
+  var weekStart = _mondayOfThisWeek_();
+  var weekEnd = _addDays_(weekStart, 6);
+  var lines = ['now=' + new Date() + '  weekStart=' + _isoDate_(weekStart) + '  weekEnd=' + _isoDate_(weekEnd), ''];
+  listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
+    var wed = _asDate_(o.induction_wed);
+    var inWeek = wed && wed >= weekStart && wed <= weekEnd;
+    var bucket = inWeek ? 'BOOKED_THIS_WEEK'
+      : (!o.induction_wed && !o.induction_thu) ? 'AWAITING'
+      : 'HIDDEN(has date but not this calendar week / unparseable)';
+    lines.push([(o.name || '(no name)'),
+      'wed=' + JSON.stringify(o.induction_wed || ''),
+      'thu=' + JSON.stringify(o.induction_thu || ''),
+      'parsedWed=' + (wed ? _isoDate_(wed) : 'null'),
+      'approved=' + (o.approved_at ? 'Y' : 'n'),
+      'status=' + (o.status || ''),
+      '=> ' + bucket].join('  |  '));
+  });
+  lines.push('', 'AQUA_PARENT_FOLDER=' + (optProp_(PROP.AQUA_PARENT_FOLDER) || '(unset)'),
+    'QUAY1_PARENT_FOLDER=' + (optProp_(PROP.QUAY1_PARENT_FOLDER) || '(unset)'));
+  var s = lines.join('\n');
+  Logger.log(s);
+  return s;
+}
+
 // ---------------------------------------------------------------- candidate booking page
 
 /** Serve the branded candidate induction-booking page (doGet ?i=<folderId>). Token-less: the
