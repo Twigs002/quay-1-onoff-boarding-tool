@@ -176,6 +176,42 @@ function brokerActivityLabel_(code) {
   return hit ? hit.label : '';
 }
 
+/**
+ * Editor one-off: turn the two new IGCISA agreement Google Docs (Sale + Rental, in the Contracts
+ * folder) into fill-in templates by inserting the merge tokens genQuay1Contract_ expects, then point
+ * the Sale/Rental template Script Properties at them. Verifies each token actually landed and reports
+ * anything MISSING (a missed token would leave a hardcoded value in every generated contract, so check
+ * the log). {{BROKER_ACTIVITY}} is intentionally NOT inserted - the Sale/Rental split already carries
+ * the right activity clause; the token just no-ops. Run once, then confirm with a test contract.
+ */
+function installNewContractTemplates() {
+  var SALE = '1_zlJd5RvrihhjjXLv7imcS6cI-l4DLNH9BYhjMezZEc';
+  var RENTAL = '18NnUzMO2btImBcUpcTKW9_Hmb4gLeNSrD8VPV-7K1Nc';
+  var report = [];
+  var esc = function (s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+  var tokenize = function (label, docId, seniorName, effectiveDate, commissionPct) {
+    var doc = DocumentApp.openById(docId);
+    var b = doc.getBody();
+    b.replaceText('Name:\\s*_+', 'Name:  {{FULL_NAME}}');
+    b.replaceText('ID\\s+_{5,}', 'ID {{ID_NUMBER}}');
+    b.replaceText(esc(effectiveDate), '{{START_DATE}}');
+    b.replaceText('account of ' + esc(seniorName), 'account of {{SENIOR_BROKER}}');
+    b.replaceText('entitled to ' + esc(commissionPct) + '%', 'entitled to {{COMMISSION}}%');
+    var missing = ['FULL_NAME', 'ID_NUMBER', 'START_DATE', 'SENIOR_BROKER', 'COMMISSION'].filter(function (t) {
+      return !b.findText('\\{\\{' + t + '\\}\\}');
+    });
+    doc.saveAndClose();
+    report.push(label + ': ' + (missing.length ? 'MISSING -> ' + missing.join(', ') : 'all 5 tokens placed'));
+  };
+  tokenize('Sale', SALE, 'Justin Nortier', '21 March 2026', '25');
+  tokenize('Rental', RENTAL, 'Daniel Wentzel', '18 February 2026', '80');
+  _scriptProps_().setProperty(PROP.QUAY1_TEMPLATE_SALE, SALE);
+  _scriptProps_().setProperty(PROP.QUAY1_TEMPLATE_RENTAL, RENTAL);
+  report.push('QUAY1_TEMPLATE_SALE -> ' + SALE, 'QUAY1_TEMPLATE_RENTAL -> ' + RENTAL);
+  Logger.log(report.join('\n'));
+  return report.join(' | ');
+}
+
 /** Save any base64 files the candidate submitted at contract-gen time into the folder. */
 function _saveUploadedFiles_(folder, files) {
   (files || []).forEach(function (fl) {
