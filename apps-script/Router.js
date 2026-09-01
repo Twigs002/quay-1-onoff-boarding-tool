@@ -85,6 +85,7 @@ function dispatch_(kind, body, ctx) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
     case 'approve': return _approveDispatch_(body, ctx);
+    case 'edit_onboarding': return editOnboarding_(body, ctx);
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);

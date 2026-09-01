@@ -226,7 +226,7 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     if (!Array.isArray(sys)) {
       sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
-    out.push({
+    var item = {
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       status: o.status || '',
       docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
@@ -238,7 +238,16 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,
-    });
+    };
+    // Admin-only: the editable core fields, so the Admin Check "Edit" form can pre-fill current values.
+    // Gated behind isAdmin so PII (email / ID) is not exposed to a non-admin onboarder's status read.
+    if (isAdmin) {
+      item.edit = {
+        name: o.name || '', email: o.email || '', id_number: o.id_number || '', contact: o.contact || '',
+        team: o.team || '', senior_name: o.senior_name || '', senior_email: o.senior_email || '',
+      };
+    }
+    out.push(item);
   });
   return out;
 }

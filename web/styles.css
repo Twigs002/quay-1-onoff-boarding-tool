@@ -576,3 +576,14 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
      targets so they are easy to hit. */
   .pipe-actions .btn { flex: 1 1 auto; }
 }
+
+/* Admin Check inline "Edit" form (app.admincheck.js): correct a candidate's core details in place.
+   Two columns on desktop, single column on narrow screens; reuses .field for the inputs. */
+.ac-edit { background: var(--card-2); }
+.ac-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin: 10px 0 12px; }
+.ac-edit-grid .field { margin: 0; }
+.ac-edit-actions { display: flex; gap: 8px; }
+@media (max-width: 560px) {
+  .ac-edit-grid { grid-template-columns: 1fr; }
+  .ac-edit-actions .btn { flex: 1 1 auto; }
+}

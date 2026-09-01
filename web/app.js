@@ -24,6 +24,7 @@
     onboardQuay1: 'onboard_quay1',
     onboardAqua: 'onboard_aqua',
     approve: 'approve',
+    editOnboarding: 'edit_onboarding',
     remind: 'remind',
     resendPacket: 'resend_packet',
     status: 'status',
