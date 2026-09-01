@@ -79,6 +79,7 @@ function hrTrackingUpsert_(folderId) {
   var target = _hrFindRowByKey_(sh, keyCol, o.id_number);
   if (!target) target = Math.max(sh.getLastRow() + 1, 2);
   sh.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  sh.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
   try { setOnboardingCell_(folderId, ONB_COL.hr_tracking_at, nowIso_()); } catch (e) { /* non-fatal */ }
   return { ok: true, row: target };
@@ -108,6 +109,7 @@ function hrPromote_(folderId) {
   var existing = _hrFindRowByKey_(dest, keyCol, o.id_number);
   var target = existing || Math.max(dest.getLastRow() + 1, 2);
   dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
   try {
@@ -181,6 +183,47 @@ function _hrBuildRow_(o) {
     'FFC Status': (String(o.entity) === 'quay1' ? String(o.ffc_status || '') : ''),
   };
   return HR_HEADERS.map(function (h) { var v = map[h]; return v == null ? '' : String(v); });
+}
+
+/** Rich-text value for the "Name & Surname" cell (column A): the person's name as a clickable
+ *  hyperlink to their onboarding Drive folder (contract + FICA docs). Falls back to plain name text
+ *  when the folder id is missing or unreadable. Applied AFTER the bulk row write, since setValues
+ *  cannot carry a link. */
+function _hrNameRich_(o) {
+  var name = String((o && o.name) || '').trim() || 'Unnamed';
+  var url = '';
+  try { if (o && o.folderId) url = DriveApp.getFolderById(o.folderId).getUrl(); } catch (e) { url = ''; }
+  var b = SpreadsheetApp.newRichTextValue().setText(name);
+  if (url) b.setLinkUrl(url);
+  return b.build();
+}
+
+/**
+ * Editor one-off: backfill the column-A name hyperlink onto existing HR rows (tracking + both
+ * destination tabs). For every onboarding row it finds the matching HR row by Identification Number
+ * and rewrites the name cell as a link to that person's folder. New/re-synced rows already get it;
+ * this is for rows written before the link existed. Gated by HR sync. Safe to re-run.
+ */
+function backfillHrNameLinks_() {
+  if (!hrSyncEnabled_()) { Logger.log('HR sync OFF - not touching the HR sheet'); return 'HR sync OFF'; }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+  var out = {};
+  Object.keys(HR_TAB).forEach(function (k) { out[HR_TAB[k]] = 0; });
+  var rowsById = {};
+  listOnboarding_().forEach(function (o) { if (o.id_number) rowsById[String(o.id_number).trim()] = o; });
+  Object.keys(HR_TAB).forEach(function (k) {
+    var name = HR_TAB[k], sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var keys = sh.getRange(2, keyCol, sh.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      var o = rowsById[String(keys[i][0]).trim()];
+      if (o) { sh.getRange(i + 2, 1).setRichTextValue(_hrNameRich_(o)); out[name]++; }
+    }
+  });
+  logAudit_('hr_name_links_backfill', out);
+  Logger.log(JSON.stringify(out, null, 2));
+  return JSON.stringify(out);
 }
 
 // ---------------------------------------------------------------- tab + row helpers
