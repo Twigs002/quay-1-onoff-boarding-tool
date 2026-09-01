@@ -96,6 +96,10 @@ var ONB_COL = {
   // moment the candidate picks their induction week). Idempotency marker so the team is chased once,
   // not again when the packet later sends. See _alertTeamHubspotMissing_ (Induction.js).
   hubspot_team_alerted_at: 58,
+  // JSON array of the Google Calendar event ids created for this candidate's two induction mornings
+  // (see _syncInductionCalendar_). Stored so a re-booking can delete the old events before creating
+  // the new ones, rather than leaving stale duplicates. Empty until a week is booked.
+  induction_calendar_ids: 59,
 };
 
 var ONB_HEADERS = [
@@ -112,6 +116,7 @@ var ONB_HEADERS = [
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
   'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at', 'HubSpot team alerted at',
+  'Induction calendar ids',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

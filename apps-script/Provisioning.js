@@ -228,11 +228,12 @@ function _docsReady_(o) {
   return !!(o && o.fica_contract && o.fica_id && o.fica_poa && o.fica_bank);
 }
 
-/** Ready to provision = docs are in AND an admin has clicked "Approve & set up" (approved_at stamped).
- *  This is the ONE guard between an onboarded candidate and real account creation. A wrong-but-signed
- *  contract still cannot mint accounts until a human has reviewed and approved it. */
+/** Ready to provision = docs are in, an admin has approved (approved_at stamped), AND the candidate
+ *  has BOOKED an induction week (induction_wed set). Accounts are only created for someone who has
+ *  committed to a week, so the logins are ready in time for that induction. This is the guard between
+ *  an onboarded candidate and real account creation - the Tuesday 15:00 batch reads it. */
 function _provisionReady_(o) {
-  return !!(o && _docsReady_(o) && o.approved_at);
+  return !!(o && _docsReady_(o) && o.approved_at && (o.induction_wed || o.induction_thu));
 }
 
 /**
@@ -509,7 +510,7 @@ function _pushGroup_(arr, email) {
   arr.push(email);
 }
 
-/** The standard broker password: "G" + first name (capitalised) + "002", e.g. "GAnne002". Set as a
+/** The standard broker password: "G" + first name (capitalised) + "@002", e.g. "GAnne@002". Set as a
  *  PERMANENT password per the team's standing convention - the broker keeps this and is NOT forced to
  *  change it at first sign-in (googleCreate_ sets changePasswordAtNextLogin false). Non-alphanumerics
  *  are stripped from the first name so the value always meets Google's password rules. */
@@ -517,7 +518,7 @@ function _standardPw_(firstName) {
   var f = String(firstName || 'User').replace(/[^A-Za-z0-9]/g, '');
   if (!f) f = 'User';
   f = f.charAt(0).toUpperCase() + f.slice(1).toLowerCase();
-  return 'G' + f + '002';
+  return 'G' + f + '@002';
 }
 
 /**

@@ -50,6 +50,9 @@ function bookInduction_(body) {
   // Chase the team's HubSpot login NOW if it is not on record, so there is time to get it before the
   // packet (with logins) lands on the induction morning. Idempotent + gated inside.
   _alertTeamHubspotMissing_(folderId, meta);
+  // Put the two induction mornings on the calendar (candidate + Kat + Pagan), refreshing any from a
+  // previous booking. Non-fatal.
+  _syncInductionCalendar_(folderId, meta, wed, thu);
 
   return { ok: true, wed: wed, thu: thu };
 }
@@ -210,6 +213,55 @@ function _alertTeamHubspotMissing_(folderId, o) {
   } catch (err) {
     logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(err) });
   }
+}
+
+/**
+ * Put the candidate's two induction mornings (Wed + Thu, 09:00-12:00) on the calendar and invite the
+ * candidate + Kat, with Pagan as organiser (the script runs as the deploying user, so the events land
+ * on that calendar). Called on booking. A re-booking first deletes the events from the previous
+ * booking (their ids are stored in induction_calendar_ids) so no stale duplicates are left. The venue
+ * comes from the single-source INDUCTION_VENUE constant. Never throws into the caller.
+ */
+function _syncInductionCalendar_(folderId, o, wed, thu) {
+  o = o || {};
+  try {
+    var cal = CalendarApp.getDefaultCalendar();
+    var prior = safeJsonParse_(o.induction_calendar_ids, null);   // delete any previous booking's events
+    if (Array.isArray(prior)) {
+      prior.forEach(function (id) { try { var ev = cal.getEventById(id); if (ev) ev.deleteEvent(); } catch (e) { /* already gone */ } });
+    }
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var guests = ['kat@quay1.co.za'];                              // Pagan is organiser; Kat is invited to all
+    if (isEmail_(o.email)) guests.push(o.email);                   // the candidate, for their booked week
+    var name = o.name || 'New starter';
+    var venue = (typeof INDUCTION_VENUE !== 'undefined') ? INDUCTION_VENUE.address : '';
+    var ids = [];
+    [['Day 1', wed], ['Day 2', thu]].forEach(function (pair) {
+      var m = String(pair[1] || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return;
+      var start = new Date(+m[1], +m[2] - 1, +m[3], 9, 0, 0);
+      var end = new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0);
+      var ev = cal.createEvent(company.name + ' Induction ' + pair[0] + ' - ' + name, start, end, {
+        description: company.name + ' induction (' + pair[0] + ') for ' + name + '. 09:00 - 12:00.',
+        location: venue, guests: guests.join(','), sendInvites: true,
+      });
+      ids.push(ev.getId());
+    });
+    setOnboardingCell_(folderId, ONB_COL.induction_calendar_ids, JSON.stringify(ids));
+    logAudit_('induction_calendar_synced', { folderId: folderId, events: ids.length });
+  } catch (err) {
+    logAudit_('induction_calendar_failed', { folderId: folderId, error: String(err) });
+  }
+}
+
+/** Editor one-off: run once after deploy to grant the newly-added Calendar permission (adding the
+ *  scope means the deploying user must re-authorise before the booking flow can create events). Just
+ *  touches the calendar to trigger the consent prompt. Safe to delete after. */
+function authorizeCalendar() {
+  var cal = CalendarApp.getDefaultCalendar();
+  var msg = 'Calendar authorised: ' + cal.getName();
+  Logger.log(msg);
+  return msg;
 }
 
 /** Candidate-page lookup for the induction booking status (doGet ?i=<folderId>). */
