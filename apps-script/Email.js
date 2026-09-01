@@ -274,6 +274,30 @@ function inductionInviteHtml_(company, first, bookUrl) {
   return emailShell_(company, 'Documents approved', inner);
 }
 
+/** Aqua welcome + new Google login. Aqua has no induction, so this is how an Aqua contractor receives
+ *  their credentials once provisioned. Mirrors the invite styling; the login sits in a highlighted card. */
+function aquaWelcomeHtml_(company, first, cred) {
+  var B = CFG.BRAND;
+  var row = function (label, value) {
+    return '<tr><td style="padding:2px 10px 2px 0;font-size:13px;color:' + B.muted + '">' + htmlEsc_(label) +
+      '</td><td style="padding:2px 0;font-size:14px;font-weight:700;color:' + B.navyDark + '">' + htmlEsc_(value || '-') + '</td></tr>';
+  };
+  var loginCard =
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#FFF6D6;border:1px solid #F0DFA0;border-radius:10px"><tr><td style="padding:14px 16px">' +
+      '<div style="font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:' + B.goldInk + ';margin:0 0 8px">Your Google login</div>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0">' + row('Email', cred && cred.email) + row('Password', cred && cred.temp_password) + '</table>' +
+    '</td></tr></table>';
+  var inner =
+    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Welcome to ' + htmlEsc_(company.full) +
+      '. Your Google account is ready - your sign-in details are below.</p>' +
+    loginCard +
+    '<p style="margin:0 0 20px;font-size:13.5px;line-height:1.6;color:' + B.muted + '">On first sign-in, please switch on 2-step verification to keep your account secure.</p>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'Welcome', inner);
+}
+
 /** Induction packet: welcome + induction dates + new Google login + what to bring. */
 /** The induction venue - SINGLE SOURCE OF TRUTH for the address, rendered by both the "induction
  *  confirmed" email and the full packet. Update here only. */

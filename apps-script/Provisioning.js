@@ -228,12 +228,16 @@ function _docsReady_(o) {
   return !!(o && o.fica_contract && o.fica_id && o.fica_poa && o.fica_bank);
 }
 
-/** Ready to provision = docs are in, an admin has approved (approved_at stamped), AND the candidate
- *  has BOOKED an induction week (induction_wed set). Accounts are only created for someone who has
- *  committed to a week, so the logins are ready in time for that induction. This is the guard between
- *  an onboarded candidate and real account creation - the Tuesday 15:00 batch reads it. */
+/** Ready to provision = docs are in and an admin has approved (approved_at stamped). For Quay 1 there
+ *  is one more gate: the candidate must have BOOKED an induction week (induction_wed/thu), so the
+ *  logins are ready in time for that induction. Aqua has NO induction step, so that gate does not apply
+ *  to it - docs + approval is enough (Aqua's login is delivered by a welcome email at provision time,
+ *  see _sendAquaWelcome_). This is the guard between an onboarded candidate and real account creation -
+ *  the Tuesday 15:00 batch reads it. */
 function _provisionReady_(o) {
-  return !!(o && _docsReady_(o) && o.approved_at && (o.induction_wed || o.induction_thu));
+  if (!o || !_docsReady_(o) || !o.approved_at) return false;
+  if (String(o.entity) === 'aqua') return true;
+  return !!(o.induction_wed || o.induction_thu);
 }
 
 /**
@@ -265,7 +269,10 @@ function provisionReadyBatch_() {
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
       // Induction invite is NOT sent here - it goes out on approval now (approveAndProvision_), well
-      // before this Tuesday batch, so the candidate can pick a week early.
+      // before this Tuesday batch, so the candidate can pick a week early. Quay 1 gets its login in the
+      // induction packet; Aqua has no induction, so deliver Aqua's login now, once, as we stamp
+      // provisioned_at (the provisioned_at guard above stops this row re-provisioning, so it sends once).
+      if (String(o.entity) === 'aqua') _sendAquaWelcome_(o.folderId, o);
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
       _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       out.provisioned.push(o.folderId);
@@ -312,9 +319,14 @@ function approveAndProvision_(folderId, ctx) {
     setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
     setOnboardingStatus_(folderId, 'Approved');
     logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
-    _sendInductionInvite_(folderId, o);   // pick-your-week invite goes out on approval, not on provisioning
+    // Induction is a Quay 1 step only. Quay 1 gets the "pick your week" invite now; Aqua has no
+    // induction, so approval just marks it ready and the Tuesday batch creates + emails the login.
+    var isAqua = String(o.entity) === 'aqua';
+    if (!isAqua) _sendInductionInvite_(folderId, o);
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy,
-      message: 'Approved and induction invite sent. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
+      message: isAqua
+        ? 'Approved. Accounts are created in the next scheduled setup batch (Tuesday 15:00) and the login is emailed then.'
+        : 'Approved and induction invite sent. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
   } finally {
     lock.releaseLock();
   }
@@ -340,6 +352,31 @@ function _sendInductionInvite_(folderId, o) {
       { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
   } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * Aqua contractors have no induction, so their new Google login is delivered by this welcome email,
+ * sent once the moment the batch provisions them (Quay 1 gets its login in the induction packet
+ * instead). Reads the created account from the restricted Credentials tab. Wrapped so a send failure
+ * never breaks the batch. Auto-send is permitted for this scoped onboarding-pipeline step.
+ */
+function _sendAquaWelcome_(folderId, o) {
+  o = o || {};
+  try {
+    if (!isEmail_(o.email)) { logAudit_('aqua_welcome_skipped_no_email', { folderId: folderId }); return; }
+    var cred = _credentialFor_(folderId);
+    if (!cred) { logAudit_('aqua_welcome_no_credential', { folderId: folderId }); return; }
+    var company = CFG.COMPANY.aqua;
+    var plain = 'Hi ' + firstName_(o.name) + ',\n\nWelcome to ' + company.full +
+      '. Your Google account is ready.\n\nEmail: ' + (cred.email || '-') +
+      '\nPassword: ' + (cred.temp_password || '-') +
+      '\n(On first sign-in, please switch on 2-step verification to keep your account secure.)' +
+      '\n\nWarm regards,\nThe ' + company.name + ' Team';
+    GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + ' - your login' + (o.name ? ' - ' + o.name : ''),
+      plain, { name: company.name,
+        htmlBody: aquaWelcomeHtml_(company, firstName_(o.name), cred),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+  } catch (err) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(err) }); }
 }
 
 /**
