@@ -92,6 +92,10 @@ var ONB_COL = {
   // inductionPacketSweep_ (Induction.js). This is the send-once idempotency marker; booking only sends
   // the lightweight "induction confirmed" email now, not the logins. Empty until the packet fires.
   induction_packet_sent_at: 57,
+  // When we emailed the team that their HubSpot login is missing for a booked starter (fired the
+  // moment the candidate picks their induction week). Idempotency marker so the team is chased once,
+  // not again when the packet later sends. See _alertTeamHubspotMissing_ (Induction.js).
+  hubspot_team_alerted_at: 58,
 };
 
 var ONB_HEADERS = [
@@ -107,7 +111,7 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
-  'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at',
+  'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at', 'HubSpot team alerted at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

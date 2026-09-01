@@ -47,6 +47,9 @@ function bookInduction_(body) {
   // Re-booking a different week resets the marker so the packet re-targets the new Wednesday.
   try { setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, ''); } catch (e) { /* non-fatal */ }
   _sendInductionConfirmed_(folderId, meta, wed, thu);
+  // Chase the team's HubSpot login NOW if it is not on record, so there is time to get it before the
+  // packet (with logins) lands on the induction morning. Idempotent + gated inside.
+  _alertTeamHubspotMissing_(folderId, meta);
 
   return { ok: true, wed: wed, thu: thu };
 }
@@ -167,31 +170,45 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
     }
-    // Team HubSpot login NOT on record -> alert the team (CC Sheldon + Marthinus) so the new hire
-    // gets access and no one has to chase it. Suppressed when internal mail is off (ccEnabled_).
-    if (hub && !hub.recorded && isEmail_(hub.username) && ccEnabled_()) {
-      try {
-        GmailApp.sendEmail(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
-          'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
-          ' is about to start, but we do not have a HubSpot login recorded for your team. Please reply with ' +
-          'your team HubSpot password and who the verification code should go to, as soon as possible.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name, cc: CFG.CMA_APPROVERS.join(',') });
-      } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
-    }
-    // Team name not found AT ALL in "HubSpot Logins" (no row to chase a password on) - this is a data
-    // mismatch, not a missing password, so it needs an ops fix rather than a team chase. Alert Sheldon
-    // + Marthinus directly since there is no team email to send to. Same ccEnabled_() gate as above.
-    if (!hub && ccEnabled_()) {
-      try {
-        GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
-          'Hi,\n\n' + (o.name || 'A new starter') + ' is joining team "' + (o.team || '(none)') +
-          '", but that team name was not found in the "HubSpot Logins" tab, so their induction packet ' +
-          'could not include a login. Please add or correct the row for this team.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name });
-      } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
-    }
+    // Safety net: if the team login is still not on record by packet time, chase it (idempotent - it
+    // was normally already chased the moment the candidate booked, see bookInduction_).
+    _alertTeamHubspotMissing_(folderId, o);
   } catch (err) {
     logAudit_('induction_packet_failed', { folderId: folderId, error: String(err) });
+  }
+}
+
+/**
+ * Chase a booked starter's missing team HubSpot login. Fired the moment they pick their induction week
+ * (bookInduction_) so there's time to get the login before the packet lands, with the packet as a
+ * safety-net caller. Idempotent via the hubspot_team_alerted_at marker (chase once). ccEnabled_ gates
+ * it. Two cases: the team is listed but has no password -> email the team (cc ops); the team is not in
+ * the "HubSpot Logins" tab at all -> email ops to fix the data. Never throws into the caller.
+ */
+function _alertTeamHubspotMissing_(folderId, o) {
+  o = o || {};
+  try {
+    if (o.hubspot_team_alerted_at) return;         // already chased once
+    if (!ccEnabled_()) return;                      // internal mail off
+    var hub = _teamHubspotLogin_(o.team);
+    if (hub && hub.recorded) return;                // login is on file - nothing to chase
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    if (hub && isEmail_(hub.username)) {
+      GmailApp.sendEmail(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
+        'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
+        ' has just booked their induction, but we do not have a HubSpot login recorded for your team. ' +
+        'Please reply with your team HubSpot password and who the verification code should go to, as soon ' +
+        'as possible.\n\nThanks,\nThe ' + company.name + ' Team', { name: company.name, cc: CFG.CMA_APPROVERS.join(',') });
+    } else {
+      GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
+        'Hi,\n\n' + (o.name || 'A new starter') + ' has booked induction for team "' + (o.team || '(none)') +
+        '", but that team name was not found in the "HubSpot Logins" tab, so we cannot include a login. ' +
+        'Please add or correct the row for this team.\n\nThanks,\nThe ' + company.name + ' Team', { name: company.name });
+    }
+    try { setOnboardingCell_(folderId, ONB_COL.hubspot_team_alerted_at, nowIso_()); } catch (e) { /* non-fatal */ }
+    logAudit_('hubspot_team_alerted', { folderId: folderId, team: o.team, matched: !!hub });
+  } catch (err) {
+    logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(err) });
   }
 }
 

@@ -263,7 +263,8 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
-      _sendInductionInvite_(o.folderId, o);   // same one-time invite as the interactive accept path
+      // Induction invite is NOT sent here - it goes out on approval now (approveAndProvision_), well
+      // before this Tuesday batch, so the candidate can pick a week early.
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
       _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       out.provisioned.push(o.folderId);
@@ -294,22 +295,25 @@ function approveAndProvision_(folderId, ctx) {
     var o = readOnboardingByFolder_(folderId);
     if (!o) return { ok: false, error: 'onboarding row not found' };
     if (o.provisioned_at) return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
+    if (o.approved_at) return { ok: true, already: true, approved_at: o.approved_at,
+      message: 'already approved on ' + o.approved_at + '. The induction invite was sent; accounts are created in the Tuesday 15:00 batch.' };
     if (!_docsReady_(o)) {
       return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
     }
-    // Approval now ONLY marks the candidate ready - it does NOT create any accounts. Every creation is
-    // deferred to the scheduled provisionReadyBatch_ (Tuesday 15:00), so all provisioning happens in
-    // one weekly batch, never at the moment an admin accepts the documents. The batch (gated on
-    // approved_at + docsReady) does provisionAll_, the CMA/Dialfire account-requests, the induction
-    // invite and the provisioned_at stamp. Stamping approved_at is what unlocks it for that batch.
+    // Approval marks the candidate ready and IMMEDIATELY sends the "pick your induction week" invite,
+    // but creates NO accounts - every creation is deferred to the scheduled provisionReadyBatch_
+    // (Tuesday 15:00). Flow: approve -> induction invite now -> candidate books a week -> Tuesday batch
+    // creates the accounts -> the packet with logins lands the induction Wednesday morning. Stamping
+    // approved_at is what unlocks the batch. This block is idempotent via the approved_at guard above.
     var approvedAt = nowIso_();
     var approvedBy = (ctx && ctx.email) || 'admin';
     setOnboardingCell_(folderId, ONB_COL.approved_at, approvedAt);
     setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
     setOnboardingStatus_(folderId, 'Approved');
     logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
+    _sendInductionInvite_(folderId, o);   // pick-your-week invite goes out on approval, not on provisioning
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy,
-      message: 'Approved. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
+      message: 'Approved and induction invite sent. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
   } finally {
     lock.releaseLock();
   }
@@ -596,6 +600,18 @@ function retryGroupsForFolder_(folderId) {
 /** Editor one-off: re-add Anne Wilkinson to her Google groups (Betties). Safe to delete after use. */
 function fixAnneGroups() {
   return retryGroupsForFolder_('17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo');
+}
+
+/** Editor one-off: send Brendon Mark Smee his induction invite. He was approved before the induction
+ *  invite moved to the approval step, so it never went out; the new approve path is idempotent and
+ *  won't resend. Safe to delete after use. */
+function fixBrendonInvite() {
+  var folderId = '1lewxm-cb6L2GeuetkGx1M5f7eaH9VrUF';
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) { Logger.log('Brendon row not found'); return 'not found'; }
+  _sendInductionInvite_(folderId, o);
+  Logger.log('Induction invite sent to ' + (o.name || folderId) + ' <' + (o.email || '-') + '>');
+  return 'sent to ' + (o.email || folderId);
 }
 
 /**
