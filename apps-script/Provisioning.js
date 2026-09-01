@@ -16,7 +16,7 @@
  * Public surface:
  *   resolveSystems_(entity, programs, explicit, team, activity) - [system...]  core + mapped programs + team map, then the entitlements matrix strips systems the broker role may not hold.
  *   provisionAll_(folderId, systems, ctx)       - {ok, results:{system:status}}  auth enforced at call site.
- *   provisionReadyBatch_()                      - {provisioned,...}  SCHEDULED Wed 08:00: provision every row whose signed contract + FICA are in (nothing is created at onboard time).
+ *   provisionReadyBatch_()                      - {provisioned,...}  SCHEDULED Tuesday 15:00: the ONLY place accounts are created - provisions every APPROVED row whose signed contract + FICA are in. Approval just marks a row ready; nothing is created at onboard or approval time.
  *   googleCreate_(person)        - {email, tempPw, dryRun?}  Users.insert + Members.insert.
  *   googleSuspend_(email)        - {ok, ...}  Users.update {suspended:true}. Suspend only (user choice).
  *   recordCredential_(entry)     - void  upsert the created email + temp password into the private
@@ -278,10 +278,12 @@ function provisionReadyBatch_() {
 }
 
 /**
- * IMMEDIATE-ON-APPROVE (kind:'approve'). An admin reviews the signed contract + FICA docs on the site
- * and clicks "Approve & set up". This is the ONLY path that turns a candidate into real accounts, and
- * it happens on that deliberate click - not on onboard, not on a timer. Idempotent: a row already
- * provisioned is a no-op success. requireAdmin_ is asserted at the call site (Router._approveDispatch_).
+ * APPROVE (kind:'approve'). An admin reviews the signed contract + FICA docs on the site and clicks
+ * "Approve". This MARKS the candidate ready (stamps approved_at) but no longer creates any accounts -
+ * every creation is deferred to the weekly provisionReadyBatch_ (Tuesday 15:00), so provisioning never
+ * happens at the moment documents are accepted. Idempotent: a row already provisioned is a no-op
+ * success. requireAdmin_ is asserted at the call site (Router._approveDispatch_). (Name kept for the
+ * dispatch wiring; it approves, the batch provisions.)
  */
 function approveAndProvision_(folderId, ctx) {
   // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
@@ -295,48 +297,19 @@ function approveAndProvision_(folderId, ctx) {
     if (!_docsReady_(o)) {
       return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
     }
-    // Stamp the approval FIRST - a human approved, and that fact holds even if provisioning fails or
-    // is deferred (test mode). It satisfies the gate for any later retry by the batch.
+    // Approval now ONLY marks the candidate ready - it does NOT create any accounts. Every creation is
+    // deferred to the scheduled provisionReadyBatch_ (Tuesday 15:00), so all provisioning happens in
+    // one weekly batch, never at the moment an admin accepts the documents. The batch (gated on
+    // approved_at + docsReady) does provisionAll_, the CMA/Dialfire account-requests, the induction
+    // invite and the provisioned_at stamp. Stamping approved_at is what unlocks it for that batch.
     var approvedAt = nowIso_();
     var approvedBy = (ctx && ctx.email) || 'admin';
     setOnboardingCell_(folderId, ONB_COL.approved_at, approvedAt);
     setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
+    setOnboardingStatus_(folderId, 'Approved');
     logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
-
-    var systems = safeJsonParse_(o.systems_json, null);
-    if (!Array.isArray(systems) || !systems.length) {
-      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
-    }
-
-    var prov = provisionAll_(folderId, systems, ctx);
-
-    // CMA + Dialfire are not auto-created (CMA costs money; Dialfire has no create API), so an
-    // entitled candidate triggers a manual account-request email - CMA to Sheldon + Marthinus,
-    // Dialfire to Alan. After provisionAll_ so no one is asked to set up an account before the rest
-    // of setup has started. Both idempotent + test-safe inside (see helpers).
-    // These are FUNCTIONAL account-request emails (CMA -> Sheldon + Marthinus, Dialfire -> Alan), not
-    // CC copies, so they fire on approval REGARDLESS of the CC toggle. ccsOff only silences candidate
-    // CC/BCC + the internal HubSpot-login alert; it must not stop a CMA/Dialfire account from being
-    // requested. Entitlement, idempotency (stamped so never re-sent) + DRY_RUN handling are inside.
-    _maybeRequestCma_(folderId, o, systems);
-    _maybeRequestDialfire_(folderId, o, systems);
-
-    // Only mark the candidate PROVISIONED (dropping them off the pipeline) when real accounts were
-    // actually created. On an error, leave provisioned_at empty so it stays visible and retryable.
-    // In test mode (DRY_RUN), leave it too so the real batch provisions once armed.
-    if (prov.anyError) {
-      setOnboardingStatus_(folderId, 'Setup error');
-      return { ok: false, error: 'approved, but account setup hit an error - the candidate stays on the Progress report so it can be retried.', approved_at: approvedAt, provisioning: prov.results };
-    }
-    if (prov.dryRun) {
-      setOnboardingStatus_(folderId, 'Approved (test mode)');
-      return { ok: true, dryRun: true, approved_at: approvedAt, approved_by: approvedBy, message: 'Approved. The system is in test mode, so no live accounts were created yet.', provisioning: prov.results };
-    }
-    setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
-    setOnboardingStatus_(folderId, 'Provisioned');
-    // Real accounts exist now, so invite the candidate to pick an induction week (CC the senior).
-    _sendInductionInvite_(folderId, o);
-    return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
+    return { ok: true, approved_at: approvedAt, approved_by: approvedBy,
+      message: 'Approved. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
   } finally {
     lock.releaseLock();
   }

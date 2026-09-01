@@ -56,10 +56,11 @@ function setupTriggers() {
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
-  // Deferred provisioning: create accounts once a week for everyone whose signed contract + FICA are
-  // in. Wednesday ~08:00 (Africa/Johannesburg per appsscript.json timeZone).
+  // Deferred provisioning: create accounts once a week for everyone approved (signed contract + FICA
+  // in AND an admin has approved). Tuesday 15:00 (Africa/Johannesburg per appsscript.json timeZone) -
+  // this is the ONLY time accounts are created; approval just marks a candidate ready for this batch.
   ScriptApp.newTrigger('provisionReadyBatch_').timeBased()
-    .onWeekDay(ScriptApp.WeekDay.WEDNESDAY).atHour(8).create();
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(15).create();
   // FICA follow-up: hourly sweep that nudges anyone 12+ hours past their contract email who has not
   // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
   ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
