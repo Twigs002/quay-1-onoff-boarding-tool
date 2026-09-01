@@ -204,7 +204,7 @@ function _hrNameRich_(o) {
  * and rewrites the name cell as a link to that person's folder. New/re-synced rows already get it;
  * this is for rows written before the link existed. Gated by HR sync. Safe to re-run.
  */
-function backfillHrNameLinks_() {
+function backfillHrNameLinks() {
   if (!hrSyncEnabled_()) { Logger.log('HR sync OFF - not touching the HR sheet'); return 'HR sync OFF'; }
   var ss = SpreadsheetApp.openById(hrSheetId_());
   var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
