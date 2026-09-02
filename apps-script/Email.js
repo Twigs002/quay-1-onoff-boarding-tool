@@ -226,10 +226,13 @@ function inductionDigestHtml_(company, buckets) {
       '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">' +
       head + body + '</table></div>';
   };
+  var bookedOther = buckets.bookedOther || [];
   var inner =
     '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:' + B.slate + '">Induction status for the week. ' +
-      buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' booked for induction.</p>' +
+      buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' booked for this week' +
+      (bookedOther.length ? ', ' + bookedOther.length + ' booked for an upcoming week' : '') + '.</p>' +
     table('Booked this week', buckets.dueThisWeek, 'No inductions booked this week.', true) +
+    table('Booked - upcoming weeks', bookedOther, 'No upcoming bookings.', true) +
     table('Awaiting booking', buckets.unbooked, 'Everyone due is booked.', false);
   return emailShell_(company, 'Induction digest', inner);
 }

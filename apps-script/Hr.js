@@ -193,6 +193,9 @@ function _hrNameRich_(o) {
   var name = String((o && o.name) || '').trim() || 'Unnamed';
   var url = '';
   try { if (o && o.folderId) url = DriveApp.getFolderById(o.folderId).getUrl(); } catch (e) { url = ''; }
+  // Surface a dropped link instead of silently writing a plain-text name: a missing/unreadable
+  // folder id is the root cause of "HR folders not being linked", so leave an audit trail.
+  if (!url) logAudit_('hr_name_link_missing', { name: name, folderId: (o && o.folderId) || '' });
   var b = SpreadsheetApp.newRichTextValue().setText(name);
   if (url) b.setLinkUrl(url);
   return b.build();

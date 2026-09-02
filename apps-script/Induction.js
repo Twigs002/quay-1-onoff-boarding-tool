@@ -372,19 +372,28 @@ function tuesdayDigestAfternoon_() { _sendInductionDigest_('2pm'); }
 function _sendInductionDigest_(slot) {
   var weekStart = _mondayOfThisWeek_();
   var weekEnd = _addDays_(weekStart, 6);
-  var buckets = { dueThisWeek: [], unbooked: [] };
+  // Three mutually-exclusive, EXHAUSTIVE buckets so no candidate is ever silently dropped:
+  //   dueThisWeek - booked for an induction Wed inside this calendar week
+  //   bookedOther - booked (has a Wed/Thu date) but NOT this calendar week (an upcoming week, or a
+  //                 past/unparseable date). Previously these fell through both branches and vanished
+  //                 from the digest entirely (someone booked after the Tue cut-off always books a
+  //                 FUTURE week, so this was the common case, not an edge case).
+  //   unbooked    - no induction date at all yet
+  var buckets = { dueThisWeek: [], bookedOther: [], unbooked: [] };
   listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
     if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
-    else if (!o.induction_wed && !o.induction_thu) buckets.unbooked.push(o);
+    else if (o.induction_wed || o.induction_thu) buckets.bookedOther.push(o);
+    else buckets.unbooked.push(o);
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
   var tag = (slot === '2pm') ? ' [2pm update]' : '';
   var subject = company.name + ' - induction digest' + tag + ' (' + buckets.dueThisWeek.length +
-    ' booked, ' + buckets.unbooked.length + ' awaiting)';
+    ' this week, ' + buckets.bookedOther.length + ' upcoming, ' + buckets.unbooked.length + ' awaiting)';
   GmailApp.sendEmail(to, subject,
     'Induction status. Booked this week: ' + buckets.dueThisWeek.length +
+    '. Booked upcoming weeks: ' + buckets.bookedOther.length +
     '. Awaiting booking: ' + buckets.unbooked.length + '.',
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
 }
@@ -403,8 +412,8 @@ function debugDigest() {
     var wed = _asDate_(o.induction_wed);
     var inWeek = wed && wed >= weekStart && wed <= weekEnd;
     var bucket = inWeek ? 'BOOKED_THIS_WEEK'
-      : (!o.induction_wed && !o.induction_thu) ? 'AWAITING'
-      : 'HIDDEN(has date but not this calendar week / unparseable)';
+      : (o.induction_wed || o.induction_thu) ? 'BOOKED_UPCOMING(has a date, not this calendar week)'
+      : 'AWAITING';
     lines.push([(o.name || '(no name)'),
       'wed=' + JSON.stringify(o.induction_wed || ''),
       'thu=' + JSON.stringify(o.induction_thu || ''),
