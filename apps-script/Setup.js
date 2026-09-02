@@ -373,17 +373,58 @@ function hubStatus() {
     webapp_url: isSet(PROP.WEBAPP_URL),
     supabase: isSet(PROP.SUPABASE_URL),
     quay1_templates: isSet(PROP.QUAY1_TEMPLATE_SALE) + '/' + isSet(PROP.QUAY1_TEMPLATE_RENTAL),
+    quay1_parent_folder: isSet(PROP.QUAY1_PARENT_FOLDER),
+    // Aqua must have ALL of these set or onboardAqua_ throws (no folder / no template) and no Aqua
+    // row is ever written - the usual reason "Aqua contractors have no HR row / no sheet to update".
     aqua_templates: isSet(PROP.AQUA_TEMPLATE_MONTHLY) + '/' + isSet(PROP.AQUA_TEMPLATE_FIXED) + '/' + isSet(PROP.AQUA_TEMPLATE_PERMANENT),
+    aqua_parent_folder: isSet(PROP.AQUA_PARENT_FOLDER),
+    hr_sheet: isSet(PROP.HR_SHEET_ID),
     propdata_creds: isSet(PROP.PROPDATA_API_KEY) + '/' + isSet(PROP.PROPDATA_VENDOR_ID),
     hubspot_token: isSet(PROP.HUBSPOT_TOKEN),
     groups_json: isSet(PROP.GROUPS_JSON),
     flags: {
       DRY_RUN: DRY_RUN_(), OFFBOARD_ARMED: offboardArmed_(),
       HUBSPOT_SEAT_ENABLED: hubspotSeatEnabled_(), PROPDATA_LIVE: propdataLive_(),
+      HR_SYNC_ENABLED: hrSyncEnabled_(), CC_ENABLED: ccEnabled_(),
     },
   };
   Logger.log(JSON.stringify(s, null, 2));
   return s;
+}
+
+/**
+ * READ-ONLY diagnostic (editor Run): the single call that explains the HR + Aqua questions -
+ * "where do Aqua employees go on the HR sheet" and "why don't their contracts sit for approval".
+ * Reports, per entity, how many onboarding rows exist and how many are docs-complete/approved, plus
+ * which HR destination tabs actually exist in the live HR sheet. If aqua.total is 0, no Aqua person
+ * has ever been onboarded through the tool (so there is nothing to promote and no Aqua tab yet);
+ * if the Aqua tab is absent it is created automatically on the first Aqua promotion. Sends nothing.
+ */
+function diagnoseHrAqua() {
+  var counts = {};
+  listOnboarding_().forEach(function (o) {
+    var e = String(o.entity || '(blank)');
+    counts[e] = counts[e] || { total: 0, docs_ready: 0, approved: 0, provisioned: 0, promoted_to_hr: 0 };
+    counts[e].total++;
+    if (_docsReady_(o)) counts[e].docs_ready++;
+    if (o.approved_at) counts[e].approved++;
+    if (o.provisioned_at) counts[e].provisioned++;
+    if (o.hr_promoted_at) counts[e].promoted_to_hr++;
+  });
+  var tabs = {};
+  try {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    Object.keys(HR_TAB).forEach(function (k) { tabs[HR_TAB[k]] = !!ss.getSheetByName(HR_TAB[k]); });
+  } catch (e) { tabs = { error: String(e) }; }
+  var out = {
+    hr_sync_enabled: hrSyncEnabled_(),
+    hr_sheet_set: !!optProp_(PROP.HR_SHEET_ID),
+    aqua_configured: !!optProp_(PROP.AQUA_PARENT_FOLDER) && !!optProp_(PROP.AQUA_TEMPLATE_MONTHLY),
+    onboarding_rows_by_entity: counts,
+    hr_destination_tabs_present: tabs,
+  };
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 // ---------------------------------------------------------------- helpers
