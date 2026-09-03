@@ -45,6 +45,51 @@ function _hsLoginRows_() {
   return out;
 }
 
+// Column layout of the "HubSpot Logins" tab (1-indexed), verbatim from the tracker header row:
+// 1 Team | 2 Division | 3 HubSpot Username | 4 HubSpot Password | 5 Code goes to (name) |
+// 6 Details updated? | 7 Notes.
+var HS_COL = { team: 1, division: 2, username: 3, password: 4, code_to: 5, updated: 6, notes: 7 };
+
+/**
+ * EDITOR ONE-OFF (Run): record HubSpot passwords / code recipients that teams have sent back, straight
+ * into the "HubSpot Logins" tab. Each entry is matched to its row by exact team name (case-insensitive),
+ * so there is no chance of writing to the wrong row among the ~90 teams. Writes password (col D) and,
+ * when given, the code recipient (col E); stamps "Details updated?" (col F) with today's date and marks
+ * "2FA ON" in Notes (col G) if that column is blank. Idempotent - re-running just overwrites with the
+ * same values. Add new teams to HS_LOGINS_TO_RECORD below, deploy, and Run.
+ *
+ * Fill this list, then Run:  [{ team, password, code_to }]  (code_to optional).
+ */
+var HS_LOGINS_TO_RECORD = [
+  { team: 'Betties', password: 'HSBetties002', code_to: 'Pagan' },
+  { team: 'Dealmakers', password: 'HSDealmakers002' },
+];
+
+function recordHubSpotLogins() {
+  var sh = _hsLoginsTab_();
+  if (!sh) throw new Error('"' + HS_LOGINS_TAB + '" tab not found');
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var rows = _hsLoginRows_();
+  var byTeam = {};
+  rows.forEach(function (r) { byTeam[r.team.toLowerCase()] = r.row; });
+
+  var out = { today: today, recorded: [], notFound: [] };
+  HS_LOGINS_TO_RECORD.forEach(function (e) {
+    var team = String(e.team || '').trim();
+    var row = byTeam[team.toLowerCase()];
+    if (!row) { out.notFound.push(team); return; }
+    if (e.password != null) sh.getRange(row, HS_COL.password).setNumberFormat('@').setValue(String(e.password));
+    if (e.code_to) sh.getRange(row, HS_COL.code_to).setValue(String(e.code_to));
+    sh.getRange(row, HS_COL.updated).setValue(today);
+    var notesCell = sh.getRange(row, HS_COL.notes);
+    if (!String(notesCell.getValue()).trim()) notesCell.setValue('2FA ON');
+    out.recorded.push({ team: team, row: row, code_to: e.code_to || '(unchanged)' });
+    logAudit_('hubspot_login_recorded', { team: team, row: row, updated: today });
+  });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
 function _hsSubject_(team, deadline) {
   return 'Action needed by ' + (deadline || HS_DEADLINE) + ': confirm your ' + team + "'s HubSpot login details";
 }
