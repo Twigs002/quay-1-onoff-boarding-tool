@@ -31,6 +31,19 @@ function onboardQuay1_(body, ctx) {
   var f = (body && body.fields) || body || {};
   var c = _quay1Fields_(f);
   if (!c.full_name || !c.id_number) return { ok: false, error: 'full_name and id_number are required' };
+  // Guard the ID field against a mis-entered NAME (a surname once landed here, leaving the real ID
+  // missing everywhere downstream). A valid entry is a 13-digit SA ID or an alphanumeric passport -
+  // both contain at least one digit; a pure word/name does not. Also strip spaces and reject a
+  // 13-digit value that fails the SA ID checksum (a likely typo). Passports keep their letters.
+  var idClean = c.id_number.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9]+$/.test(idClean) || !/\d/.test(idClean)) {
+    return { ok: false, error: 'ID/passport number "' + c.id_number + '" looks like a name, not an ID. ' +
+      'Enter a 13-digit SA ID or a passport number (letters and digits, no spaces).' };
+  }
+  if (/^\d{13}$/.test(idClean) && !saIdChecksumOk_(idClean)) {
+    return { ok: false, error: 'That 13-digit SA ID fails its checksum - please re-check the number.' };
+  }
+  c.id_number = idClean;
   if (!isEmail_(c.candidate_email)) return { ok: false, error: 'a valid candidate email is required' };
 
   var folder = _entityFolder_(prop_(PROP.QUAY1_PARENT_FOLDER, true), c.full_name, c.id_number);
@@ -161,6 +174,62 @@ function brokerActivityLabel_(code) {
   if (!c) return '';
   var hit = (CFG.BROKER_ACTIVITIES || []).filter(function (a) { return a.code === c; })[0];
   return hit ? hit.label : '';
+}
+
+/**
+ * Editor one-off: turn the two new IGCISA agreement Google Docs (Sale + Rental, in the Contracts
+ * folder) into fill-in templates by inserting the merge tokens genQuay1Contract_ expects, then point
+ * the Sale/Rental template Script Properties at them. Verifies each token actually landed and reports
+ * anything MISSING (a missed token would leave a hardcoded value in every generated contract, so check
+ * the log). {{BROKER_ACTIVITY}} is intentionally NOT inserted - the Sale/Rental split already carries
+ * the right activity clause; the token just no-ops. Run once, then confirm with a test contract.
+ */
+function installNewContractTemplates() {
+  var SALE = '1_zlJd5RvrihhjjXLv7imcS6cI-l4DLNH9BYhjMezZEc';
+  var RENTAL = '18NnUzMO2btImBcUpcTKW9_Hmb4gLeNSrD8VPV-7K1Nc';
+  var report = [];
+  var esc = function (s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+  var tokenize = function (label, docId, seniorName, effectiveDate, commissionPct) {
+    var doc = DocumentApp.openById(docId);
+    var b = doc.getBody();
+    b.replaceText('Name:\\s*_+', 'Name:  {{FULL_NAME}}');
+    b.replaceText('ID\\s+_{5,}', 'ID {{ID_NUMBER}}');
+    b.replaceText(esc(effectiveDate), '{{START_DATE}}');
+    b.replaceText('account of ' + esc(seniorName), 'account of {{SENIOR_BROKER}}');
+    b.replaceText('entitled to ' + esc(commissionPct) + '%', 'entitled to {{COMMISSION}}%');
+    var missing = ['FULL_NAME', 'ID_NUMBER', 'START_DATE', 'SENIOR_BROKER', 'COMMISSION'].filter(function (t) {
+      return !b.findText('\\{\\{' + t + '\\}\\}');
+    });
+    doc.saveAndClose();
+    report.push(label + ': ' + (missing.length ? 'MISSING -> ' + missing.join(', ') : 'all 5 tokens placed'));
+  };
+  tokenize('Sale', SALE, 'Justin Nortier', '21 March 2026', '25');
+  tokenize('Rental', RENTAL, 'Daniel Wentzel', '18 February 2026', '80');
+  _scriptProps_().setProperty(PROP.QUAY1_TEMPLATE_SALE, SALE);
+  _scriptProps_().setProperty(PROP.QUAY1_TEMPLATE_RENTAL, RENTAL);
+  report.push('QUAY1_TEMPLATE_SALE -> ' + SALE, 'QUAY1_TEMPLATE_RENTAL -> ' + RENTAL);
+  Logger.log(report.join('\n'));
+  return report.join(' | ');
+}
+
+/**
+ * Editor one-off: generate a Sale AND a Rental sample contract from the new templates into a throwaway
+ * Drive folder, so you can eyeball the merged result before it goes live. Logs the folder + both doc
+ * URLs. Delete the "Contract token test" folder afterwards. Run after installNewContractTemplates().
+ */
+function testGenerateNewContracts() {
+  var folder = DriveApp.createFolder('Contract token test');
+  var sale = genQuay1Contract_(folder, {
+    full_name: 'Test Candidate', id_number: '9001015800089', start_date: '2026-04-01',
+    senior_broker: 'Jane Senior', commission: '30', deal_type: 'sale', activity: 'sell_res_broker'
+  });
+  var rental = genQuay1Contract_(folder, {
+    full_name: 'Test Candidate', id_number: '9001015800089', start_date: '2026-04-01',
+    senior_broker: 'Jane Senior', commission: '75', deal_type: 'rental', activity: 'rent_res_broker'
+  });
+  var out = 'Test folder: ' + folder.getUrl() + '\nSale doc: ' + sale.url + '\nRental doc: ' + rental.url;
+  Logger.log(out);
+  return out;
 }
 
 /** Save any base64 files the candidate submitted at contract-gen time into the folder. */

@@ -69,6 +69,10 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
     if (ccList) opts.cc = ccList;
     if (pdfFile) opts.attachments = [pdfFile.getAs('application/pdf')];
     GmailApp.sendEmail(toEmail, subject, plain, opts);
+    // Stamp when the welcome email went out so the 12-hour FICA follow-up sweep has a clock to key
+    // off. Non-fatal: a stamp failure must never fail the (already sent) contract email.
+    try { setOnboardingCell_(folderId, ONB_COL.contract_emailed_at, nowIso_()); }
+    catch (e) { logAudit_('contract_emailed_stamp_failed', { folderId: folderId, error: String(e) }); }
     return true;
   } catch (err) {
     logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
@@ -144,4 +148,152 @@ function _remindContract_(folderId, ctx) {
     logAudit_('contract_reminder_failed', { folderId: folderId, error: String(err) });
     return { ok: false, error: 'could not send the reminder: ' + String(err && err.message ? err.message : err) };
   }
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Automatic 12-hour FICA follow-up
+ *
+ * Some new starters reply to the contract email with their FICA documents attached instead of using
+ * their personal secure upload link, which leaves the tracker showing FICA incomplete and stalls
+ * their induction. ficaFollowUpSweep_() is a time-driven sweep (installed hourly in Setup.js) that,
+ * 12 hours after the contract welcome email went out, sends ONE nudge whose whole job is to point
+ * the person back to the secure link (and ask them not to reply with attachments). This is part of
+ * the scoped onboarding auto-send pipeline (SPEC section 6), so it sends without DRY_RUN gating,
+ * exactly like the contract welcome email itself.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Delay from the contract email to the FICA follow-up nudge: 12 hours. */
+var FICA_FOLLOWUP_DELAY_MS = 12 * 60 * 60 * 1000;
+
+/** Only send follow-ups during daytime (07:00-20:00 in the script timezone) so a contract emailed in
+ *  the afternoon never triggers a 3am nudge - a due row simply waits for the next daytime sweep. */
+function _inFollowUpWindow_() {
+  var tz = Session.getScriptTimeZone() || 'Africa/Johannesburg';
+  var h = parseInt(Utilities.formatDate(new Date(), tz, 'H'), 10);
+  return h >= 7 && h < 20;
+}
+
+/** True once the person has engaged with the secure FICA link: status advanced to "FICA received"
+ *  (Fica.js) or any FICA doc tick (R..V) is present. Such rows never get the "use the link" nudge. */
+function _ficaSubmitted_(o) {
+  if (/fica received/i.test(String(o.status || ''))) return true;
+  return !!(o.fica_nda || o.fica_bank || o.fica_poa || o.fica_id || o.fica_contract);
+}
+
+/** Whether an onboarding row is due the automatic FICA follow-up at time `now` (ms). */
+function _ficaFollowUpDue_(o, now) {
+  if (!o.contract_emailed_at) return false;         // welcome email never sent (or pre-dates this feature)
+  if (o.fica_followup_at) return false;             // already nudged once
+  if (o.provisioned_at || o.approved_at) return false;  // already set up / signed off
+  if (_ficaSubmitted_(o)) return false;             // already used the link - nothing to nudge
+  if (_isTestRecipient_(o.email)) return false;     // QA onboards do not get chased
+  if (!isEmail_(o.email)) return false;
+  var t = Date.parse(o.contract_emailed_at);
+  if (!t) return false;
+  return (now - t) >= FICA_FOLLOWUP_DELAY_MS;
+}
+
+/** Send the single "please use your secure FICA link" follow-up for one onboarding row. */
+function _sendFicaFollowUp_(o) {
+  var entity = o.entity || 'quay1';
+  var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
+  var first = firstName_(o.name);
+  var ficaUrl = ficaLink_(o.folderId);
+  var subject = 'Please submit your ' + company.name + ' FICA documents via your secure link' +
+    (o.name ? ' - ' + o.name : '');
+  var plain =
+    'Hi ' + first + ',\n\n' +
+    'A quick follow-up on your FICA documents. To keep your information secure and to move your ' +
+    'setup along, please upload your documents using your personal, secure link rather than ' +
+    'replying to this email with attachments:\n\n' +
+    ficaUrl + '\n\n' +
+    'Uploading through the link is the only way your documents reach our system, so anything sent ' +
+    'as an email reply will not be picked up. If you have already uploaded via the link, thank you ' +
+    'and please ignore this note.\n\n' +
+    'If you need a hand, simply reply and we will gladly help.\n\n' +
+    'Warm regards,\nThe ' + company.name + ' Team';
+  var opts = { name: company.name, htmlBody: ficaFollowUpHtml_(company, first, ficaUrl) };
+  // Stamp the once-only marker BEFORE sending. If the marker write fails we would rather miss this
+  // optional courtesy nudge than risk re-sending it on the next hourly sweep: a send failure after a
+  // successful stamp costs one un-sent email (still logged), never a duplicate to the candidate.
+  setOnboardingCell_(o.folderId, ONB_COL.fica_followup_at, nowIso_());
+  GmailApp.sendEmail(o.email, subject, plain, opts);
+  logAudit_('fica_followup_sent', { folderId: o.folderId, to: o.email });
+}
+
+/**
+ * Time-driven sweep (installed hourly by setupTriggers): send the one-time FICA follow-up to every
+ * onboarding row that is 12+ hours past its contract email and has not yet used the secure link.
+ * Idempotent per row via the fica_followup_at marker; quiet outside daytime hours. Non-fatal per row.
+ */
+function ficaFollowUpSweep_() {
+  if (!_inFollowUpWindow_()) return;
+  var now = new Date().getTime();
+  var due = listOnboarding_(function (o) { return _ficaFollowUpDue_(o, now); });
+  due.forEach(function (o) {
+    try { _sendFicaFollowUp_(o); }
+    catch (e) { logAudit_('fica_followup_failed', { folderId: o.folderId, error: String(e) }); }
+  });
+  if (due.length) logAudit_('fica_followup_sweep', { sent: due.length });
+}
+
+/**
+ * ADMIN edit of a candidate's core information (kind:'edit_onboarding'). Corrects mistakes such as a
+ * misfiled ID number, a wrong email, or the wrong team on the Onboarding row. Only a WHITELISTED set of
+ * human-entered fields can be changed here - never the pipeline markers (approved_at, provisioned_at,
+ * the FICA doc ticks, etc.), so an edit can never quietly re-open or skip a gate. Each field is
+ * validated/normalised the same way intake validates it. requireAdmin_ is asserted. Re-syncs the HR
+ * sheet afterwards so the master HR tabs pick up the correction. Returns { ok, fields:[changed keys] }.
+ */
+function editOnboarding_(body, ctx) {
+  requireAdmin_(ctx);
+  var folderId = String((body && body.folderId) || '').trim();
+  if (!folderId) return { ok: false, error: 'missing reference' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+
+  var f = (body && body.fields) || {};
+  var changes = {};
+
+  if ('name' in f) {
+    var name = String(f.name == null ? '' : f.name).trim();
+    if (!name) return { ok: false, error: 'Name cannot be empty.' };
+    changes.name = name;
+  }
+  if ('email' in f) {
+    var email = String(f.email == null ? '' : f.email).trim();
+    if (email && !isEmail_(email)) return { ok: false, error: 'That email address does not look valid.' };
+    changes.email = email;
+  }
+  if ('senior_email' in f) {
+    var se = String(f.senior_email == null ? '' : f.senior_email).trim();
+    if (se && !isEmail_(se)) return { ok: false, error: 'The senior broker email does not look valid.' };
+    changes.senior_email = se;
+  }
+  if ('id_number' in f) {
+    var idClean = String(f.id_number == null ? '' : f.id_number).replace(/\s+/g, '');
+    if (idClean) {
+      if (!/^[A-Za-z0-9]+$/.test(idClean) || !/\d/.test(idClean)) {
+        return { ok: false, error: 'That ID / passport number looks wrong - it should be letters and digits only.' };
+      }
+      if (/^\d{13}$/.test(idClean) && !saIdChecksumOk_(idClean)) {
+        return { ok: false, error: 'That 13-digit SA ID fails its checksum - please re-check the digits.' };
+      }
+    }
+    changes.id_number = idClean;
+  }
+  if ('contact' in f) changes.contact = String(f.contact == null ? '' : f.contact).trim();
+  if ('team' in f) changes.team = String(f.team == null ? '' : f.team).trim();
+  if ('senior_name' in f) changes.senior_name = String(f.senior_name == null ? '' : f.senior_name).trim();
+
+  var keys = Object.keys(changes);
+  if (!keys.length) return { ok: false, error: 'No changes to save.' };
+  keys.forEach(function (k) { setOnboardingCell_(folderId, ONB_COL[k], changes[k]); });
+  logAudit_('onboard_edited', { folderId: folderId, by: (ctx && ctx.email) || 'admin', fields: keys });
+  // Keep the HR master sheet in step with the correction (best-effort; the row edit already stands).
+  // Refresh the destination row too so a correction reaches an already-promoted person's entity tab,
+  // not just the tracking tab.
+  try { hrTrackingUpsert_(folderId); hrRefreshDest_(folderId); }
+  catch (e) { logAudit_('hr_tracking_failed', { folderId: folderId, error: String(e) }); }
+  return { ok: true, message: 'Saved.', fields: keys };
 }

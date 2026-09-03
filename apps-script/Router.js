@@ -37,8 +37,10 @@ var TOKENLESS_KINDS = { fica_upload: true, candidate_upload: true, book_inductio
 function doGet(e) {
   try {
     var p = (e && e.parameter) || {};
-    if (p.f) return ficaForm_(String(p.f));                 // candidate FICA upload page (HTML)
-    if (p.i) return inductionPageHtml_(String(p.i));         // candidate induction booking page (HTML)
+    // A Drive folder id is only [A-Za-z0-9_-]; strip anything else so a crafted ?f=/?i= value can
+    // never carry markup into the page (defence-in-depth alongside jsInScript_ at the injection site).
+    if (p.f) return ficaForm_(_safeFolderId_(p.f));          // candidate FICA upload page (HTML)
+    if (p.i) return inductionPageHtml_(_safeFolderId_(p.i)); // candidate induction booking page (HTML)
     return textOut_('ok'); // health ping
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -83,6 +85,7 @@ function dispatch_(kind, body, ctx) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
     case 'approve': return _approveDispatch_(body, ctx);
+    case 'edit_onboarding': return editOnboarding_(body, ctx);
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);

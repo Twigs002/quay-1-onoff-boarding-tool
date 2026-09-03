@@ -83,6 +83,23 @@ var ONB_COL = {
   // acceptance of a Dialfire-entitled starter). Idempotency marker so re-accepting never re-sends.
   // Mirrors cma_requested_at. See _maybeRequestDialfire_.
   dialfire_requested_at: 54,
+  // FICA follow-up nudge (appended, no shift): contract_emailed_at is stamped when the contract
+  // welcome email actually sends (_emailContract_); fica_followup_at is the idempotency marker for
+  // the automatic 12-hour "please submit via the secure link" nudge (ficaFollowUpSweep_). Empty
+  // until each fires. See Onboarding_Common.js.
+  contract_emailed_at: 55, fica_followup_at: 56,
+  // The full induction packet (with logins) auto-sends at 06:00 on the induction Wednesday via
+  // inductionPacketSweep_ (Induction.js). This is the send-once idempotency marker; booking only sends
+  // the lightweight "induction confirmed" email now, not the logins. Empty until the packet fires.
+  induction_packet_sent_at: 57,
+  // When we emailed the team that their HubSpot login is missing for a booked starter (fired the
+  // moment the candidate picks their induction week). Idempotency marker so the team is chased once,
+  // not again when the packet later sends. See _alertTeamHubspotMissing_ (Induction.js).
+  hubspot_team_alerted_at: 58,
+  // JSON array of the Google Calendar event ids created for this candidate's two induction mornings
+  // (see _syncInductionCalendar_). Stored so a re-booking can delete the old events before creating
+  // the new ones, rather than leaving stale duplicates. Empty until a week is booked.
+  induction_calendar_ids: 59,
 };
 
 var ONB_HEADERS = [
@@ -98,6 +115,8 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
+  'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at', 'HubSpot team alerted at',
+  'Induction calendar ids',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

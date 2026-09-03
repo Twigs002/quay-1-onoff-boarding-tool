@@ -16,7 +16,7 @@
  * Public surface:
  *   resolveSystems_(entity, programs, explicit, team, activity) - [system...]  core + mapped programs + team map, then the entitlements matrix strips systems the broker role may not hold.
  *   provisionAll_(folderId, systems, ctx)       - {ok, results:{system:status}}  auth enforced at call site.
- *   provisionReadyBatch_()                      - {provisioned,...}  SCHEDULED Wed 08:00: provision every row whose signed contract + FICA are in (nothing is created at onboard time).
+ *   provisionReadyBatch_()                      - {provisioned,...}  SCHEDULED Tuesday 15:00: the ONLY place accounts are created - provisions every APPROVED row whose signed contract + FICA are in. Approval just marks a row ready; nothing is created at onboard or approval time.
  *   googleCreate_(person)        - {email, tempPw, dryRun?}  Users.insert + Members.insert.
  *   googleSuspend_(email)        - {ok, ...}  Users.update {suspended:true}. Suspend only (user choice).
  *   recordCredential_(entry)     - void  upsert the created email + temp password into the private
@@ -228,11 +228,16 @@ function _docsReady_(o) {
   return !!(o && o.fica_contract && o.fica_id && o.fica_poa && o.fica_bank);
 }
 
-/** Ready to provision = docs are in AND an admin has clicked "Approve & set up" (approved_at stamped).
- *  This is the ONE guard between an onboarded candidate and real account creation. A wrong-but-signed
- *  contract still cannot mint accounts until a human has reviewed and approved it. */
+/** Ready to provision = docs are in and an admin has approved (approved_at stamped). For Quay 1 there
+ *  is one more gate: the candidate must have BOOKED an induction week (induction_wed/thu), so the
+ *  logins are ready in time for that induction. Aqua has NO induction step, so that gate does not apply
+ *  to it - docs + approval is enough (Aqua's login is delivered by a welcome email at provision time,
+ *  see _sendAquaWelcome_). This is the guard between an onboarded candidate and real account creation -
+ *  the Tuesday 15:00 batch reads it. */
 function _provisionReady_(o) {
-  return !!(o && _docsReady_(o) && o.approved_at);
+  if (!o || !_docsReady_(o) || !o.approved_at) return false;
+  if (String(o.entity) === 'aqua') return true;
+  return !!(o.induction_wed || o.induction_thu);
 }
 
 /**
@@ -263,7 +268,11 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
-      _sendInductionInvite_(o.folderId, o);   // same one-time invite as the interactive accept path
+      // Induction invite is NOT sent here - it goes out on approval now (approveAndProvision_), well
+      // before this Tuesday batch, so the candidate can pick a week early. Quay 1 gets its login in the
+      // induction packet; Aqua has no induction, so deliver Aqua's login now, once, as we stamp
+      // provisioned_at (the provisioned_at guard above stops this row re-provisioning, so it sends once).
+      if (String(o.entity) === 'aqua') _sendAquaWelcome_(o.folderId, o);
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
       _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       out.provisioned.push(o.folderId);
@@ -278,10 +287,12 @@ function provisionReadyBatch_() {
 }
 
 /**
- * IMMEDIATE-ON-APPROVE (kind:'approve'). An admin reviews the signed contract + FICA docs on the site
- * and clicks "Approve & set up". This is the ONLY path that turns a candidate into real accounts, and
- * it happens on that deliberate click - not on onboard, not on a timer. Idempotent: a row already
- * provisioned is a no-op success. requireAdmin_ is asserted at the call site (Router._approveDispatch_).
+ * APPROVE (kind:'approve'). An admin reviews the signed contract + FICA docs on the site and clicks
+ * "Approve". This MARKS the candidate ready (stamps approved_at) but no longer creates any accounts -
+ * every creation is deferred to the weekly provisionReadyBatch_ (Tuesday 15:00), so provisioning never
+ * happens at the moment documents are accepted. Idempotent: a row already provisioned is a no-op
+ * success. requireAdmin_ is asserted at the call site (Router._approveDispatch_). (Name kept for the
+ * dispatch wiring; it approves, the batch provisions.)
  */
 function approveAndProvision_(folderId, ctx) {
   // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
@@ -292,51 +303,30 @@ function approveAndProvision_(folderId, ctx) {
     var o = readOnboardingByFolder_(folderId);
     if (!o) return { ok: false, error: 'onboarding row not found' };
     if (o.provisioned_at) return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
+    if (o.approved_at) return { ok: true, already: true, approved_at: o.approved_at,
+      message: 'already approved on ' + o.approved_at + '. The induction invite was sent; accounts are created in the Tuesday 15:00 batch.' };
     if (!_docsReady_(o)) {
       return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
     }
-    // Stamp the approval FIRST - a human approved, and that fact holds even if provisioning fails or
-    // is deferred (test mode). It satisfies the gate for any later retry by the batch.
+    // Approval marks the candidate ready and IMMEDIATELY sends the "pick your induction week" invite,
+    // but creates NO accounts - every creation is deferred to the scheduled provisionReadyBatch_
+    // (Tuesday 15:00). Flow: approve -> induction invite now -> candidate books a week -> Tuesday batch
+    // creates the accounts -> the packet with logins lands the induction Wednesday morning. Stamping
+    // approved_at is what unlocks the batch. This block is idempotent via the approved_at guard above.
     var approvedAt = nowIso_();
     var approvedBy = (ctx && ctx.email) || 'admin';
     setOnboardingCell_(folderId, ONB_COL.approved_at, approvedAt);
     setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
+    setOnboardingStatus_(folderId, 'Approved');
     logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
-
-    var systems = safeJsonParse_(o.systems_json, null);
-    if (!Array.isArray(systems) || !systems.length) {
-      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
-    }
-
-    var prov = provisionAll_(folderId, systems, ctx);
-
-    // CMA + Dialfire are not auto-created (CMA costs money; Dialfire has no create API), so an
-    // entitled candidate triggers a manual account-request email - CMA to Sheldon + Marthinus,
-    // Dialfire to Alan. After provisionAll_ so no one is asked to set up an account before the rest
-    // of setup has started. Both idempotent + test-safe inside (see helpers).
-    // These are FUNCTIONAL account-request emails (CMA -> Sheldon + Marthinus, Dialfire -> Alan), not
-    // CC copies, so they fire on approval REGARDLESS of the CC toggle. ccsOff only silences candidate
-    // CC/BCC + the internal HubSpot-login alert; it must not stop a CMA/Dialfire account from being
-    // requested. Entitlement, idempotency (stamped so never re-sent) + DRY_RUN handling are inside.
-    _maybeRequestCma_(folderId, o, systems);
-    _maybeRequestDialfire_(folderId, o, systems);
-
-    // Only mark the candidate PROVISIONED (dropping them off the pipeline) when real accounts were
-    // actually created. On an error, leave provisioned_at empty so it stays visible and retryable.
-    // In test mode (DRY_RUN), leave it too so the real batch provisions once armed.
-    if (prov.anyError) {
-      setOnboardingStatus_(folderId, 'Setup error');
-      return { ok: false, error: 'approved, but account setup hit an error - the candidate stays on the Progress report so it can be retried.', approved_at: approvedAt, provisioning: prov.results };
-    }
-    if (prov.dryRun) {
-      setOnboardingStatus_(folderId, 'Approved (test mode)');
-      return { ok: true, dryRun: true, approved_at: approvedAt, approved_by: approvedBy, message: 'Approved. The system is in test mode, so no live accounts were created yet.', provisioning: prov.results };
-    }
-    setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
-    setOnboardingStatus_(folderId, 'Provisioned');
-    // Real accounts exist now, so invite the candidate to pick an induction week (CC the senior).
-    _sendInductionInvite_(folderId, o);
-    return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
+    // Induction is a Quay 1 step only. Quay 1 gets the "pick your week" invite now; Aqua has no
+    // induction, so approval just marks it ready and the Tuesday batch creates + emails the login.
+    var isAqua = String(o.entity) === 'aqua';
+    if (!isAqua) _sendInductionInvite_(folderId, o);
+    return { ok: true, approved_at: approvedAt, approved_by: approvedBy,
+      message: isAqua
+        ? 'Approved. Accounts are created in the next scheduled setup batch (Tuesday 15:00) and the login is emailed then.'
+        : 'Approved and induction invite sent. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
   } finally {
     lock.releaseLock();
   }
@@ -362,6 +352,31 @@ function _sendInductionInvite_(folderId, o) {
       { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
   } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * Aqua contractors have no induction, so their new Google login is delivered by this welcome email,
+ * sent once the moment the batch provisions them (Quay 1 gets its login in the induction packet
+ * instead). Reads the created account from the restricted Credentials tab. Wrapped so a send failure
+ * never breaks the batch. Auto-send is permitted for this scoped onboarding-pipeline step.
+ */
+function _sendAquaWelcome_(folderId, o) {
+  o = o || {};
+  try {
+    if (!isEmail_(o.email)) { logAudit_('aqua_welcome_skipped_no_email', { folderId: folderId }); return; }
+    var cred = _credentialFor_(folderId);
+    if (!cred) { logAudit_('aqua_welcome_no_credential', { folderId: folderId }); return; }
+    var company = CFG.COMPANY.aqua;
+    var plain = 'Hi ' + firstName_(o.name) + ',\n\nWelcome to ' + company.full +
+      '. Your Google account is ready.\n\nEmail: ' + (cred.email || '-') +
+      '\nPassword: ' + (cred.temp_password || '-') +
+      '\n(On first sign-in, please switch on 2-step verification to keep your account secure.)' +
+      '\n\nWarm regards,\nThe ' + company.name + ' Team';
+    GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + ' - your login' + (o.name ? ' - ' + o.name : ''),
+      plain, { name: company.name,
+        htmlBody: aquaWelcomeHtml_(company, firstName_(o.name), cred),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+  } catch (err) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(err) }); }
 }
 
 /**
@@ -532,30 +547,29 @@ function _pushGroup_(arr, email) {
   arr.push(email);
 }
 
-/** A random, per-user temporary password that meets Google's complexity rules (mixed case + digit +
- *  symbol, 14 chars). Not derived from any personal detail, so it cannot be guessed from a name.
- *  changePasswordAtNextLogin forces the broker to set their own on first sign-in. */
-function _randomTempPw_() {
-  var upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ', lower = 'abcdefghijkmnpqrstuvwxyz';
-  var digit = '23456789', sym = '!@#$%*?';
-  var all = upper + lower + digit + sym;
-  var pick = function (set) { return set.charAt(Math.floor(Math.random() * set.length)); };
-  var out = pick(upper) + pick(lower) + pick(digit) + pick(sym);  // guarantee one of each class
-  for (var i = 0; i < 10; i++) out += pick(all);
-  return out.split('').sort(function () { return Math.random() - 0.5; }).join('');
+/** The standard broker password: "G" + first name (capitalised) + "@002", e.g. "GAnne@002". Set as a
+ *  PERMANENT password per the team's standing convention - the broker keeps this and is NOT forced to
+ *  change it at first sign-in (googleCreate_ sets changePasswordAtNextLogin false). Non-alphanumerics
+ *  are stripped from the first name so the value always meets Google's password rules. */
+function _standardPw_(firstName) {
+  var f = String(firstName || 'User').replace(/[^A-Za-z0-9]/g, '');
+  if (!f) f = 'User';
+  f = f.charAt(0).toUpperCase() + f.slice(1).toLowerCase();
+  return 'G' + f + '@002';
 }
 
 /**
  * Create the Google Workspace user. DRY_RUN (default): log + return the payload it WOULD send.
  * Live: Users.insert first@quay1.co.za (fallback first.surname@ on 409), then Members.insert
- * per group. Random per-user temp password (see _randomTempPw_), changePasswordAtNextLogin.
+ * per group. Standard "G<First>002" PERMANENT password (see _standardPw_); the broker is not forced
+ * to change it at first sign-in.
  */
 function googleCreate_(person) {
   var first = String(person.first_name || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
   var last = String(person.last_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   var primary = first + '@' + CFG.DOMAIN;
   var fallback = (first + (last ? '.' + last : '')) + '@' + CFG.DOMAIN;
-  var tempPw = _randomTempPw_();  // random per user; handed over via the private Credentials tab, never guessable
+  var tempPw = _standardPw_(person.first_name);  // standard "G<First>002" permanent password (team convention)
   var groups = _groupsForTeam_(person.team);
 
   if (DRY_RUN_()) {
@@ -568,7 +582,7 @@ function googleCreate_(person) {
     primaryEmail: primary,
     name: { givenName: person.first_name || 'User', familyName: person.last_name || (person.first_name || 'User') },
     password: tempPw,
-    changePasswordAtNextLogin: true,
+    changePasswordAtNextLogin: false,
   };
   try {
     AdminDirectory.Users.insert(body);
@@ -588,6 +602,142 @@ function googleCreate_(person) {
   recordCredential_({ full_name: person.full_name, quay_email: email, temp_password: tempPw,
     team: person.team, folderId: person.folderId });
   return { email: email, tempPw: tempPw, groups: groups };
+}
+
+/**
+ * Repair helper: (re)add an already-provisioned candidate to their Google groups (the company group +
+ * the derived team group), for cases where a group-add was silently skipped at provision time (e.g.
+ * the team group did not exist yet). Reads the account email from the Credentials tab. Idempotent -
+ * "already a member" is treated as success. NOTE: this can only ADD to groups that EXIST; creating a
+ * missing group needs the admin.directory.group scope (not granted), so a missing group is reported
+ * for you to create in admin.google.com, then re-run. Run from the editor. Returns a per-group summary.
+ */
+function retryGroupsForFolder_(folderId) {
+  var o = readOnboardingByFolder_(folderId) || {};
+  var cred = _credentialFor_(folderId);
+  var email = cred && cred.email ? String(cred.email).trim() : '';
+  if (!isEmail_(email)) { var m = 'No Google account email on file for ' + folderId + ' - was this person provisioned?'; Logger.log(m); return m; }
+  var groups = _groupsForTeam_(o.team);
+  var out = [];
+  groups.forEach(function (grp) {
+    try {
+      AdminDirectory.Members.insert({ email: email, role: 'MEMBER' }, grp);
+      out.push('ADDED ' + email + ' -> ' + grp);
+    } catch (e) {
+      var msg = String(e);
+      if (/member already exists|duplicate|409/i.test(msg)) { out.push('already in ' + grp); }
+      else if (/not\s*found|notFound|404|does not exist/i.test(msg)) { out.push('GROUP MISSING: ' + grp + ' - create it in admin.google.com, then re-run'); }
+      else { out.push('FAILED ' + grp + ': ' + msg); }
+    }
+  });
+  logAudit_('retry_groups', { folderId: folderId, email: email, team: o.team, result: out });
+  Logger.log(out.join('\n'));
+  return out.join(' | ');
+}
+
+/** Editor one-off: re-add Anne Wilkinson to her Google groups (Betties). Safe to delete after use. */
+function fixAnneGroups() {
+  return retryGroupsForFolder_('17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo');
+}
+
+/** Editor one-off: send Brendon Mark Smee his induction invite. He was approved before the induction
+ *  invite moved to the approval step, so it never went out; the new approve path is idempotent and
+ *  won't resend. Safe to delete after use. */
+function fixBrendonInvite() {
+  var folderId = '1lewxm-cb6L2GeuetkGx1M5f7eaH9VrUF';
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) { Logger.log('Brendon row not found'); return 'not found'; }
+  _sendInductionInvite_(folderId, o);
+  Logger.log('Induction invite sent to ' + (o.name || folderId) + ' <' + (o.email || '-') + '>');
+  return 'sent to ' + (o.email || folderId);
+}
+
+/**
+ * Editor one-off: re-queue Anne's failed PropData row with the correct surname. Her create was
+ * enqueued BEFORE fixAnneData, so the stored payload has last_name:"" - retryRow_ only flips the row
+ * to pending, it does not rebuild the payload, so a plain retry would create the profile with no
+ * surname. This patches last_name -> "Wilkinson" in the stored payload and sets status pending. Run it
+ * AFTER the worker (with the tolerant designation match) is redeployed. Safe to delete after use.
+ */
+function fixAnnePropdataPayload() {
+  var folderId = '17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo';
+  var t = _pqTab_();
+  var last = t.getLastRow();
+  if (last < 2) return 'queue empty';
+  var vals = t.getRange(2, 1, last - 1, PQ_HEADERS.length).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][PQ_COL.folderId]) === folderId && String(vals[i][PQ_COL.system]) === 'propdata') {
+      var row = i + 2;
+      var payload = {};
+      try { payload = JSON.parse(vals[i][PQ_COL.payload_json] || '{}'); } catch (e) { /* keep {} */ }
+      payload.last_name = 'Wilkinson';
+      t.getRange(row, PQ_COL.payload_json + 1).setNumberFormat('@').setValue(JSON.stringify(payload));
+      t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      t.getRange(row, PQ_COL.attempts + 1).setValue(0);   // clear the maxed-out (3/3) counter so it runs
+      t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
+      logAudit_('fix_anne_propdata', { row: row, payload: payload });
+      Logger.log('Anne propdata row ' + row + ': last_name="Wilkinson", status -> pending');
+      return 'requeued row ' + row;
+    }
+  }
+  return 'no propdata row found for Anne';
+}
+
+/**
+ * Editor one-off: fix Anne Wilkinson's misfiled record. At contract intake her name was split - "Anne"
+ * landed in Name and her surname "Wilkinson" was dropped into the ID number field, so her real SA ID
+ * was missing everywhere. This corrects, in order:
+ *   1. the source Onboarding row (name -> "Anne Wilkinson", id_number -> her real 13-digit SA ID);
+ *   2. the existing HR rows IN PLACE (tracking + New Brokers) - matched on the old "Wilkinson" key so
+ *      no duplicates are created - rebuilt from the corrected data;
+ *   3. her Google account display name (givenName/familyName), which was built from the split name.
+ * Idempotent-ish: re-running after step 1 finds no "Wilkinson"-keyed HR row and just reports that.
+ * Safe to delete after use.
+ */
+function fixAnneData() {
+  var folderId = '17nrAm7sdaLopk3YSwIgQQrXt4r_sxxGo';
+  var NEW_NAME = 'Anne Wilkinson', FIRST = 'Anne', LAST = 'Wilkinson';
+  var NEW_ID = '5608150046089';   // verified: 13-digit, Luhn-valid, decodes to 1956-08-15
+  var OLD_ID = 'Wilkinson';       // the surname currently misfiled in the id_number field
+  var log = [];
+
+  // 1) Source of truth: the Onboarding tracker row.
+  setOnboardingCell_(folderId, ONB_COL.name, NEW_NAME);
+  setOnboardingCell_(folderId, ONB_COL.id_number, NEW_ID);
+  var o = readOnboardingByFolder_(folderId) || {};
+  log.push('Onboarding row: name="' + o.name + '", id_number="' + o.id_number + '"');
+
+  // 2) The already-written HR rows: overwrite in place, matched by the OLD misfiled key.
+  if (hrSyncEnabled_()) {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+    [HR_TAB.tracking, HR_TAB.quay1].forEach(function (tabName) {
+      var sh = ss.getSheetByName(tabName);
+      if (!sh) { log.push(tabName + ': tab not found'); return; }
+      var row = _hrFindRowByKey_(sh, keyCol, OLD_ID);
+      if (!row) { log.push(tabName + ': no row keyed "' + OLD_ID + '" (already fixed?)'); return; }
+      sh.getRange(row, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([_hrBuildRow_(o)]);
+      log.push(tabName + ': corrected row ' + row);
+    });
+  } else {
+    log.push('HR sync OFF - HR rows left untouched');
+  }
+
+  // 3) Google account display name (was built from the split name).
+  var cred = _credentialFor_(folderId);
+  var email = cred && cred.email ? String(cred.email).trim() : '';
+  if (isEmail_(email)) {
+    try {
+      AdminDirectory.Users.update({ name: { givenName: FIRST, familyName: LAST } }, email);
+      log.push('Google account ' + email + ' name -> ' + NEW_NAME);
+    } catch (e) { log.push('Google name update FAILED: ' + String(e)); }
+  } else {
+    log.push('no Google account email on file - skipped name update');
+  }
+
+  logAudit_('fix_anne_data', { folderId: folderId, log: log });
+  Logger.log(log.join('\n'));
+  return log.join(' | ');
 }
 
 // ---------------------------------------------------------------- Credentials ledger
@@ -722,12 +872,37 @@ function _propdata_(person, action) {
 
 /** Write pending Provisioning Queue rows for the browser-only systems. Returns the queue_ids. */
 function enqueueBrowserSystems_(person, systems, action) {
+  var act = action || 'create';
   var ids = [];
+  // Test mode must NOT drop a live `pending` create row on the queue: the worker has its own DRY_RUN,
+  // but if it is armed while the app is not, it would pick that row up and create a REAL portal account
+  // despite this app being in dry-run. Deactivate rows are gated separately (googleSuspend_ + worker),
+  // so only the create path needs this guard. (Offboard enqueues via enqueueDeactivate_, not here.)
+  if (act === 'create' && DRY_RUN_()) {
+    logAudit_('browser_enqueue_skipped_dryrun', { folderId: person.folderId, systems: systems });
+    return ids;
+  }
+  // Existing create rows for this folder, so a manual re-provision that only needs to retry ONE failed
+  // system does not enqueue a DUPLICATE create for a system that is already open or done. Only an
+  // 'error' row is eligible to be re-created; pending/in_progress/done/skipped block a re-enqueue.
+  var existingCreate = {};
+  if (act === 'create') {
+    readQueue_(CFG.TAB.PROVISION_QUEUE).forEach(function (r) {
+      if (String(r.action) === 'create' && String(r.folderId) === String(person.folderId) &&
+          String(r.status || '').toLowerCase() !== 'error') {
+        existingCreate[String(r.system)] = true;
+      }
+    });
+  }
   (systems || []).forEach(function (s) {
     if (CFG.WORKER_SYSTEMS.indexOf(s) < 0) return;
     // Dialfire is now a manual email request to Alan (no create API), so it is NOT enqueued for the
     // worker - it would only hit an unimplemented DOM path. See _maybeRequestDialfire_.
     if (s === 'dialfire') return;
+    if (act === 'create' && existingCreate[s]) {
+      logAudit_('browser_enqueue_deduped', { folderId: person.folderId, system: s });
+      return;
+    }
     var payload = _browserPayload_(s, person);
     // Grant the worker's service account read access to the FICA headshot it will download to build
     // the branded profile photo. Non-fatal: a share failure just means the worker uses the logo.

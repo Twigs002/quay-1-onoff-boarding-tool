@@ -44,23 +44,39 @@ function setupHub() {
   return msg;
 }
 
-/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00)
- *  and the offboarding stuck-row reaper (every 15 min). */
+/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00 and
+ *  again ~14:00), the provisioning batch, the FICA/induction sweeps, and the offboarding reaper. */
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_') ScriptApp.deleteTrigger(t);
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayDigestAfternoon_' || fn === 'reapOffboarding_' ||
+        fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
+        fn === 'inductionPacketSweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
+  // Second send of the same induction digest at 14:00 (Africa/Johannesburg): after the booking cut-off
+  // and one hour before the 15:00 provisioning batch, so the team gets the final post-cutoff picture.
+  ScriptApp.newTrigger('tuesdayDigestAfternoon_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(14).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
-  // Deferred provisioning: create accounts once a week for everyone whose signed contract + FICA are
-  // in. Wednesday ~08:00 (Africa/Johannesburg per appsscript.json timeZone).
+  // Deferred provisioning: create accounts once a week for everyone approved (signed contract + FICA
+  // in AND an admin has approved). Tuesday 15:00 (Africa/Johannesburg per appsscript.json timeZone) -
+  // this is the ONLY time accounts are created; approval just marks a candidate ready for this batch.
   ScriptApp.newTrigger('provisionReadyBatch_').timeBased()
-    .onWeekDay(ScriptApp.WeekDay.WEDNESDAY).atHour(8).create();
-  return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00).';
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(15).create();
+  // FICA follow-up: hourly sweep that nudges anyone 12+ hours past their contract email who has not
+  // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
+  ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
+    .everyHours(1).create();
+  // Induction packet: every morning ~06:00 (Africa/Johannesburg), send the full packet WITH logins to
+  // anyone whose induction Wednesday is that day. Booking itself only sends the "confirmed" email now.
+  ScriptApp.newTrigger('inductionPacketSweep_').timeBased()
+    .everyDays(1).atHour(6).create();
+  return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), offboarding reaper ' +
+    '(every 15 min), provisioning batch (Tuesday ~15:00), FICA follow-up sweep (hourly, daytime), ' +
+    'induction packet sweep (daily ~06:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */
@@ -357,17 +373,58 @@ function hubStatus() {
     webapp_url: isSet(PROP.WEBAPP_URL),
     supabase: isSet(PROP.SUPABASE_URL),
     quay1_templates: isSet(PROP.QUAY1_TEMPLATE_SALE) + '/' + isSet(PROP.QUAY1_TEMPLATE_RENTAL),
+    quay1_parent_folder: isSet(PROP.QUAY1_PARENT_FOLDER),
+    // Aqua must have ALL of these set or onboardAqua_ throws (no folder / no template) and no Aqua
+    // row is ever written - the usual reason "Aqua contractors have no HR row / no sheet to update".
     aqua_templates: isSet(PROP.AQUA_TEMPLATE_MONTHLY) + '/' + isSet(PROP.AQUA_TEMPLATE_FIXED) + '/' + isSet(PROP.AQUA_TEMPLATE_PERMANENT),
+    aqua_parent_folder: isSet(PROP.AQUA_PARENT_FOLDER),
+    hr_sheet: isSet(PROP.HR_SHEET_ID),
     propdata_creds: isSet(PROP.PROPDATA_API_KEY) + '/' + isSet(PROP.PROPDATA_VENDOR_ID),
     hubspot_token: isSet(PROP.HUBSPOT_TOKEN),
     groups_json: isSet(PROP.GROUPS_JSON),
     flags: {
       DRY_RUN: DRY_RUN_(), OFFBOARD_ARMED: offboardArmed_(),
       HUBSPOT_SEAT_ENABLED: hubspotSeatEnabled_(), PROPDATA_LIVE: propdataLive_(),
+      HR_SYNC_ENABLED: hrSyncEnabled_(), CC_ENABLED: ccEnabled_(),
     },
   };
   Logger.log(JSON.stringify(s, null, 2));
   return s;
+}
+
+/**
+ * READ-ONLY diagnostic (editor Run): the single call that explains the HR + Aqua questions -
+ * "where do Aqua employees go on the HR sheet" and "why don't their contracts sit for approval".
+ * Reports, per entity, how many onboarding rows exist and how many are docs-complete/approved, plus
+ * which HR destination tabs actually exist in the live HR sheet. If aqua.total is 0, no Aqua person
+ * has ever been onboarded through the tool (so there is nothing to promote and no Aqua tab yet);
+ * if the Aqua tab is absent it is created automatically on the first Aqua promotion. Sends nothing.
+ */
+function diagnoseHrAqua() {
+  var counts = {};
+  listOnboarding_().forEach(function (o) {
+    var e = String(o.entity || '(blank)');
+    counts[e] = counts[e] || { total: 0, docs_ready: 0, approved: 0, provisioned: 0, promoted_to_hr: 0 };
+    counts[e].total++;
+    if (_docsReady_(o)) counts[e].docs_ready++;
+    if (o.approved_at) counts[e].approved++;
+    if (o.provisioned_at) counts[e].provisioned++;
+    if (o.hr_promoted_at) counts[e].promoted_to_hr++;
+  });
+  var tabs = {};
+  try {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    Object.keys(HR_TAB).forEach(function (k) { tabs[HR_TAB[k]] = !!ss.getSheetByName(HR_TAB[k]); });
+  } catch (e) { tabs = { error: String(e) }; }
+  var out = {
+    hr_sync_enabled: hrSyncEnabled_(),
+    hr_sheet_set: !!optProp_(PROP.HR_SHEET_ID),
+    aqua_configured: !!optProp_(PROP.AQUA_PARENT_FOLDER) && !!optProp_(PROP.AQUA_TEMPLATE_MONTHLY),
+    onboarding_rows_by_entity: counts,
+    hr_destination_tabs_present: tabs,
+  };
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 // ---------------------------------------------------------------- helpers

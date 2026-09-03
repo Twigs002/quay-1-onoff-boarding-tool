@@ -226,7 +226,7 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     if (!Array.isArray(sys)) {
       sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
-    out.push({
+    var item = {
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       status: o.status || '',
       docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
@@ -238,7 +238,16 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,
-    });
+    };
+    // Admin-only: the editable core fields, so the Admin Check "Edit" form can pre-fill current values.
+    // Gated behind isAdmin so PII (email / ID) is not exposed to a non-admin onboarder's status read.
+    if (isAdmin) {
+      item.edit = {
+        name: o.name || '', email: o.email || '', id_number: o.id_number || '', contact: o.contact || '',
+        team: o.team || '', senior_name: o.senior_name || '', senior_email: o.senior_email || '',
+      };
+    }
+    out.push(item);
   });
   return out;
 }
@@ -277,6 +286,9 @@ function retryRow_(queueId, ctx) {
       }
       var row = i + 2;
       t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      // Reset the attempts counter, else the worker sees it already at the cap (3) and immediately
+      // re-marks the row 'error' without running - so a retry of an EXHAUSTED row would never execute.
+      t.getRange(row, PQ_COL.attempts + 1).setValue(0);
       t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
       return { ok: true };
     }
@@ -339,6 +351,15 @@ function setOffboardStatus_(offbId, status, googleResult, workerResult) {
     t.getRange(row, OQ_COL.worker_result_json + 1).setNumberFormat('@')
       .setValue(JSON.stringify(workerResult || {}));
   }
+}
+
+/** Live status (H) for one OQ row, trimmed + lowercased; '' if the row is gone. Read fresh from the
+ *  sheet (not a snapshot) so an atomic scheduled -> firing claim can compare-and-set under a lock. */
+function offboardStatus_(offbId) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (!row) return '';
+  return String(t.getRange(row, OQ_COL.status + 1).getValue() || '').trim().toLowerCase();
 }
 
 /** Record the one-shot trigger id (K) for an OQ row. */

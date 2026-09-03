@@ -52,7 +52,7 @@ var HR_HEADERS = [
   'ID Received', 'Agreement Received', 'Ryan Greeff Signed', 'Welcome Email Sent',
   'Calender Check: BIRTHDAY', 'Calender Check: WORK ANNIVERSARY', 'Next of Kin Name',
   'Next of Kin Contact Number', 'Next of Kin Relationship', 'Next of Kin Email',
-  'FFC CERTIFICATE NUMBER', 'Team working',
+  'FFC CERTIFICATE NUMBER', 'Team working', 'FFC Status',
 ];
 
 /** The tracking tab carries one extra trailing status column so HR can see promotion state without
@@ -79,6 +79,7 @@ function hrTrackingUpsert_(folderId) {
   var target = _hrFindRowByKey_(sh, keyCol, o.id_number);
   if (!target) target = Math.max(sh.getLastRow() + 1, 2);
   sh.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  sh.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
   try { setOnboardingCell_(folderId, ONB_COL.hr_tracking_at, nowIso_()); } catch (e) { /* non-fatal */ }
   return { ok: true, row: target };
@@ -108,6 +109,7 @@ function hrPromote_(folderId) {
   var existing = _hrFindRowByKey_(dest, keyCol, o.id_number);
   var target = existing || Math.max(dest.getLastRow() + 1, 2);
   dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
   try {
@@ -128,6 +130,46 @@ function hrPromote_(folderId) {
   catch (e) { logAudit_('hr_promoted_marker_failed', { folderId: folderId, error: String(e) }); }
   logAudit_('hr_promoted', { folderId: folderId, name: o.name, entity: entity, dest: destName });
   return { ok: true, row: target, dest: destName };
+}
+
+/**
+ * Refresh an ALREADY-promoted candidate's destination-tab row IN PLACE (never appends) with current
+ * onboarding data. Only non-empty freshly-built values overwrite; where the row builder has nothing to
+ * say the existing cell is kept - that is what protects the HR-owned columns the builder leaves blank
+ * (Ryan Greeff Signed, Welcome Email Sent, the calendar checks) from being clobbered. No-op when the
+ * person has no destination row yet: that first copy is hrPromote_'s job.
+ *
+ * This is what makes FICA (or an admin edit) that lands AFTER promotion actually show up on the entity
+ * tab. Without it, hrPromote_ self-guards on hr_promoted_at and later doc ticks only ever reach the
+ * tracking tab - the exact reason an imported Aqua contractor's later FICA never appeared on
+ * "New Aqua (Automated)". DRY_RUN-safe (gated by hrSyncEnabled_); callers wrap in try/catch.
+ */
+function hrRefreshDest_(folderId) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
+  var destName = HR_TAB[entity];
+
+  if (!hrSyncEnabled_()) {
+    logAudit_('hr_refresh_dryrun', { folderId: folderId, name: o.name, dest: destName });
+    return { ok: true, dryRun: true };
+  }
+
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var dest = ss.getSheetByName(destName);
+  if (!dest) return { ok: true, skipped: 'dest tab missing' };
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+  var target = _hrFindRowByKey_(dest, keyCol, o.id_number);
+  if (!target) return { ok: true, skipped: 'no destination row yet' }; // never promoted; leave to hrPromote_
+
+  var built = _hrBuildRow_(o);
+  var existing = dest.getRange(target, 1, 1, HR_HEADERS.length).getValues()[0];
+  // Merge: a non-empty freshly-built value wins; otherwise keep what HR has on the sheet.
+  var merged = built.map(function (v, i) { return String(v).trim() ? v : existing[i]; });
+  dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([merged]);
+  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // keep the folder link fresh too
+  logAudit_('hr_refresh_dest', { folderId: folderId, name: o.name, dest: destName, row: target });
+  return { ok: true, row: target };
 }
 
 // ---------------------------------------------------------------- row builder
@@ -177,11 +219,105 @@ function _hrBuildRow_(o) {
     'Next of Kin Email': o.nok_email,
     'FFC CERTIFICATE NUMBER': o.ffc_number,
     'Team working': o.team,
+    // FFC status (full/candidate/none) - a Quay 1 concept only, so blank for Aqua contractors.
+    'FFC Status': (String(o.entity) === 'quay1' ? String(o.ffc_status || '') : ''),
   };
   return HR_HEADERS.map(function (h) { var v = map[h]; return v == null ? '' : String(v); });
 }
 
+/** Rich-text value for the "Name & Surname" cell (column A): the person's name as a clickable
+ *  hyperlink to their onboarding Drive folder (contract + FICA docs). Falls back to plain name text
+ *  when the folder id is missing or unreadable. Applied AFTER the bulk row write, since setValues
+ *  cannot carry a link. */
+function _hrNameRich_(o) {
+  var name = String((o && o.name) || '').trim() || 'Unnamed';
+  var url = '';
+  try { if (o && o.folderId) url = DriveApp.getFolderById(o.folderId).getUrl(); } catch (e) { url = ''; }
+  // Surface a dropped link instead of silently writing a plain-text name: a missing/unreadable
+  // folder id is the root cause of "HR folders not being linked", so leave an audit trail.
+  if (!url) logAudit_('hr_name_link_missing', { name: name, folderId: (o && o.folderId) || '' });
+  var b = SpreadsheetApp.newRichTextValue().setText(name);
+  if (url) b.setLinkUrl(url);
+  return b.build();
+}
+
+/**
+ * Editor one-off: backfill the column-A name hyperlink onto existing HR rows (tracking + both
+ * destination tabs). For every onboarding row it finds the matching HR row by Identification Number
+ * and rewrites the name cell as a link to that person's folder. New/re-synced rows already get it;
+ * this is for rows written before the link existed. Gated by HR sync. Safe to re-run.
+ */
+function backfillHrNameLinks() {
+  if (!hrSyncEnabled_()) { Logger.log('HR sync OFF - not touching the HR sheet'); return 'HR sync OFF'; }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+  var out = {};
+  Object.keys(HR_TAB).forEach(function (k) { out[HR_TAB[k]] = 0; });
+  var rowsById = {};
+  listOnboarding_().forEach(function (o) { if (o.id_number) rowsById[String(o.id_number).trim()] = o; });
+  Object.keys(HR_TAB).forEach(function (k) {
+    var name = HR_TAB[k], sh = ss.getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var keys = sh.getRange(2, keyCol, sh.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      var o = rowsById[String(keys[i][0]).trim()];
+      if (o) { sh.getRange(i + 2, 1).setRichTextValue(_hrNameRich_(o)); out[name]++; }
+    }
+  });
+  logAudit_('hr_name_links_backfill', out);
+  Logger.log(JSON.stringify(out, null, 2));
+  return JSON.stringify(out);
+}
+
 // ---------------------------------------------------------------- tab + row helpers
+
+/**
+ * Editor one-off: add the "FFC Status" header column to the EXISTING live HR tabs so their layout
+ * matches the updated HR_HEADERS (auto-created tabs already get it). Adds it to the shared tracking
+ * tab and the Quay 1 destination tab only - FFC is a Quay 1 concept, so the Aqua tab is left alone.
+ * The tracking tab has a trailing "Tracking status" column sitting where FFC Status now goes, so we
+ * INSERT a column there to push it right (no data lost); the destination tab just gets the header
+ * appended. Idempotent - skips a tab that already has the header. Existing rows are NOT backfilled
+ * (they populate on their next sync); run from the editor after deploying the code. Gated by HR sync.
+ */
+/** Editor diagnostic: log row 1 (headers) of each HR tab with absolute column numbers, so we can see
+ *  the TRUE live layout vs HR_HEADERS. Read-only. Run from the editor and paste the log. */
+function dumpHrHeaders() {
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var out = [];
+  [HR_TAB.tracking, HR_TAB.quay1, HR_TAB.aqua].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { out.push(name + ': NOT FOUND'); return; }
+    var last = sh.getLastColumn();
+    var hdr = sh.getRange(1, 1, 1, last).getValues()[0];
+    var cells = hdr.map(function (h, i) { return (i + 1) + ':' + String(h == null ? '' : h).trim(); });
+    out.push('=== ' + name + ' (' + last + ' cols) ===\n' + cells.join('  |  '));
+  });
+  var msg = out.join('\n\n');
+  Logger.log(msg);
+  return msg;
+}
+
+function migrateHrAddFfcStatus() {
+  if (!hrSyncEnabled_()) { Logger.log('HR sync is OFF - not touching the HR sheet'); return 'HR sync OFF'; }
+  var ffcCol = HR_HEADERS.indexOf('FFC Status') + 1;
+  if (!ffcCol) { Logger.log('deploy the code first - FFC Status not in HR_HEADERS'); return 'FFC Status not in HR_HEADERS'; }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var out = [];
+  [HR_TAB.tracking, HR_TAB.quay1].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) { out.push(name + ': tab not found'); return; }
+    if (String(sh.getRange(1, ffcCol).getValue()).trim() === 'FFC Status') { out.push(name + ': already has FFC Status'); return; }
+    if (sh.getMaxColumns() < ffcCol) sh.insertColumnsAfter(sh.getMaxColumns(), ffcCol - sh.getMaxColumns());
+    var occupant = String(sh.getRange(1, ffcCol).getValue()).trim();
+    if (occupant) { sh.insertColumnBefore(ffcCol); }   // preserve whatever is there (e.g. Tracking status)
+    sh.getRange(1, ffcCol).setValue('FFC Status').setFontWeight('bold');
+    out.push(name + ': FFC Status set at col ' + ffcCol + (occupant ? ' (inserted; preserved "' + occupant + '")' : ''));
+  });
+  logAudit_('hr_add_ffc_status', { result: out });
+  Logger.log(out.join('\n'));
+  return out.join(' | ');
+}
 
 /** Get a tab by name; create it (with the HR_HEADERS header row, + the tracking status column for
  *  the tracking tab) when missing and `createIfMissing`. Returns null if absent and not creating. */

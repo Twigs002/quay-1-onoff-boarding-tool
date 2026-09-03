@@ -163,9 +163,11 @@ function ficaUpload_(body) {
 
   setOnboardingStatus_(folderId, 'FICA received');
 
-  // Mirror to HR: refresh the tracking row, then promote (append-only, once) into the entity
-  // destination tab now that FICA is complete. Non-fatal + DRY_RUN-safe.
-  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
+  // Mirror to HR: refresh the tracking row, promote (append-only, once) into the entity destination
+  // tab, then refresh that destination row in place. The refresh is what carries FICA that lands
+  // AFTER promotion (e.g. an imported Aqua contractor whose real docs arrive later) onto the entity
+  // tab - hrPromote_ self-guards on hr_promoted_at and would otherwise skip. Non-fatal + DRY_RUN-safe.
+  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); hrRefreshDest_(folderId); }
   catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
   if (isEmail_(meta.email)) {
@@ -313,9 +315,9 @@ badLink +
 '<div class="card"><p class="sec">7 - Professional status</p>' +
 '<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
 '<div class="radios">' +
-'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status &ndash; I hold a valid FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner &ndash; working towards my FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status &ndash; I do not hold an FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status: I hold a valid FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner, working towards my FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status: I do not hold an FFC</span></label>' +
 '</div></div>' +
 '<div class="row" id="ffcNumRow"><label for="ffc_number">FFC number <span class="req" id="ffcNumReq">*</span></label>' +
 '<input type="text" id="ffc_number" autocomplete="off">' +
@@ -336,7 +338,7 @@ badLink +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - your documents are stored securely and used only for FICA compliance.</p>' +
 '</div><script>' +
-'var ENDPOINT=' + JSON.stringify(endpoint) + ';var FOLDER_ID=' + JSON.stringify(folderId) + ';' +
+'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
 'var KNOWN=' + (known ? 'true' : 'false') + ';' +
 'var form=document.getElementById("ficaForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
 'if(!KNOWN&&btn){btn.disabled=true;}' +
