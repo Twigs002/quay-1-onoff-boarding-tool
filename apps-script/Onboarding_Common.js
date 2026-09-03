@@ -291,7 +291,9 @@ function editOnboarding_(body, ctx) {
   keys.forEach(function (k) { setOnboardingCell_(folderId, ONB_COL[k], changes[k]); });
   logAudit_('onboard_edited', { folderId: folderId, by: (ctx && ctx.email) || 'admin', fields: keys });
   // Keep the HR master sheet in step with the correction (best-effort; the row edit already stands).
-  try { hrTrackingUpsert_(folderId); }
+  // Refresh the destination row too so a correction reaches an already-promoted person's entity tab,
+  // not just the tracking tab.
+  try { hrTrackingUpsert_(folderId); hrRefreshDest_(folderId); }
   catch (e) { logAudit_('hr_tracking_failed', { folderId: folderId, error: String(e) }); }
   return { ok: true, message: 'Saved.', fields: keys };
 }

@@ -163,9 +163,11 @@ function ficaUpload_(body) {
 
   setOnboardingStatus_(folderId, 'FICA received');
 
-  // Mirror to HR: refresh the tracking row, then promote (append-only, once) into the entity
-  // destination tab now that FICA is complete. Non-fatal + DRY_RUN-safe.
-  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
+  // Mirror to HR: refresh the tracking row, promote (append-only, once) into the entity destination
+  // tab, then refresh that destination row in place. The refresh is what carries FICA that lands
+  // AFTER promotion (e.g. an imported Aqua contractor whose real docs arrive later) onto the entity
+  // tab - hrPromote_ self-guards on hr_promoted_at and would otherwise skip. Non-fatal + DRY_RUN-safe.
+  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); hrRefreshDest_(folderId); }
   catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
   if (isEmail_(meta.email)) {

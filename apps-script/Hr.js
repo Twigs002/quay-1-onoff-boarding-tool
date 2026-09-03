@@ -132,6 +132,46 @@ function hrPromote_(folderId) {
   return { ok: true, row: target, dest: destName };
 }
 
+/**
+ * Refresh an ALREADY-promoted candidate's destination-tab row IN PLACE (never appends) with current
+ * onboarding data. Only non-empty freshly-built values overwrite; where the row builder has nothing to
+ * say the existing cell is kept - that is what protects the HR-owned columns the builder leaves blank
+ * (Ryan Greeff Signed, Welcome Email Sent, the calendar checks) from being clobbered. No-op when the
+ * person has no destination row yet: that first copy is hrPromote_'s job.
+ *
+ * This is what makes FICA (or an admin edit) that lands AFTER promotion actually show up on the entity
+ * tab. Without it, hrPromote_ self-guards on hr_promoted_at and later doc ticks only ever reach the
+ * tracking tab - the exact reason an imported Aqua contractor's later FICA never appeared on
+ * "New Aqua (Automated)". DRY_RUN-safe (gated by hrSyncEnabled_); callers wrap in try/catch.
+ */
+function hrRefreshDest_(folderId) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
+  var destName = HR_TAB[entity];
+
+  if (!hrSyncEnabled_()) {
+    logAudit_('hr_refresh_dryrun', { folderId: folderId, name: o.name, dest: destName });
+    return { ok: true, dryRun: true };
+  }
+
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var dest = ss.getSheetByName(destName);
+  if (!dest) return { ok: true, skipped: 'dest tab missing' };
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+  var target = _hrFindRowByKey_(dest, keyCol, o.id_number);
+  if (!target) return { ok: true, skipped: 'no destination row yet' }; // never promoted; leave to hrPromote_
+
+  var built = _hrBuildRow_(o);
+  var existing = dest.getRange(target, 1, 1, HR_HEADERS.length).getValues()[0];
+  // Merge: a non-empty freshly-built value wins; otherwise keep what HR has on the sheet.
+  var merged = built.map(function (v, i) { return String(v).trim() ? v : existing[i]; });
+  dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([merged]);
+  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // keep the folder link fresh too
+  logAudit_('hr_refresh_dest', { folderId: folderId, name: o.name, dest: destName, row: target });
+  return { ok: true, row: target };
+}
+
 // ---------------------------------------------------------------- row builder
 
 /** Build the HR_HEADERS-ordered values array from an onboarding field object. Doc ticks in the

@@ -276,3 +276,61 @@ function importLegacyAquaContractors() {
   Logger.log(JSON.stringify(out, null, 2));
   return out;
 }
+
+/**
+ * EDITOR ONE-OFF (Run): register FICA documents that are already ON FILE in an Aqua contractor's Drive
+ * folder but were never recorded on the tracker. This is the case for contractors collected by the OLD
+ * aqua-contracts script and then imported here: their "FICA documents" subfolder already holds the
+ * ID / BANK / POA (/ TAX) files, yet the tracker's FICA ticks stayed blank, so "New Aqua (Automated)"
+ * showed nothing received even though the docs were in hand.
+ *
+ * For every Aqua onboarding row it opens the "FICA documents" subfolder and, using the tool's own
+ * filename convention ("<LABEL> - <name>.<ext>" mapped via FICA_LABEL_KEY), ticks each doc that is
+ * physically present; it also lifts residential address + income tax number out of the "FICA details"
+ * note the old script saved. It then re-syncs HR - the tracking tab plus an in-place destination
+ * refresh (hrRefreshDest_) so an already-promoted row actually updates. NDA is a manual tick, so it is
+ * never auto-set. Idempotent and safe to re-run; the HR writes are gated by HR sync.
+ */
+function backfillAquaFicaFromFolder() {
+  var out = { hr_sync_enabled: hrSyncEnabled_(), processed: [] };
+  listOnboarding_(function (o) { return o.entity === 'aqua' && o.folderId; }).forEach(function (o) {
+    var r = { name: o.name, folderId: o.folderId, ticked: [], fields: [] };
+    try {
+      var subIt = DriveApp.getFolderById(o.folderId).getFoldersByName('FICA documents');
+      if (!subIt.hasNext()) { r.skipped = 'no FICA documents subfolder'; out.processed.push(r); return; }
+      var sub = subIt.next();
+
+      var files = sub.getFiles(), seen = {};
+      while (files.hasNext()) {
+        var fname = files.next().getName();
+        var prefix = String(fname.split(' - ')[0] || '').toUpperCase().trim();
+        var key = FICA_LABEL_KEY[prefix];
+        if (key && !seen[key]) {                       // tick a doc that is on file but not yet recorded
+          seen[key] = true;
+          if (!o['fica_' + key]) { tickFica_(o.folderId, key); r.ticked.push(key); }
+        }
+        if (/^FICA details/i.test(fname)) {            // the old script's structured note: lift HR fields
+          var txt = '';
+          try { txt = sub.getFilesByName(fname).next().getBlob().getDataAsString(); } catch (e) { /* skip */ }
+          var patch = {};
+          var addr = (txt.match(/Residential address:\s*(.+)/i) || [])[1];
+          var tax = (txt.match(/Income tax number:\s*(.+)/i) || [])[1];
+          if (addr && !o.residential_address) { patch.residential_address = addr.trim(); r.fields.push('residential_address'); }
+          if (tax && !o.tax_number) { patch.tax_number = tax.trim(); r.fields.push('tax_number'); }
+          if (Object.keys(patch).length) { patch.folderId = o.folderId; upsertOnboardingRow_(patch); }
+        }
+      }
+
+      // Push the now-complete picture onto the HR sheet: tracking tab + the entity destination row.
+      try { hrTrackingUpsert_(o.folderId); hrRefreshDest_(o.folderId); }
+      catch (e) { r.hr_error = String(e); }
+      r.ok = true;
+    } catch (err) {
+      r.ok = false; r.error = String(err && err.message ? err.message : err);
+      logAudit_('aqua_fica_backfill_failed', { name: o.name, folderId: o.folderId, error: r.error });
+    }
+    out.processed.push(r);
+  });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
