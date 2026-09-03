@@ -60,9 +60,11 @@ var HS_COL = { team: 1, division: 2, username: 3, password: 4, code_to: 5, updat
  *
  * Fill this list, then Run:  [{ team, password, code_to }]  (code_to optional).
  */
+// SECURITY: never commit real passwords here - they are secrets and must not enter git history.
+// Leave this list EMPTY in the repo. To do a batch, paste the entries into THIS array inside the Apps
+// Script editor (that copy is not in git), Run recordHubSpotLogins(), then clear it again. The passwords
+// live only in the sheet (their system of record). Format: { team, password, code_to } (code_to optional).
 var HS_LOGINS_TO_RECORD = [
-  { team: 'Betties', password: 'HSBetties002', code_to: 'Pagan' },
-  { team: 'Dealmakers', password: 'HSDealmakers002' },
 ];
 
 function recordHubSpotLogins() {
