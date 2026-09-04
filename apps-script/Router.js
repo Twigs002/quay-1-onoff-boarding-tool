@@ -17,6 +17,7 @@
  *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [admin]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
+ *   mark_induction_complete        -> markInductionComplete_(folderId, ctx)       [onboarder]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
  *   offboard                       -> Offboarding.offboardRequest_(body, ctx)     [admin]
  *   offboard_notify                -> requestOffboardNotify_(body, ctx)           [onboarder]
@@ -37,8 +38,10 @@ var TOKENLESS_KINDS = { fica_upload: true, candidate_upload: true, book_inductio
 function doGet(e) {
   try {
     var p = (e && e.parameter) || {};
-    if (p.f) return ficaForm_(String(p.f));                 // candidate FICA upload page (HTML)
-    if (p.i) return inductionPageHtml_(String(p.i));         // candidate induction booking page (HTML)
+    // A Drive folder id is only [A-Za-z0-9_-]; strip anything else so a crafted ?f=/?i= value can
+    // never carry markup into the page (defence-in-depth alongside jsInScript_ at the injection site).
+    if (p.f) return ficaForm_(_safeFolderId_(p.f));          // candidate FICA upload page (HTML)
+    if (p.i) return inductionPageHtml_(_safeFolderId_(p.i)); // candidate induction booking page (HTML)
     return textOut_('ok'); // health ping
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -86,6 +89,7 @@ function dispatch_(kind, body, ctx) {
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
+    case 'mark_induction_complete': return _inductionCompleteDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
@@ -138,6 +142,16 @@ function _resendPacketDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return resendInductionPacket_(folderId, ctx);
+}
+
+/** Mark induction completed (kind:'mark_induction_complete'). Same access as resend_packet - any
+ *  onboarder (super/admin/senior broker) may complete a candidate they can see. Stamping the row
+ *  removes the candidate from the Progress report (see Queue.readForUi_). */
+function _inductionCompleteDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return markInductionComplete_(folderId, ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded

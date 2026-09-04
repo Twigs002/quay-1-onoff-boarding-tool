@@ -72,6 +72,15 @@ PROFILE_DIR: Path = Path(os.environ.get("PROFILE_DIR", str(ROOT / "browser_profi
 # ---- run limits ----------------------------------------------------------
 MAX_ROWS_PER_PASS: int = _int("MAX_ROWS_PER_PASS", 25)   # 0 = no limit
 MAX_ATTEMPTS: int = _int("MAX_ATTEMPTS", 3)
+# A row claimed (status in_progress) but never finished - because the process was killed, the Mac
+# slept, or a Playwright run hung - is "stale" once its updated_at is older than this. The next pass
+# re-pends it so it is retried instead of silently stranding the candidate. Must be comfortably longer
+# than the slowest real provisioning run so a genuinely in-flight row is never yanked out from under a
+# live worker (a single flock'd instance means only one worker holds a row at a time anyway).
+STALE_IN_PROGRESS_MIN: int = _int("STALE_IN_PROGRESS_MIN", 20)
+# Filesystem lock guaranteeing a single poll.py instance at a time (overlapping runs could otherwise
+# both claim the same row - the CAS narrows but does not close that window).
+LOCK_PATH: str = os.environ.get("WORKER_LOCK_PATH", str(ROOT / ".worker.lock"))
 
 # ---- per-portal admin identities ----------------------------------------
 # (username from env, password from Keychain via get_password()).

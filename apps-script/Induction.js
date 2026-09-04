@@ -68,6 +68,29 @@ function resendInductionPacket_(folderId, ctx) {
 }
 
 /**
+ * Mark a candidate's induction as completed (admin/onboarder action from the Progress report
+ * "Induction completed" button). Stamps induction_completed_at, which removes the candidate from the
+ * Progress report entirely (Queue.readForUi_ filters completed folders out of both the "Induction
+ * booked" list and the account-setup rows). Refuses if no induction week was ever booked. Idempotent:
+ * re-marking an already-completed row returns ok without re-stamping.
+ */
+function markInductionComplete_(folderId, ctx) {
+  folderId = String(folderId || '');
+  if (!folderId) return { ok: false, error: 'missing reference' };
+  var meta = readOnboardingByFolder_(folderId);
+  if (!meta) return { ok: false, error: 'not_found' };
+  var wed = String(meta.induction_wed || '').trim();
+  var thu = String(meta.induction_thu || '').trim();
+  if (!wed && !thu) return { ok: false, error: 'Cannot complete an induction that was never booked.' };
+  var already = String(meta.induction_completed_at || '').trim();
+  if (already) return { ok: true, completed_at: already, completed: true };
+  var when = nowIso_();
+  setInductionCompleted_(folderId, when);
+  logAudit_('induction_completed', { folderId: folderId, by: (ctx && ctx.email) || 'admin' });
+  return { ok: true, completed_at: when, completed: true };
+}
+
+/**
  * Build + send the induction packet (booked dates + Google/HubSpot logins) to the candidate, CC the
  * senior broker, and alert the team when no HubSpot login is on record. Shared by bookInduction_ (first
  * send) and resendInductionPacket_. Wrapped so a send failure never propagates to the caller.
@@ -324,7 +347,7 @@ badLink + bookedMsg +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - we look forward to welcoming you.</p>' +
 '</div><script>' +
-'var ENDPOINT=' + JSON.stringify(endpoint) + ';var FOLDER_ID=' + JSON.stringify(folderId) + ';' +
+'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
 'var KNOWN=' + (known ? 'true' : 'false') + ';' +
 'var form=document.getElementById("indForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
 'if(!KNOWN&&btn){btn.disabled=true;}' +

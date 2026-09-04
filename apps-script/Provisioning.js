@@ -722,12 +722,37 @@ function _propdata_(person, action) {
 
 /** Write pending Provisioning Queue rows for the browser-only systems. Returns the queue_ids. */
 function enqueueBrowserSystems_(person, systems, action) {
+  var act = action || 'create';
   var ids = [];
+  // Test mode must NOT drop a live `pending` create row on the queue: the worker has its own DRY_RUN,
+  // but if it is armed while the app is not, it would pick that row up and create a REAL portal account
+  // despite this app being in dry-run. Deactivate rows are gated separately (googleSuspend_ + worker),
+  // so only the create path needs this guard. (Offboard enqueues via enqueueDeactivate_, not here.)
+  if (act === 'create' && DRY_RUN_()) {
+    logAudit_('browser_enqueue_skipped_dryrun', { folderId: person.folderId, systems: systems });
+    return ids;
+  }
+  // Existing create rows for this folder, so a manual re-provision that only needs to retry ONE failed
+  // system does not enqueue a DUPLICATE create for a system that is already open or done. Only an
+  // 'error' row is eligible to be re-created; pending/in_progress/done/skipped block a re-enqueue.
+  var existingCreate = {};
+  if (act === 'create') {
+    readQueue_(CFG.TAB.PROVISION_QUEUE).forEach(function (r) {
+      if (String(r.action) === 'create' && String(r.folderId) === String(person.folderId) &&
+          String(r.status || '').toLowerCase() !== 'error') {
+        existingCreate[String(r.system)] = true;
+      }
+    });
+  }
   (systems || []).forEach(function (s) {
     if (CFG.WORKER_SYSTEMS.indexOf(s) < 0) return;
     // Dialfire is now a manual email request to Alan (no create API), so it is NOT enqueued for the
     // worker - it would only hit an unimplemented DOM path. See _maybeRequestDialfire_.
     if (s === 'dialfire') return;
+    if (act === 'create' && existingCreate[s]) {
+      logAudit_('browser_enqueue_deduped', { folderId: person.folderId, system: s });
+      return;
+    }
     var payload = _browserPayload_(s, person);
     // Grant the worker's service account read access to the FICA headshot it will download to build
     // the branded profile photo. Non-fatal: a share failure just means the worker uses the logo.

@@ -221,12 +221,14 @@ class PropDataProvisioner(Provisioner):
 
             # Save
             self._save(page)
-            self._await_save(page)
+            saved = self._await_save(page)
 
-        log.info("propdata.create OK: %s (%s) designation=%s photo=%s",
+        existed = (saved == "exists")
+        log.info("propdata.create %s: %s (%s) designation=%s photo=%s",
+                 "ALREADY-EXISTS (idempotent)" if existed else "OK",
                  person.full_name, email, designation, photo_added)
         return result(True, "create", self.system, email=email, designation=designation,
-                      photo_added=photo_added)
+                      photo_added=photo_added, already_existed=existed)
 
     def _deactivate_live(self, person: Person) -> dict:
         # The offboard/deactivate DOM path was not part of the mapped walk-through.
@@ -366,12 +368,16 @@ class PropDataProvisioner(Provisioner):
         else:
             page.get_by_text("Save User", exact=True).click()
 
-    def _await_save(self, page) -> None:
-        """Confirm the save actually persisted. On success PDMS leaves the /add page
-        (back to the users list). If it stays on /add, the form was rejected - gather
-        the visible 'required' field errors and raise so the caller reports failure
-        instead of a false success."""
-        for _ in range(30):
+    def _await_save(self, page) -> str:
+        """Confirm the save actually persisted. On success PDMS leaves the /add page (back to the users
+        list) and we return "". If it stays on /add we gather the visible errors: when PDMS's OWN
+        unique-email validation says the address is already in use, that means the agent already exists
+        (typically because a previous attempt created it but its redirect was slower than our poll, and
+        the row was retried) - we return "exists" so the caller records an IDEMPOTENT success instead of
+        creating a duplicate. Any other rejection raises."""
+        # Up to 30s (60 x 500ms). PDMS's post-save SPA redirect can lag well past 15s on a slow network;
+        # a too-short wait was false-negativing a successful save, and the retry then made a 2nd agent.
+        for _ in range(60):
             page.wait_for_timeout(500)
             url = page.url
             if "/login" in url:
@@ -380,7 +386,7 @@ class PropDataProvisioner(Provisioner):
                 raise RuntimeError("PDMS session expired during save - agent may not have been created")
             # Success only when PDMS leaves the add form FOR the users list / a user detail page.
             if "/agents/add" not in url and "/agents" in url:
-                return
+                return ""
         # still on the add form -> collect actionable diagnostics (not just "unknown"): (a) any field
         # group carrying a required/invalid/error marker (by class OR text, since PDMS does not always
         # print the word "required"), and (b) any visible alert / toast / validation banner text.
@@ -398,9 +404,19 @@ class PropDataProvisioner(Provisioner):
                 }""") or {}
         except Exception:  # noqa: BLE001
             info = {}
-        self._shot(page, "_savefail")
         fields = info.get("fields") or []
         banners = info.get("banners") or []
+        # PDMS enforces unique agent emails. If the rejection is a duplicate-email message, the agent
+        # already exists (our prior attempt created it, or an admin did) - treat as an idempotent
+        # success rather than raising, so a retry never creates a second live profile.
+        import re as _re
+        blob = " ".join(fields + banners).lower()
+        if _re.search(r"already\s+(exist|registered|in use|taken)|duplicate|"
+                      r"e-?mail[^.]*(exist|taken|in use|registered)", blob):
+            log.warning("propdata.create: PDMS reports the email already exists - treating as an "
+                        "idempotent success (no duplicate created): %s", blob[:200])
+            return "exists"
+        self._shot(page, "_savefail")
         detail = "; ".join(p for p in [
             ("fields flagged: " + ", ".join(fields)) if fields else "",
             ("messages: " + " | ".join(banners)) if banners else "",

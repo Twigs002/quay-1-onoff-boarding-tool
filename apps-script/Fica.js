@@ -313,9 +313,9 @@ badLink +
 '<div class="card"><p class="sec">7 - Professional status</p>' +
 '<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
 '<div class="radios">' +
-'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status &ndash; I hold a valid FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner &ndash; working towards my FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status &ndash; I do not hold an FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status: I hold a valid FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner, working towards my FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status: I do not hold an FFC</span></label>' +
 '</div></div>' +
 '<div class="row" id="ffcNumRow"><label for="ffc_number">FFC number <span class="req" id="ffcNumReq">*</span></label>' +
 '<input type="text" id="ffc_number" autocomplete="off">' +
@@ -336,7 +336,7 @@ badLink +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - your documents are stored securely and used only for FICA compliance.</p>' +
 '</div><script>' +
-'var ENDPOINT=' + JSON.stringify(endpoint) + ';var FOLDER_ID=' + JSON.stringify(folderId) + ';' +
+'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
 'var KNOWN=' + (known ? 'true' : 'false') + ';' +
 'var form=document.getElementById("ficaForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
 'if(!KNOWN&&btn){btn.disabled=true;}' +
