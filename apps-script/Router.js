@@ -17,6 +17,7 @@
  *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [admin]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
+ *   mark_induction_complete        -> markInductionComplete_(folderId, ctx)       [onboarder]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
  *   offboard                       -> Offboarding.offboardRequest_(body, ctx)     [admin]
  *   offboard_notify                -> requestOffboardNotify_(body, ctx)           [onboarder]
@@ -88,6 +89,7 @@ function dispatch_(kind, body, ctx) {
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
+    case 'mark_induction_complete': return _inductionCompleteDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
@@ -140,6 +142,16 @@ function _resendPacketDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return resendInductionPacket_(folderId, ctx);
+}
+
+/** Mark induction completed (kind:'mark_induction_complete'). Same access as resend_packet - any
+ *  onboarder (super/admin/senior broker) may complete a candidate they can see. Stamping the row
+ *  removes the candidate from the Progress report (see Queue.readForUi_). */
+function _inductionCompleteDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return markInductionComplete_(folderId, ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded

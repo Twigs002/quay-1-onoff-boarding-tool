@@ -26,6 +26,7 @@
     approve: 'approve',
     remind: 'remind',
     resendPacket: 'resend_packet',
+    markInductionComplete: 'mark_induction_complete',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
@@ -648,14 +649,17 @@
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
       const when = [o.induction_wed, o.induction_thu].filter(Boolean).map((d) => fmtNiceDate(d)).join(' & ');
-      return `<div class="pipe-row">
+      return `<div class="pipe-row" data-row="${esc(o.folderId)}">
         <div class="pipe-main">
           <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
           <div class="pipe-team muted">${esc(o.team || '')}${when ? ` · induction ${esc(when)}` : ''}</div>
         </div>
         <div class="pipe-side">
           <span class="pill s-done">Induction booked</span>
-          <div class="pipe-actions"><button type="button" class="btn btn-ghost btn-sm" data-resend="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Resend induction packet</button></div>
+          <div class="pipe-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-resend="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Resend induction packet</button>
+            <button type="button" class="btn btn-primary btn-sm" data-complete="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Induction completed</button>
+          </div>
         </div>
       </div>`;
     }).join('');
@@ -670,6 +674,24 @@
           b.classList.remove('loading'); b.disabled = false;
         } catch (err) {
           toast('Could not resend packet', err.message, 'err');
+          b.classList.remove('loading'); b.disabled = false;
+        }
+      });
+    });
+    // "Induction completed" marks the candidate done: the backend stamps induction_completed_at, which
+    // drops them off the Progress report. Remove the card on success; clear the whole section if empty.
+    host.querySelectorAll('[data-complete]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.name || 'this person';
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          await api(KINDS.markInductionComplete, { folderId: b.dataset.complete });
+          toast('Induction completed', `${esc(name)} has been marked as inducted and cleared from the Progress report.`, 'ok');
+          const row = b.closest('[data-row]');
+          if (row) row.remove();
+          if (!host.querySelector('[data-row]')) host.innerHTML = '';
+        } catch (err) {
+          toast('Could not mark completed', err.message, 'err');
           b.classList.remove('loading'); b.disabled = false;
         }
       });

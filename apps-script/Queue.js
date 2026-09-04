@@ -159,6 +159,13 @@ function readForUi_(ctx) {
   // The candidate pipeline: onboarded people not yet set up, so admins can review + Approve & set up.
   // Scoped to a broker's own candidates for non-admins.
   var onboarding = _onboardingPipeline_(isAdmin, email, pq);
+  // Candidates whose induction was marked completed drop off the Progress report entirely: hide their
+  // account-setup (Provisioning Queue) rows too, not just the "Induction booked" list. Keyed by folderId.
+  var completed = {};
+  listOnboarding_().forEach(function (o) {
+    if (o.induction_completed_at) completed[o.folderId] = true;
+  });
+  pq = pq.filter(function (r) { return !completed[r.folderId]; });
   if (!isAdmin && email) {
     // Scope the provisioning queue to ALL of the broker's own candidates (by requester_email), NOT the
     // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
@@ -183,6 +190,7 @@ function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
+    if (o.induction_completed_at) return;               // completed -> off the Progress report
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',

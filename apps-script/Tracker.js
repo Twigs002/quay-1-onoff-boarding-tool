@@ -88,6 +88,11 @@ var ONB_COL = {
   // the automatic 12-hour "please submit via the secure link" nudge (ficaFollowUpSweep_). Empty
   // until each fires. See Onboarding_Common.js.
   contract_emailed_at: 55, fica_followup_at: 56,
+  // When an admin/onboarder clicks "Induction completed" on the Progress report. Stamping it drops the
+  // candidate off the Progress report (the "Induction booked" list AND their account-setup rows) - they
+  // have finished the whole flow. Idempotency marker so re-clicking is a no-op. See Induction.js
+  // markInductionComplete_ and Queue.readForUi_ (the completed-folder filter).
+  induction_completed_at: 57,
 };
 
 var ONB_HEADERS = [
@@ -103,7 +108,7 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
-  'Contract emailed at', 'FICA follow-up at',
+  'Contract emailed at', 'FICA follow-up at', 'Induction completed at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by
@@ -223,6 +228,12 @@ function setInduction_(folderId, wed, thu) {
 
 function setOnboardingStatus_(folderId, status) {
   setOnboardingCell_(folderId, ONB_COL.status, status);
+}
+
+/** Stamp the induction-completed marker (defaults to now). Setting it removes the candidate from the
+ *  Progress report (see Queue.readForUi_). See Induction.markInductionComplete_ for the gated caller. */
+function setInductionCompleted_(folderId, iso) {
+  setOnboardingCell_(folderId, ONB_COL.induction_completed_at, iso || nowIso_());
 }
 
 /** All onboarding rows as field objects (optionally filtered by a predicate). */
