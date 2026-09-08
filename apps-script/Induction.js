@@ -107,6 +107,12 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
           htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu }, cred, teamLogin),
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
+      // The induction packet IS the Quay 1 welcome pack: record that it went out and reflect it on the
+      // HR row (which was promoted earlier, on acceptance). Non-fatal.
+      try {
+        setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
+        hrMarkWelcomeSent_(folderId);
+      } catch (e) { logAudit_('welcome_sent_mark_failed', { folderId: folderId, error: String(e) }); }
     }
     // Team HubSpot login NOT on record -> alert the team (CC Sheldon + Marthinus) so the new hire
     // gets access and no one has to chase it. Suppressed when internal mail is off (ccEnabled_).

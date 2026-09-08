@@ -439,6 +439,9 @@ function _sendAquaWelcome_(folderId, o) {
     GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + (o.name ? ' - ' + o.name : ''), plain,
       { name: company.name, htmlBody: aquaWelcomeHtml_(company, first, cred),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    // Record that the Aqua welcome pack went out and reflect it on the HR row (promoted moments ago).
+    setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
+    hrMarkWelcomeSent_(folderId);
   } catch (e) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(e) }); }
 }
 

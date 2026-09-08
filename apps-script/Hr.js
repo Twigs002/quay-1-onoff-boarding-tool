@@ -137,12 +137,43 @@ function hrPromote_(folderId) {
   return { ok: true, row: target, dest: destName };
 }
 
+/** Set the "Welcome Email Sent" cell on the candidate's HR row, called when the welcome pack actually
+ *  sends (Quay 1 induction packet / Aqua welcome). Because HR promotion happens earlier (on
+ *  acceptance), the row usually already exists on the entity destination tab; we update it in place,
+ *  falling back to the staging tracking tab, and no-op if neither exists yet (a later promotion will
+ *  pick the value up from welcome_email_at via _hrBuildRow_). DRY_RUN/HR_SYNC-safe; caller wraps in
+ *  try/catch. */
+function hrMarkWelcomeSent_(folderId) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  if (!hrSyncEnabled_()) {
+    logAudit_('hr_welcome_sent_dryrun', { folderId: folderId, name: o.name });
+    return { ok: true, dryRun: true, would: 'mark Welcome Email Sent for ' + (o.name || o.id_number) };
+  }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+  var col = HR_HEADERS.indexOf('Welcome Email Sent') + 1;
+  var val = fmtDate_(o.welcome_email_at || nowIso_());
+  var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
+  var tabs = [HR_TAB[entity], HR_TAB.tracking];   // prefer the "active" destination tab, else staging
+  for (var i = 0; i < tabs.length; i++) {
+    var sh = _hrEnsureTab_(ss, tabs[i], false);
+    if (!sh) continue;
+    var row = _hrFindRowByKey_(sh, keyCol, o.id_number);
+    if (row) {
+      sh.getRange(row, col).setNumberFormat('@').setValue(val);
+      return { ok: true, tab: tabs[i], row: row };
+    }
+  }
+  return { ok: true, skipped: 'no HR row yet - reflected on promotion' };
+}
+
 // ---------------------------------------------------------------- row builder
 
 /** Build the HR_HEADERS-ordered values array from an onboarding field object. Doc ticks in the
  *  boarding tracker are non-empty strings ("Received <iso>") when a doc is in, so a truthy check =
- *  received. Formula/manual HR columns (cal-checks, Ryan Greeff, welcome email) are left blank for
- *  HR to fill or for the sheet's own formulas. */
+ *  received. "Welcome Email Sent" is auto-stamped from welcome_email_at; the remaining formula/manual
+ *  HR columns (cal-checks, Ryan Greeff) are left blank for HR to fill or for the sheet's own formulas. */
 function _hrBuildRow_(o) {
   var received = function (v) { return String(v || '').trim() ? 'TRUE' : ''; };
   var sa = isSaId_(o.id_number);
@@ -175,7 +206,7 @@ function _hrBuildRow_(o) {
     'ID Received': received(o.fica_id),
     'Agreement Received': received(o.fica_contract),
     'Ryan Greeff Signed': '',
-    'Welcome Email Sent': '',
+    'Welcome Email Sent': o.welcome_email_at ? fmtDate_(o.welcome_email_at) : '',
     'Calender Check: BIRTHDAY': '',
     'Calender Check: WORK ANNIVERSARY': '',
     'Next of Kin Name': o.nok_name,
