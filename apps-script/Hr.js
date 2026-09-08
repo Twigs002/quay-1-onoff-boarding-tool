@@ -332,3 +332,112 @@ function repairHrIds_(apply) {
   logAudit_('hr_id_repair_summary', summary);
   return summary;
 }
+
+// ---------------------------------------------------------------- work-permit expiry alerts
+
+/** Whole days from today (script-local midnight) until a stored work_permit_expiry, or null when the
+ *  value is not a parseable date. Stored format is 'YYYY-MM-DD' - the value comes straight from the
+ *  FICA page's <input type="date"> (Fica.js), persisted verbatim as text (Tracker _putOnb_). Using
+ *  Date.UTC for both endpoints cancels the timezone so the difference is whole calendar days. */
+function _workPermitDaysLeft_(expiry) {
+  var s = String(expiry == null ? '' : expiry).trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  var y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  var expUtc = Date.UTC(y, mo - 1, d);
+  var chk = new Date(expUtc);
+  if (chk.getUTCFullYear() !== y || chk.getUTCMonth() !== mo - 1 || chk.getUTCDate() !== d) return null;
+  var now = new Date();
+  var todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((expUtc - todayUtc) / 86400000);
+}
+
+/**
+ * Weekly HR alert for work permits that are expiring soon or have already lapsed. Nothing else ever
+ * re-reads work_permit_expiry after FICA captures it, so without this a permit can quietly expire while
+ * the person keeps access. Scans the onboarding rows, keeps active staff (provisioned_at set) whose
+ * permit is within CFG.WORK_PERMIT_ALERT_DAYS of expiry or already past it, and - when any are found -
+ * sends ONE digest to CFG.WORK_PERMIT_ALERT_TO listing each person soonest-first.
+ *
+ * Stateless / idempotent-by-cadence: no columns, no per-row marker. It only emails when someone is in
+ * window, so a weekly run is a natural non-spammy reminder cadence. Follows the DRY_RUN pattern of
+ * _requestManualAccount_ / _maybeNotifyAquaAccepted_ (Provisioning.js): in DRY_RUN it DRAFTS (previewable),
+ * when armed it sends. Never throws - wrapped in try/catch, failures go to logAudit_. Returns a small
+ * summary object { ok, count, dryRun, alerted:[{name,id,daysLeft}] }.
+ */
+function workPermitExpirySweep_() {
+  try {
+    var horizon = Number(CFG.WORK_PERMIT_ALERT_DAYS);
+    if (isNaN(horizon)) horizon = 30;
+
+    // Active, non-legacy staff only: skip migrated-legacy imports and abandoned drafts (no provisioned_at).
+    var rows = listOnboarding_(function (o) {
+      if (_isMigratedLegacy_(o)) return false;
+      if (!String(o.provisioned_at || '').trim()) return false;
+      return String(o.work_permit_expiry || '').trim() !== '';
+    });
+
+    var items = [];
+    rows.forEach(function (o) {
+      var daysLeft = _workPermitDaysLeft_(o.work_permit_expiry);
+      if (daysLeft == null) {
+        logAudit_('work_permit_unparsable', { folderId: o.folderId, name: o.name, value: String(o.work_permit_expiry) });
+        return;
+      }
+      if (daysLeft <= horizon) {
+        items.push({
+          name: o.name || o.id_number || '(unnamed)',
+          entity: o.entity || '',
+          expiry: String(o.work_permit_expiry).trim(),
+          daysLeft: daysLeft,
+          id_number: o.id_number || '',
+        });
+      }
+    });
+
+    if (!items.length) {
+      logAudit_('work_permit_sweep', { count: 0 });
+      return { ok: true, count: 0, dryRun: DRY_RUN_(), alerted: [] };
+    }
+
+    // Soonest-first: most-expired at the top, then nearest expiry.
+    items.sort(function (a, b) { return a.daysLeft - b.daysLeft; });
+
+    var recipients = (CFG.WORK_PERMIT_ALERT_TO || []).filter(Boolean);
+    var alerted = items.map(function (it) { return { name: it.name, id: it.id_number, daysLeft: it.daysLeft }; });
+
+    if (!recipients.length) {
+      logAudit_('work_permit_no_recipients', { count: items.length, alerted: alerted });
+      return { ok: false, count: items.length, error: 'no recipients', alerted: alerted };
+    }
+
+    var company = (CFG.COMPANY && CFG.COMPANY.quay1) || { name: 'Quay 1', full: 'Quay 1 International Realty' };
+    var subject = 'Work permit expiry alert - ' + items.length + ' to review';
+    var lines = items.map(function (it) {
+      var when = (it.daysLeft < 0)
+        ? ('EXPIRED ' + Math.abs(it.daysLeft) + ' day' + (Math.abs(it.daysLeft) === 1 ? '' : 's') + ' ago')
+        : (it.daysLeft === 0) ? 'expires today'
+        : (it.daysLeft + ' day' + (it.daysLeft === 1 ? '' : 's') + ' left');
+      return '- ' + it.name + (it.entity ? ' (' + it.entity + ')' : '') +
+        ': permit expiry ' + fmtDate_(it.expiry) + ', ' + when;
+    });
+    var plain = 'The following staff have a work permit that has expired or is expiring soon.\n' +
+      'Please follow up so nobody keeps access on a lapsed permit.\n\n' + lines.join('\n') +
+      '\n\nThanks,\nThe ' + company.name + ' Team';
+    var opts = { name: company.name, htmlBody: workPermitAlertHtml_(company, items) };
+
+    if (DRY_RUN_()) {
+      // Test mode: DRAFT only (previewable), mirroring _requestManualAccount_ / _maybeNotifyAquaAccepted_.
+      GmailApp.createDraft(recipients.join(','), subject, plain, opts);
+      logAudit_('work_permit_sweep_drafted', { count: items.length, to: recipients.join(','), alerted: alerted });
+      return { ok: true, count: items.length, dryRun: true, alerted: alerted };
+    }
+    GmailApp.sendEmail(recipients.join(','), subject, plain, opts);
+    logAudit_('work_permit_sweep_sent', { count: items.length, to: recipients.join(','), alerted: alerted });
+    return { ok: true, count: items.length, dryRun: false, alerted: alerted };
+  } catch (err) {
+    logAudit_('work_permit_sweep_failed', { error: String(err) });
+    return { ok: false, error: String(err) };
+  }
+}

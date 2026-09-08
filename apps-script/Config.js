@@ -215,6 +215,13 @@ var CFG = {
   // notification to these people; the full destructive offboarding stays super/admin. Extend later.
   OFFBOARD_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za', 'sheldon@quay1.co.za'],
 
+  // Work-permit expiry alerts: HR recipient list for the weekly permit-expiry digest (see
+  // workPermitExpirySweep_ in Hr.js). CONFIRM these addresses with HR before arming. Internal
+  // @quay1 addresses, not secrets.
+  WORK_PERMIT_ALERT_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
+  // How many days ahead of a work-permit expiry to start alerting (also flags already-expired permits).
+  WORK_PERMIT_ALERT_DAYS: 30,
+
   MAX_ATTEMPTS: 3,
   OFFBOARD_DELAY_MIN: 30,
   // A row still in 'firing' this many minutes after its fire_at is treated as stuck
