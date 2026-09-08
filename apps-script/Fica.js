@@ -185,6 +185,11 @@ function ficaUpload_(body) {
 
   if (isEmail_(meta.email)) {
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
+    // Quay 1 only: copy the candidate's senior broker on the "documents received" email so they know
+    // their new hire's FICA is in and being checked. Aqua contractors have no senior broker here.
+    // Gated by ccEnabled_ like every other internal copy (matches the decline / induction senior CC).
+    var seniorCc = (ccEnabled_() && (meta.entity || 'quay1') !== 'aqua' && isEmail_(meta.senior_email))
+      ? meta.senior_email : undefined;
     try {
       GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,
         'Hi ' + firstName_(name) + ',\n\nThank you for submitting your documents to ' +
@@ -192,6 +197,7 @@ function ficaUpload_(body) {
         'email shortly confirming your induction day.\n\n' +
         'Warm regards,\nThe ' + company.name + ' Team', {
           bcc: ccEnabled_() ? CFG.ALWAYS_CC.filter(function (x) { return x; }).join(',') : undefined,
+          cc: seniorCc,
           name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name)),
         });
     } catch (err) { logAudit_('fica_thankyou_failed', { folderId: folderId, error: String(err) }); }
