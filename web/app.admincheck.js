@@ -143,7 +143,9 @@
         <div class="pipe-side">
           ${statusPill}
           <div class="pipe-actions">
-            <button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>
+            ${o.declined
+              ? '<button type="button" class="btn btn-primary btn-sm" disabled title="This candidate was declined. They must re-submit the declined documents before they can be accepted.">Accept &amp; set up</button>'
+              : `<button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>`}
             <button type="button" class="btn btn-ghost btn-sm btn-danger" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>

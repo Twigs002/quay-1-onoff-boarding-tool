@@ -144,6 +144,17 @@ function _propdataRole_(person) {
 // ctx is passed through for downstream audit/identity use.
 function provisionAll_(folderId, systems, ctx) {
   var person = _personFor_(folderId);
+  // Entity cap, defense in depth: re-apply ENTITY_SYSTEMS_ALLOW here too, not only in resolveSystems_,
+  // so nothing can smuggle a barred system onto an entity however the systems list was assembled - a
+  // hand-edited systems_json, a legacy row, or an explicit `provision` list all pass through here.
+  // Aqua = Google + Dialfire only, never PropData/CMA. quay1 has no cap.
+  var _allow = CFG.ENTITY_SYSTEMS_ALLOW && CFG.ENTITY_SYSTEMS_ALLOW[person.entity];
+  if (_allow) {
+    var _before = systems;
+    systems = systems.filter(function (s) { return _allow.indexOf(s) >= 0; });
+    var _dropped = _before.filter(function (s) { return systems.indexOf(s) < 0; });
+    if (_dropped.length) logAudit_('entity_scope_filtered_provision', { entity: person.entity, folderId: folderId, dropped: _dropped });
+  }
   var results = {};
   var anyError = false;
 
@@ -278,6 +289,9 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
+      // Promote into HR's entity "active" tab on acceptance (same single promotion point as the
+      // interactive accept path; append-once, idempotent, HR_SYNC/DRY_RUN-safe).
+      try { hrPromote_(o.folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: o.folderId, error: String(e) }); }
       // Quay 1: induction invite. Aqua: Google-only welcome pack (no induction step). Same one-time
       // sends as the interactive accept path.
       if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
@@ -313,6 +327,13 @@ function approveAndProvision_(folderId, ctx) {
     if (o.provisioned_at) return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
     if (!_docsReady_(o)) {
       return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
+    }
+    // A decline is not cleared until the candidate re-uploads (ficaUpload_ clears declined_at). So a
+    // set declined_at means "declined, not yet re-submitted" - refuse acceptance, otherwise an admin
+    // could provision against the very documents that were just rejected. The doc ticks stay set on
+    // decline (so the row stays visible), which is exactly why _docsReady_ alone is not enough here.
+    if (String(o.declined_at || '').trim()) {
+      return { ok: false, error: 'declined: this candidate was declined and has not re-submitted yet - they must re-submit the declined documents before they can be accepted' };
     }
     // Stamp the approval FIRST - a human approved, and that fact holds even if provisioning fails or
     // is deferred (test mode). It satisfies the gate for any later retry by the batch.
@@ -357,6 +378,10 @@ function approveAndProvision_(folderId, ctx) {
     }
     setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
     setOnboardingStatus_(folderId, 'Provisioned');
+    // Now the starter is accepted AND set up: promote them into HR's entity "active" tab (append-once,
+    // idempotent). This is the ONLY place HR promotion happens - NOT at FICA upload - so a declined or
+    // never-hired candidate never lands in HR's active tab. Non-fatal + HR_SYNC/DRY_RUN-safe.
+    try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
     // Real accounts exist now. Quay 1 candidates pick an induction week; Aqua has no induction, so an
     // Aqua contractor instead gets the Google-only welcome pack. Both CC the senior when CC is on.
     if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
