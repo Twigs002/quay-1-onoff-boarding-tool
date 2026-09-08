@@ -41,7 +41,8 @@ function resolveSystems_(entity, programs, explicit, team, activity) {
     s = String(s || '').toLowerCase();
     if (CFG.SYSTEMS.indexOf(s) >= 0 && s !== 'hubspot') set[s] = true;
   };
-  if (explicit && explicit.length) {
+  var usedExplicit = !!(explicit && explicit.length);
+  if (usedExplicit) {
     explicit.forEach(add);
   } else {
     (CFG.CORE_SYSTEMS[entity] || []).forEach(add);
@@ -52,9 +53,27 @@ function resolveSystems_(entity, programs, explicit, team, activity) {
   }
   // Team-configured systems are a baseline that applies in BOTH branches (see docstring).
   if (team) teamMapping_(team).systems.forEach(add);
+  var out = Object.keys(set);
+  // Entity CAP first: an entity may hard-limit which systems it can EVER hold, no matter how one was
+  // added (explicit tick, team map, program). Aqua = Google + Dialfire only. quay1 has no cap. This
+  // runs before the role matrix so a barred-by-entity system is stripped even for a full broker role.
+  var allow = CFG.ENTITY_SYSTEMS_ALLOW && CFG.ENTITY_SYSTEMS_ALLOW[entity];
+  if (allow) {
+    var before = out;
+    out = out.filter(function (s) { return allow.indexOf(s) >= 0; });
+    var dropped = before.filter(function (s) { return out.indexOf(s) < 0; });
+    if (dropped.length) logAudit_('entity_scope_filtered', { entity: entity, dropped: dropped });
+    // If a crafted EXPLICIT list was entirely outside the cap (e.g. aqua systems:['propdata']), the
+    // filter would leave the person with NO systems at all. Fall back to the entity core set within the
+    // cap so they still get their baseline accounts (aqua -> Google + Dialfire) rather than nothing.
+    if (usedExplicit && !out.length) {
+      out = (CFG.CORE_SYSTEMS[entity] || []).filter(function (s) { return allow.indexOf(s) >= 0; });
+      if (out.length) logAudit_('entity_scope_explicit_emptied_fallback', { entity: entity, fallback: out });
+    }
+  }
   // Entitlements matrix has the FINAL say: strip systems this broker role may not hold, even when
   // explicitly ticked or team-mapped (e.g. a JB assistant never gets CMA). See Config.
-  return entitlementFilter_(Object.keys(set), activity);
+  return entitlementFilter_(out, activity);
 }
 
 /** Extract the broker role token ('sb' full Broker | 'jb' Assistant) from a broker-activity value.
@@ -96,6 +115,7 @@ function _personFor_(folderId) {
   var o = readOnboardingByFolder_(folderId) || {};
   return {
     folderId: folderId,
+    entity: o.entity || '',   // used by provisionAll_ to keep Dialfire request-only for Aqua
     full_name: o.name || '',
     first_name: firstName_(o.name || ''),
     last_name: lastName_(o.name || ''),
@@ -126,12 +146,23 @@ function _propdataRole_(person) {
  * enqueue the browser systems for the worker. Returns { ok, results:{system:status} }.
  */
 // NOTE: auth is enforced at the CALL SITE, not here. provisionAll_ runs from two paths:
-//   - the scheduled provisionReadyBatch_ (Wednesday 08:00), which provisions a row ONLY once its
+//   - the scheduled provisionReadyBatch_ (Tuesday 15:00), which provisions a row ONLY once its
 //     signed contract + FICA docs are in - NOTHING is created at onboard time anymore;
 //   - the standalone 'provision' kind (_provisionDispatch_), which asserts requireAdmin_.
 // ctx is passed through for downstream audit/identity use.
 function provisionAll_(folderId, systems, ctx) {
   var person = _personFor_(folderId);
+  // Entity cap, defense in depth: re-apply ENTITY_SYSTEMS_ALLOW here too, not only in resolveSystems_,
+  // so nothing can smuggle a barred system onto an entity however the systems list was assembled - a
+  // hand-edited systems_json, a legacy row, or an explicit `provision` list all pass through here.
+  // Aqua = Google + Dialfire only, never PropData/CMA. quay1 has no cap.
+  var _allow = CFG.ENTITY_SYSTEMS_ALLOW && CFG.ENTITY_SYSTEMS_ALLOW[person.entity];
+  if (_allow) {
+    var _before = systems;
+    systems = systems.filter(function (s) { return _allow.indexOf(s) >= 0; });
+    var _dropped = _before.filter(function (s) { return systems.indexOf(s) < 0; });
+    if (_dropped.length) logAudit_('entity_scope_filtered_provision', { entity: person.entity, folderId: folderId, dropped: _dropped });
+  }
   var results = {};
   var anyError = false;
 
@@ -145,6 +176,9 @@ function provisionAll_(folderId, systems, ctx) {
   // PropData is now a browser-worker system (see WORKER_SYSTEMS); it is enqueued below
   // with the other browser systems rather than created inline via the old feeds-api REST.
   var browser = systems.filter(function (s) { return CFG.WORKER_SYSTEMS.indexOf(s) >= 0; });
+  // Aqua: Dialfire is NOT provisioned by the system - it is a request to Alan (_maybeRequestDialfire_),
+  // so it must never become a worker job (which would error and leave the contractor stuck "incomplete").
+  if (person.entity === 'aqua') browser = browser.filter(function (s) { return s !== 'dialfire'; });
   enqueueBrowserSystems_(person, browser, 'create');
   browser.forEach(function (s) { results[s] = 'pending'; });
 
@@ -236,12 +270,16 @@ function _docsReady_(o) {
  *  the Tuesday 15:00 batch reads it. */
 function _provisionReady_(o) {
   if (!o || !_docsReady_(o) || !o.approved_at) return false;
+  // A set declined_at means "declined, not re-submitted yet" - never provision against rejected docs,
+  // even from the batch. ficaUpload_ clears declined_at on re-submission (and declineFica_ also clears
+  // approved_at), so a re-approved row is needed to pass this gate again. Mirrors approveAndProvision_.
+  if (String(o.declined_at || '').trim()) return false;
   if (String(o.entity) === 'aqua') return true;
   return !!(o.induction_wed || o.induction_thu);
 }
 
 /**
- * SCHEDULED BATCH (Wednesday 08:00, installed by setupTriggers). Nothing is created at onboard time;
+ * SCHEDULED BATCH (Tuesday 15:00, installed by setupTriggers). Nothing is created at onboard time;
  * this is where accounts are actually provisioned - and ONLY for a row that is _provisionReady_ (a
  * signed contract + full FICA) and not already provisioned (provisioned_at empty). Idempotent: the
  * provisioned_at marker + the queue's own dedup mean a re-run never double-provisions. Uses the
@@ -251,14 +289,23 @@ function _provisionReady_(o) {
 function provisionReadyBatch_() {
   var ctx = { email: 'batch@' + CFG.DOMAIN, role: 'system', name: 'Provisioning batch' };
   var out = { provisioned: [], not_ready: 0, already: 0, errors: [] };
-  listOnboarding_().forEach(function (o) {
-    if (o.provisioned_at) { out.already++; return; }        // done in a prior run
-    if (!_provisionReady_(o)) { out.not_ready++; return; }   // waiting on signed contract / FICA
-    var systems = safeJsonParse_(o.systems_json, null);
-    if (!Array.isArray(systems) || !systems.length) {
-      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
-    }
+  listOnboarding_().forEach(function (o0) {
+    if (o0.provisioned_at) { out.already++; return; }        // done in a prior run (cheap pre-check)
+    if (!_provisionReady_(o0)) { out.not_ready++; return; }   // waiting on signed contract / FICA / booking
+    // Serialise each row's read->provision->stamp under the same script lock approveAndProvision_ uses,
+    // so a concurrent interactive accept (or an overlapping batch run) can never double-provision one
+    // candidate. We re-read the LIVE row inside the lock and re-check both gates against it - the
+    // snapshot above may be stale by the time we hold the lock.
+    var lock = _acquireLock_();
+    lock.waitLock(30000);
     try {
+      var o = readOnboardingByFolder_(o0.folderId) || o0;
+      if (o.provisioned_at) { out.already++; return; }        // provisioned while we waited for the lock
+      if (!_provisionReady_(o)) { out.not_ready++; return; }
+      var systems = safeJsonParse_(o.systems_json, null);
+      if (!Array.isArray(systems) || !systems.length) {
+        systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+      }
       var prov = provisionAll_(o.folderId, systems, ctx);
       if (prov.anyError) {
         setOnboardingStatus_(o.folderId, 'Setup error');
@@ -268,17 +315,29 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
+      // Promote into HR's entity "active" tab at provisioning time (append-once, idempotent, reconciling,
+      // HR_SYNC/DRY_RUN-safe). This is a real-accounts-created moment, so it is a correct promotion point
+      // alongside the interactive accept path (approveAndProvision_) - never at FICA upload.
+      try { hrPromote_(o.folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: o.folderId, error: String(e) }); }
       // Induction invite is NOT sent here - it goes out on approval now (approveAndProvision_), well
       // before this Tuesday batch, so the candidate can pick a week early. Quay 1 gets its login in the
       // induction packet; Aqua has no induction, so deliver Aqua's login now, once, as we stamp
       // provisioned_at (the provisioned_at guard above stops this row re-provisioning, so it sends once).
       if (String(o.entity) === 'aqua') _sendAquaWelcome_(o.folderId, o);
-      _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
-      _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
+      // Re-intersect with the entity cap before the account-request emails, so a hand-edited aqua
+      // systems_json (e.g. ['cma']) can never trigger a paid CMA request the entity may not hold.
+      var reqSystems = systems;
+      var _reqAllow = CFG.ENTITY_SYSTEMS_ALLOW && CFG.ENTITY_SYSTEMS_ALLOW[o.entity];
+      if (_reqAllow) reqSystems = systems.filter(function (s) { return _reqAllow.indexOf(s) >= 0; });
+      _maybeRequestCma_(o.folderId, o, reqSystems);      // CMA/Dialfire account-requests also fire from
+      _maybeRequestDialfire_(o.folderId, o, reqSystems); // the batch path (idempotent, stamped once)
+      _maybeNotifyAquaAccepted_(o.folderId, o);          // Aqua "can join" notice (no-op for quay1)
       out.provisioned.push(o.folderId);
     } catch (err) {
-      out.errors.push({ folderId: o.folderId, error: String(err) });
-      logAudit_('provision_batch_failed', { folderId: o.folderId, error: String(err) });
+      out.errors.push({ folderId: o0.folderId, error: String(err) });
+      logAudit_('provision_batch_failed', { folderId: o0.folderId, error: String(err) });
+    } finally {
+      lock.releaseLock();
     }
   });
   logAudit_('provision_batch_run', out);
@@ -308,25 +367,44 @@ function approveAndProvision_(folderId, ctx) {
     if (!_docsReady_(o)) {
       return { ok: false, error: 'not ready: the signed contract and all FICA documents (ID, proof of address, bank) must be uploaded before approval' };
     }
+    // A decline is not cleared until the candidate re-uploads (ficaUpload_ clears declined_at). So a
+    // set declined_at means "declined, not yet re-submitted" - refuse acceptance, otherwise an admin
+    // could provision against the very documents that were just rejected. The doc ticks stay set on
+    // decline (so the row stays visible), which is exactly why _docsReady_ alone is not enough here.
+    if (String(o.declined_at || '').trim()) {
+      return { ok: false, error: 'declined: this candidate was declined and has not re-submitted yet - they must re-submit the declined documents before they can be accepted' };
+    }
     // Approval marks the candidate ready and IMMEDIATELY sends the "pick your induction week" invite,
     // but creates NO accounts - every creation is deferred to the scheduled provisionReadyBatch_
     // (Tuesday 15:00). Flow: approve -> induction invite now -> candidate books a week -> Tuesday batch
     // creates the accounts -> the packet with logins lands the induction Wednesday morning. Stamping
-    // approved_at is what unlocks the batch. This block is idempotent via the approved_at guard above.
+    // approved_at is what unlocks the batch, and holds even if a later batch run fails or is deferred
+    // (test mode). This block is idempotent via the approved_at guard above.
     var approvedAt = nowIso_();
     var approvedBy = (ctx && ctx.email) || 'admin';
     setOnboardingCell_(folderId, ONB_COL.approved_at, approvedAt);
     setOnboardingCell_(folderId, ONB_COL.approved_by, approvedBy);
     setOnboardingStatus_(folderId, 'Approved');
     logAudit_('onboard_approved', { folderId: folderId, by: approvedBy });
+    // Promote into HR's entity "active" tab at acceptance (append-once, idempotent, reconciling,
+    // HR_SYNC/DRY_RUN-safe). The candidate is approved (past the decline gate above), so this is a
+    // correct promotion point per doctrine - HR promotion fires at acceptance + the provisioning batch,
+    // never at FICA upload, so a declined or never-hired candidate never lands on the active HR tab.
+    // The Tuesday batch's hrPromote_ reconciles this same row when accounts are actually created.
+    try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
     // Induction is a Quay 1 step only. Quay 1 gets the "pick your week" invite now; Aqua has no
     // induction, so approval just marks it ready and the Tuesday batch creates + emails the login.
+    // No accounts are created here - CMA/Dialfire account-requests and the Aqua welcome/accepted notice
+    // fire in the deferred provisionReadyBatch_ (Tuesday 15:00), the single provisioning point.
     var isAqua = String(o.entity) === 'aqua';
     if (!isAqua) _sendInductionInvite_(folderId, o);
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy,
       message: isAqua
         ? 'Approved. Accounts are created in the next scheduled setup batch (Tuesday 15:00) and the login is emailed then.'
         : 'Approved and induction invite sent. Accounts are created in the next scheduled setup batch (Tuesday 15:00), not now.' };
+    /* origin/main provisioned immediately at approval; that path is intentionally dropped to keep #38's
+       deferred-batch model. Its safety helpers (_maybeRequestCma_ / _maybeRequestDialfire_ /
+       _maybeNotifyAquaAccepted_ / _sendAquaWelcome_) run in provisionReadyBatch_ instead. */
   } finally {
     lock.releaseLock();
   }
@@ -355,55 +433,136 @@ function _sendInductionInvite_(folderId, o) {
 }
 
 /**
- * Aqua contractors have no induction, so their new Google login is delivered by this welcome email,
- * sent once the moment the batch provisions them (Quay 1 gets its login in the induction packet
- * instead). Reads the created account from the restricted Credentials tab. Wrapped so a send failure
- * never breaks the batch. Auto-send is permitted for this scoped onboarding-pipeline step.
+ * Aqua Promotions welcome pack. Aqua has NO induction step, so instead of the "pick your induction
+ * week" invite an Aqua contractor gets a welcome email in the same pack format as Quay 1 but with
+ * ONLY their Google Workspace details (email + temporary password + how to switch on 2FA). Nothing
+ * about PropData or CMA appears, because Aqua contractors get neither. Sent ONCE, at the moment the
+ * row first reaches the provisioned (real, non-dry-run) state, from BOTH provisioning paths - so the
+ * Google credential recorded by googleCreate_ is already on file. Fully guarded: a missing email or
+ * credential, or a mail failure, logs and returns without breaking provisioning. Senior-broker CC is
+ * suppressed while CC is off; the candidate send is unconditional.
  */
 function _sendAquaWelcome_(folderId, o) {
-  o = o || {};
   try {
-    if (!isEmail_(o.email)) { logAudit_('aqua_welcome_skipped_no_email', { folderId: folderId }); return; }
-    var cred = _credentialFor_(folderId);
-    if (!cred) { logAudit_('aqua_welcome_no_credential', { folderId: folderId }); return; }
-    var company = CFG.COMPANY.aqua;
-    var plain = 'Hi ' + firstName_(o.name) + ',\n\nWelcome to ' + company.full +
-      '. Your Google account is ready.\n\nEmail: ' + (cred.email || '-') +
-      '\nPassword: ' + (cred.temp_password || '-') +
-      '\n(On first sign-in, please switch on 2-step verification to keep your account secure.)' +
+    if (!isEmail_(o && o.email)) { logAudit_('aqua_welcome_skipped_no_email', { folderId: folderId }); return; }
+    var company = CFG.COMPANY.aqua || CFG.COMPANY.quay1;
+    var cred = _credentialFor_(folderId);   // { email, temp_password } | null
+    if (!cred) logAudit_('aqua_welcome_no_credential', { folderId: folderId });   // Google not recorded (e.g. not armed)
+    var first = firstName_(o.name);
+    var plain = 'Hi ' + first + ',\n\nWelcome aboard. Your ' + company.name + ' Google Workspace account is ready.' +
+      (cred ? ('\n\nYour first-login details:\nEmail: ' + (cred.email || '-') +
+        '\nTemporary password: ' + (cred.temp_password || '-') +
+        '\n(You will be asked to set your own password and switch on 2-step verification when you first sign in.)') : '') +
       '\n\nWarm regards,\nThe ' + company.name + ' Team';
-    GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + ' - your login' + (o.name ? ' - ' + o.name : ''),
-      plain, { name: company.name,
-        htmlBody: aquaWelcomeHtml_(company, firstName_(o.name), cred),
+    GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + (o.name ? ' - ' + o.name : ''), plain,
+      { name: company.name, htmlBody: aquaWelcomeHtml_(company, first, cred),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
-  } catch (err) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(err) }); }
+    // Record that the Aqua welcome pack went out and reflect it on the HR row (promoted moments ago).
+    setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
+    hrMarkWelcomeSent_(folderId);
+  } catch (e) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(e) }); }
 }
 
 /**
- * DECLINE FICA (kind:'decline_fica'). An admin reviews the uploaded FICA documents on the site and
- * rejects them (wrong doc, illegible, expired). Sets the status to 'FICA declined' and emails the
- * candidate the admin's reason plus their FICA link so they can re-submit. The FICA ticks are left
- * intact on purpose - a fresh upload re-ticks the relevant box. requireAdmin_ is asserted at the call
- * site. The email send is guarded so a mail failure still returns ok. Returns { ok, declined }.
+ * DECLINE FICA (kind:'decline_fica'). An admin reviews the uploaded documents on the site and rejects
+ * one or more FICA documents - each with its OWN reason - and/or flags the signed contract as
+ * incorrect. The reasons are stored PER DOCUMENT in fica_declines_json (against the document, not just
+ * the candidate); the durable declined_at/declined_by markers are stamped (parity with approved_at/by);
+ * the status is set to 'FICA declined'; and the candidate is emailed exactly what to re-submit - a FICA
+ * section listing only the declined documents with their reasons, and a contract section only when the
+ * contract was flagged. FICA ticks are left intact on purpose - a fresh upload re-ticks the box AND
+ * clears this decline record (Fica.ficaUpload_), so a re-submission re-enters the queue clean.
+ * requireAdmin_ is asserted at the call site. The email send is guarded so a mail failure still
+ * returns ok.
+ *
+ *   payload = { declines: { id?, poa?, bank? -> reason string },
+ *               contract_incorrect: reason|'',
+ *               reason?: legacy single-string reason (back-compat) }
+ * At least one declined document, a contract_incorrect reason, or a legacy reason must be present.
+ * Returns { ok, declined } or { ok:false, error }.
  */
-function declineFica_(folderId, reason, ctx) {
+function declineFica_(folderId, payload, ctx) {
   var o = readOnboardingByFolder_(folderId);
   if (!o) return { ok: false, error: 'onboarding row not found' };
+
+  payload = payload || {};
+  var by = (ctx && ctx.email) || '';
+  var at = nowIso_();
+  var labels = CFG.FICA_DECLINE_LABELS || { id: 'ID document', poa: 'Proof of address', bank: 'Bank confirmation' };
+
+  // Per-document declines: keep only known keys (id/poa/bank) that carry a non-empty reason.
+  var declinesIn = (payload.declines && typeof payload.declines === 'object') ? payload.declines : {};
+  var docs = {};
+  Object.keys(labels).forEach(function (k) {
+    var reason = String(declinesIn[k] == null ? '' : declinesIn[k]).trim();
+    if (reason) docs[k] = { reason: reason, by: by, at: at };
+  });
+  var contractReason = String(payload.contract_incorrect == null ? '' : payload.contract_incorrect).trim();
+  var legacyReason = String(payload.reason == null ? '' : payload.reason).trim();
+
+  // Back-compat: an old client that posts only a single { reason } is treated as one general FICA
+  // decline so the flow never regresses.
+  if (!Object.keys(docs).length && !contractReason && legacyReason) {
+    docs.general = { reason: legacyReason, by: by, at: at };
+  }
+  if (!Object.keys(docs).length && !contractReason) {
+    return { ok: false, error: 'select at least one document to decline or tick Contract incorrect' };
+  }
+
+  var record = { docs: docs };
+  if (contractReason) record.contract_incorrect = { reason: contractReason, by: by, at: at };
+
+  setOnboardingCell_(folderId, ONB_COL.fica_declines_json, JSON.stringify(record));
+  setOnboardingCell_(folderId, ONB_COL.declined_at, at);
+  setOnboardingCell_(folderId, ONB_COL.declined_by, by);
+  // A decline UN-APPROVES the candidate: clear approved_at/approved_by so an approve-then-decline row
+  // cannot be picked up by provisionReadyBatch_ (which gates on approved_at). The candidate must be
+  // re-approved after they re-submit. Without this, the declined_at gate alone would still be bypassed
+  // by any code path that only checks approved_at.
+  setOnboardingCell_(folderId, ONB_COL.approved_at, '');
+  setOnboardingCell_(folderId, ONB_COL.approved_by, '');
   setOnboardingStatus_(folderId, 'FICA declined');
+
   var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
   var ficaUrl = ficaLink_(folderId);
-  var why = String(reason || '').trim();
   try {
-    GmailApp.sendEmail(o.email, 'Action needed on your ' + company.name + ' FICA documents',
-      'Hi ' + firstName_(o.name) + ',\n\n' +
-      'We were unable to accept your FICA documents' + (why ? ' for the following reason:\n\n' + why : '.') +
-      '\n\nPlease re-submit using your personal, secure link: ' + ficaUrl +
-      '\n\nWarm regards,\nThe ' + company.name + ' Team',
-      { name: company.name, htmlBody: ficaDeclineHtml_(company, firstName_(o.name), why, ficaUrl),
+    GmailApp.sendEmail(o.email, 'Action needed on your ' + company.name + ' documents',
+      _ficaDeclinePlain_(company, firstName_(o.name), record, ficaUrl, labels),
+      { name: company.name, htmlBody: ficaDeclineHtml_(company, firstName_(o.name), record, ficaUrl),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
   } catch (e) { logAudit_('fica_decline_email_failed', { folderId: folderId, error: String(e) }); }
-  logAudit_('fica_declined', { folderId: folderId, reason: why, by: (ctx && ctx.email) || '' });
+
+  logAudit_('fica_declined', {
+    folderId: folderId, by: by,
+    docs: Object.keys(docs), contract_incorrect: !!contractReason,
+  });
   return { ok: true, declined: true };
+}
+
+/** Plain-text fallback for the FICA decline email, mirrored from the structured decline record so it
+ *  always matches the HTML body (ficaDeclineHtml_). Lists only the declined FICA documents, then a
+ *  contract paragraph when the contract was flagged. */
+function _ficaDeclinePlain_(company, first, record, ficaUrl, labels) {
+  labels = labels || {};
+  var lines = ['Hi ' + first + ',', ''];
+  var docKeys = Object.keys((record && record.docs) || {});
+  if (docKeys.length) {
+    lines.push('We were unable to accept the following. Please re-submit only these:');
+    docKeys.forEach(function (k) {
+      lines.push('- ' + (labels[k] || 'FICA documents') + ': ' + record.docs[k].reason);
+    });
+    lines.push('');
+  }
+  if (record && record.contract_incorrect) {
+    lines.push('Your contract needs to be re-submitted.');
+    lines.push('Reason: ' + record.contract_incorrect.reason);
+    lines.push('');
+  }
+  lines.push('Please re-submit using your personal, secure link: ' + ficaUrl);
+  lines.push('');
+  lines.push('Warm regards,');
+  lines.push('The ' + company.name + ' Team');
+  return lines.join('\n');
 }
 
 /**
@@ -471,6 +630,52 @@ function _maybeRequestDialfire_(folderId, o, systems) {
     recipients: CFG.DIALFIRE_APPROVERS, requestedField: 'dialfire_requested_at', col: ONB_COL.dialfire_requested_at,
     html: function (c, n, t) { return dialfireRequestHtml_(c, n, t); },
   });
+}
+
+/**
+ * AQUA ONLY: on admin acceptance of an Aqua Promotions contractor, notify AQUA_ACCEPT_NOTIFY (Alan)
+ * that the candidate is accepted and can join Aqua, with their name + start details. Same draft/send
+ * gating as the manual account-requests (_requestManualAccount_): in DRY_RUN it DRAFTS without stamping
+ * - so the notice is previewable and the REAL send still fires once the flow is armed - and when armed
+ * it sends once and stamps aqua_accept_notified_at so it never re-sends. No-op for quay1. Never throws
+ * (a mail failure must not block approval).
+ */
+function _maybeNotifyAquaAccepted_(folderId, o) {
+  try {
+    if (!o || o.entity !== 'aqua') return false;                // Aqua contractors only
+    if (o.aqua_accept_notified_at) return false;                // already notified (idempotent)
+    var recipients = (CFG.AQUA_ACCEPT_NOTIFY || []).filter(Boolean);
+    if (!recipients.length) return false;
+
+    var company = (CFG.COMPANY && (CFG.COMPANY.aqua || CFG.COMPANY.quay1)) || { name: 'Aqua Promotions' };
+    var name = o.name || 'New contractor';
+    var details = { start_date: o.start_date || '', team: o.team || '', role: o.designation || '' };
+
+    var subject = 'Aqua Promotions - contractor accepted - ' + name;
+    var plain = name + ' has been accepted and can join Aqua Promotions.\n' +
+      'You may now begin onboarding this contractor. Do not begin onboarding anyone until you receive this acceptance email for them.\n\n' +
+      'Name: ' + name + '\n' +
+      (details.start_date ? 'Start date: ' + details.start_date + '\n' : '') +
+      (details.team ? 'Team: ' + details.team + '\n' : '') +
+      (details.role ? 'Role: ' + details.role + '\n' : '') +
+      '\nThanks,\nThe ' + company.name + ' Team';
+    var opts = { name: company.name, htmlBody: aquaAcceptedHtml_(company, name, details) };
+
+    if (DRY_RUN_()) {
+      // Test mode: DRAFT only and DELIBERATELY do NOT stamp aqua_accept_notified_at - stamping would
+      // permanently suppress the real send once armed (mirrors _requestManualAccount_).
+      GmailApp.createDraft(recipients.join(','), subject, plain, opts);
+      logAudit_('aqua_accept_notify_drafted', { folderId: folderId, to: recipients.join(','), name: name });
+      return false;
+    }
+    GmailApp.sendEmail(recipients.join(','), subject, plain, opts);
+    setOnboardingCell_(folderId, ONB_COL.aqua_accept_notified_at, nowIso_());
+    logAudit_('aqua_accept_notify_sent', { folderId: folderId, to: recipients.join(','), name: name });
+    return true;
+  } catch (err) {
+    logAudit_('aqua_accept_notify_failed', { folderId: folderId, error: String(err) });
+    return false;
+  }
 }
 
 /** Shallow copy of a provisioner result with the temp password stripped, so it never lands in the
@@ -547,29 +752,47 @@ function _pushGroup_(arr, email) {
   arr.push(email);
 }
 
-/** The standard broker password: "G" + first name (capitalised) + "@002", e.g. "GAnne@002". Set as a
- *  PERMANENT password per the team's standing convention - the broker keeps this and is NOT forced to
- *  change it at first sign-in (googleCreate_ sets changePasswordAtNextLogin false). Non-alphanumerics
- *  are stripped from the first name so the value always meets Google's password rules. */
+/** A random, strong TEMPORARY password (20 chars) for a brand-new Google account. Security fix: it is
+ *  NEVER derived from the person's name (the old "G<First>@002" convention was guessable), and the user
+ *  is forced to set their own on first sign-in (googleCreate_ sets changePasswordAtNextLogin true). One
+ *  character of each class (upper/lower/digit/symbol) is guaranteed so the value always meets Google's
+ *  password rules, then the whole string is shuffled. The firstName arg is retained for call-site
+ *  compatibility but is deliberately no longer used. Ambiguous glyphs (0/O, 1/l/I) are omitted so a
+ *  human can read the temp password off the welcome email without confusion. */
 function _standardPw_(firstName) {
-  var f = String(firstName || 'User').replace(/[^A-Za-z0-9]/g, '');
-  if (!f) f = 'User';
-  f = f.charAt(0).toUpperCase() + f.slice(1).toLowerCase();
-  return 'G' + f + '@002';
+  var upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  var lower = 'abcdefghijkmnpqrstuvwxyz';
+  var digit = '23456789';
+  var sym = '!@#$%^&*-_=+?';
+  var all = upper + lower + digit + sym;
+  var pick = function (set) { return set.charAt(Math.floor(Math.random() * set.length)); };
+  var out = [pick(upper), pick(lower), pick(digit), pick(sym)];   // guarantee one of each class
+  while (out.length < 20) out.push(pick(all));
+  for (var i = out.length - 1; i > 0; i--) {   // Fisher-Yates shuffle so the classes are not front-loaded
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = out[i]; out[i] = out[j]; out[j] = t;
+  }
+  return out.join('');
 }
 
 /**
  * Create the Google Workspace user. DRY_RUN (default): log + return the payload it WOULD send.
- * Live: Users.insert first@quay1.co.za (fallback first.surname@ on 409), then Members.insert
- * per group. Standard "G<First>002" PERMANENT password (see _standardPw_); the broker is not forced
- * to change it at first sign-in.
+ * Live: Users.insert first@quay1.co.za (fallback first.surname@ ONLY on a clash with a DIFFERENT
+ * person), then Members.insert per group. Uses a random strong TEMPORARY password (see _standardPw_);
+ * the user is forced to change it at first sign-in (changePasswordAtNextLogin true).
+ *
+ * Idempotency (fix): before creating anything, look this candidate up. If the Credentials ledger
+ * already has an account for this folderId (a re-provision / retry), reuse it and return success -
+ * never mint a second first.surname@ account for the same person. Only a 409 against a primary that
+ * this folder does NOT own (a genuine different-person same-first-name clash) falls back to
+ * first.surname@.
  */
 function googleCreate_(person) {
   var first = String(person.first_name || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
   var last = String(person.last_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   var primary = first + '@' + CFG.DOMAIN;
   var fallback = (first + (last ? '.' + last : '')) + '@' + CFG.DOMAIN;
-  var tempPw = _standardPw_(person.first_name);  // standard "G<First>002" permanent password (team convention)
+  var tempPw = _standardPw_(person.first_name);  // random strong temp password, changed at first sign-in
   var groups = _groupsForTeam_(person.team);
 
   if (DRY_RUN_()) {
@@ -577,17 +800,32 @@ function googleCreate_(person) {
     return { dryRun: true, email: primary, tempPw: tempPw, would: { primary: primary, groups: groups } };
   }
 
+  // Same-person idempotency: this folder was already provisioned once (ledger keyed by folderId).
+  // Treat as success and just re-assert group membership below - do NOT create another account.
+  var existingCred = person.folderId ? _credentialFor_(person.folderId) : null;
+  if (existingCred && isEmail_(existingCred.email)) {
+    var existingEmail = String(existingCred.email).trim();
+    logAudit_('google_create_idempotent_existing', { folderId: person.folderId, email: existingEmail });
+    groups.forEach(function (grp) {
+      try { AdminDirectory.Members.insert({ email: existingEmail, role: 'MEMBER' }, grp); }
+      catch (e) { /* already a member / group missing - non-fatal, see retryGroupsForFolder_ */ }
+    });
+    return { email: existingEmail, tempPw: existingCred.temp_password || '', existing: true, groups: groups };
+  }
+
   var email = primary;
   var body = {
     primaryEmail: primary,
     name: { givenName: person.first_name || 'User', familyName: person.last_name || (person.first_name || 'User') },
     password: tempPw,
-    changePasswordAtNextLogin: false,
+    changePasswordAtNextLogin: true,
   };
   try {
     AdminDirectory.Users.insert(body);
   } catch (err) {
     if (/409|dupli|exist/i.test(String(err))) {
+      // A primary already exists but this folder does not own it (checked above). That is a genuine
+      // different-person clash on the same first name, so fall back to first.surname@.
       email = fallback;
       body.primaryEmail = fallback;
       AdminDirectory.Users.insert(body);
@@ -874,6 +1112,16 @@ function _propdata_(person, action) {
 function enqueueBrowserSystems_(person, systems, action) {
   var act = action || 'create';
   var ids = [];
+  // Entity HARD cap, last line of defence: even if a caller hands us a widened list, an entity can only
+  // ever enqueue systems on its allow-list (Aqua = google + dialfire; quay1 uncapped). This mirrors the
+  // caps in resolveSystems_ + provisionAll_ so no path can smuggle e.g. PropData onto an Aqua contractor.
+  var _allow = person && CFG.ENTITY_SYSTEMS_ALLOW && CFG.ENTITY_SYSTEMS_ALLOW[person.entity];
+  if (_allow) {
+    var _before = systems || [];
+    systems = _before.filter(function (s) { return _allow.indexOf(s) >= 0; });
+    var _dropped = _before.filter(function (s) { return systems.indexOf(s) < 0; });
+    if (_dropped.length) logAudit_('entity_scope_filtered_enqueue', { entity: person.entity, folderId: person.folderId, dropped: _dropped });
+  }
   // Test mode must NOT drop a live `pending` create row on the queue: the worker has its own DRY_RUN,
   // but if it is armed while the app is not, it would pick that row up and create a REAL portal account
   // despite this app being in dry-run. Deactivate rows are gated separately (googleSuspend_ + worker),

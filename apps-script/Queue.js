@@ -159,13 +159,17 @@ function readForUi_(ctx) {
   // The candidate pipeline: onboarded people not yet set up, so admins can review + Approve & set up.
   // Scoped to a broker's own candidates for non-admins.
   var onboarding = _onboardingPipeline_(isAdmin, email, pq);
-  if (!isAdmin && email) {
-    // Scope the provisioning queue to ALL of the broker's own candidates (by requester_email), NOT the
-    // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
+  if (!isAdmin) {
+    // Fail-safe scoping: a non-admin sees ONLY their own candidates. A blank/unknown email must match
+    // NOTHING (not everything) - otherwise a missing session email would leak every broker's queue.
+    // Scope to ALL of the broker's own candidates (by requester_email), NOT the pipeline - the pipeline
+    // excludes already-provisioned rows, but their queue rows must still show.
     var mine = {};
-    listOnboarding_().forEach(function (o) {
-      if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
-    });
+    if (email) {
+      listOnboarding_().forEach(function (o) {
+        if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
+      });
+    }
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
   }
@@ -183,7 +187,8 @@ function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    // Fail-safe: a non-admin with no/blank email matches NOTHING (see readForUi_).
+    if (!isAdmin && (!email || String(o.requester_email).toLowerCase() !== email)) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '', status: o.status || '',
@@ -221,7 +226,8 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     var s = setup[o.folderId] || { incomplete: false, error: false };
     // Drop only when fully set up: provisioned AND no create row is still pending or errored.
     if (o.provisioned_at && !s.incomplete) return;
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    // Fail-safe: a non-admin with no/blank email matches NOTHING (see readForUi_).
+    if (!isAdmin && (!email || String(o.requester_email).toLowerCase() !== email)) return;
     var sys = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(sys)) {
       sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
@@ -238,6 +244,12 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,
+      // Per-document FICA decline state (set by declineFica_). `declined` means the reviewer asked for
+      // a re-submission; `declines` carries the per-doc reasons + optional contract_incorrect so the
+      // Admin Check UI can show what was rejected instead of a bare "ready to accept". Both clear on the
+      // candidate's next FICA re-upload (Fica.ficaUpload_), returning the row to a clean awaiting state.
+      declined: !!o.declined_at, declined_at: o.declined_at || '',
+      declines: safeJsonParse_(o.fica_declines_json, null),
     };
     // Admin-only: the editable core fields, so the Admin Check "Edit" form can pre-fill current values.
     // Gated behind isAdmin so PII (email / ID) is not exposed to a non-admin onboarder's status read.

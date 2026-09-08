@@ -66,23 +66,46 @@ var HR_TRACKING_STATUS_HEADER = 'Tracking status';
 function hrTrackingUpsert_(folderId) {
   var o = readOnboardingByFolder_(folderId);
   if (!o) return { ok: false, error: 'onboarding row not found' };
+  // HR rows are keyed on the ID number (_hrFindRowByKey_). With a blank id every call would fail to
+  // find the prior row and blind-append a fresh keyless one, duplicating the person. id_number is
+  // required + captured at contract stage, so a blank here is a data error - refuse + log, do not append.
+  if (!String(o.id_number || '').trim()) {
+    logAudit_('hr_skip_blank_id', { fn: 'hrTrackingUpsert_', folderId: folderId, name: o.name });
+    return { ok: false, error: 'blank id_number - refusing to write a keyless HR tracking row' };
+  }
   var row = _hrBuildRow_(o);
 
   if (!hrSyncEnabled_()) {
-    logAudit_('hr_tracking_dryrun', { folderId: folderId, name: o.name, id: o.id_number });
-    return { ok: true, dryRun: true, would: 'upsert tracking row for ' + (o.name || o.id_number) };
+    // Previewable dry-run: surface the exact fields that WOULD be written to the HR sheet, so the
+    // write can be reviewed before HR_SYNC is armed. The five contract-stage HR fields are named
+    // explicitly; the full HR_HEADERS-ordered row is included for a complete preview.
+    var preview = {
+      name: o.name, id_number: o.id_number, contact: o.contact, email: o.email, start_date: o.start_date,
+    };
+    logAudit_('hr_tracking_dryrun', { folderId: folderId, tab: HR_TAB.tracking, fields: preview });
+    return { ok: true, dryRun: true, tab: HR_TAB.tracking,
+      would: 'upsert tracking row for ' + (o.name || o.id_number), fields: preview, row: row };
   }
 
-  var ss = SpreadsheetApp.openById(hrSheetId_());
-  var sh = _hrEnsureTab_(ss, HR_TAB.tracking, true);
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
-  var target = _hrFindRowByKey_(sh, keyCol, o.id_number);
-  if (!target) target = Math.max(sh.getLastRow() + 1, 2);
-  sh.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
-  sh.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
+  // Serialise the find-last-row -> write span: a concurrent upsert/promote for the same person must not
+  // both compute "append at lastRow+1" and clobber each other. Reentrant-safe (see _acquireLock_), so a
+  // locked caller (approveAndProvision_ / provisionReadyBatch_) nesting through here does not deadlock.
+  var lock = _acquireLock_();
+  lock.waitLock(30000);
+  try {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    var sh = _hrEnsureTab_(ss, HR_TAB.tracking, true);
+    var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+    var target = _hrFindRowByKey_(sh, keyCol, o.id_number);
+    if (!target) target = Math.max(sh.getLastRow() + 1, 2);
+    sh.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+    sh.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
-  try { setOnboardingCell_(folderId, ONB_COL.hr_tracking_at, nowIso_()); } catch (e) { /* non-fatal */ }
-  return { ok: true, row: target };
+    try { setOnboardingCell_(folderId, ONB_COL.hr_tracking_at, nowIso_()); } catch (e) { /* non-fatal */ }
+    return { ok: true, row: target };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** Copy a FICA-complete row into the entity destination tab (append-only, once). Idempotent via
@@ -90,7 +113,12 @@ function hrTrackingUpsert_(folderId) {
 function hrPromote_(folderId) {
   var o = readOnboardingByFolder_(folderId);
   if (!o) return { ok: false, error: 'onboarding row not found' };
-  if (o.hr_promoted_at) return { ok: true, skipped: 'already promoted' };
+  // Append-only writer keyed on the ID number: a blank id would append a new keyless active-tab row on
+  // every call (the marker-vs-live reconcile below sees existing=0 and re-appends). Refuse + log instead.
+  if (!String(o.id_number || '').trim()) {
+    logAudit_('hr_skip_blank_id', { fn: 'hrPromote_', folderId: folderId, name: o.name });
+    return { ok: false, error: 'blank id_number - refusing to append a keyless HR destination row' };
+  }
 
   var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
   var destName = HR_TAB[entity];
@@ -101,35 +129,52 @@ function hrPromote_(folderId) {
     return { ok: true, dryRun: true, would: 'append ' + (o.name || o.id_number) + ' to "' + destName + '"' };
   }
 
-  var ss = SpreadsheetApp.openById(hrSheetId_());
-  var dest = _hrEnsureTab_(ss, destName, true);
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
-  // Idempotent against the LIVE sheet, not just the hr_promoted_at marker: if a prior run appended
-  // this person but its marker write failed, re-running must NOT duplicate the destination row.
-  var existing = _hrFindRowByKey_(dest, keyCol, o.id_number);
-  var target = existing || Math.max(dest.getLastRow() + 1, 2);
-  dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
-  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
-
-  // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
+  // Serialise find-last-row -> append so two promotions cannot both target lastRow+1. Reentrant-safe,
+  // so nesting under a locked caller (approveAndProvision_ / provisionReadyBatch_) does not deadlock.
+  var lock = _acquireLock_();
+  lock.waitLock(30000);
   try {
-    var track = _hrEnsureTab_(ss, HR_TAB.tracking, false);
-    if (track) {
-      var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
-      var trow = _hrFindRowByKey_(track, keyCol, o.id_number);
-      if (trow) {
-        track.getRange(trow, HR_HEADERS.length + 1)
-          .setNumberFormat('@').setValue('Moved to ' + destName + ' ' + fmtDate_(nowIso_()));
-      }
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    var dest = _hrEnsureTab_(ss, destName, true);
+    var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+    // Reconcile against the LIVE sheet, not just the hr_promoted_at marker. Three cases:
+    //  - marker set AND the destination row still exists -> already correctly promoted; return WITHOUT
+    //    overwriting, so HR-owned columns _hrBuildRow_ leaves blank (Ryan Greeff, cal-checks) are kept.
+    //  - marker set BUT the destination row has vanished (deleted/moved - the Shane incident) -> re-append
+    //    so HR's active tab is restored instead of silently missing them forever.
+    //  - marker not set -> normal first promotion (write in place if a stray row exists, else append).
+    var existing = _hrFindRowByKey_(dest, keyCol, o.id_number);
+    if (o.hr_promoted_at && existing) {
+      return { ok: true, skipped: 'already promoted', row: existing, dest: destName };
     }
-  } catch (e) { logAudit_('hr_tracking_mark_failed', { folderId: folderId, error: String(e) }); }
+    var target = existing || Math.max(dest.getLastRow() + 1, 2);
+    dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+    dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // name (col A) -> link to their folder
 
-  // Log loudly if the idempotency marker fails to write - the append already landed, so a silent
-  // failure here is the one thing that could let a retry re-touch the destination row.
-  try { setOnboardingCell_(folderId, ONB_COL.hr_promoted_at, nowIso_()); }
-  catch (e) { logAudit_('hr_promoted_marker_failed', { folderId: folderId, error: String(e) }); }
-  logAudit_('hr_promoted', { folderId: folderId, name: o.name, entity: entity, dest: destName });
-  return { ok: true, row: target, dest: destName };
+    // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
+    try {
+      var track = _hrEnsureTab_(ss, HR_TAB.tracking, false);
+      if (track) {
+        var tKeyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+        var trow = _hrFindRowByKey_(track, tKeyCol, o.id_number);
+        if (trow) {
+          track.getRange(trow, HR_HEADERS.length + 1)
+            .setNumberFormat('@').setValue('Moved to ' + destName + ' ' + fmtDate_(nowIso_()));
+        }
+      }
+    } catch (e) { logAudit_('hr_tracking_mark_failed', { folderId: folderId, error: String(e) }); }
+
+    // Log loudly if the idempotency marker fails to write - the append already landed, so a silent
+    // failure here is the one thing that could let a retry re-touch the destination row.
+    var restored = !!(o.hr_promoted_at && !existing);
+    try { setOnboardingCell_(folderId, ONB_COL.hr_promoted_at, nowIso_()); }
+    catch (e) { logAudit_('hr_promoted_marker_failed', { folderId: folderId, error: String(e) }); }
+    logAudit_(restored ? 'hr_promoted_restored' : 'hr_promoted',
+      { folderId: folderId, name: o.name, entity: entity, dest: destName });
+    return { ok: true, row: target, dest: destName, restored: restored };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -155,29 +200,68 @@ function hrRefreshDest_(folderId) {
     return { ok: true, dryRun: true };
   }
 
-  var ss = SpreadsheetApp.openById(hrSheetId_());
-  var dest = ss.getSheetByName(destName);
-  if (!dest) return { ok: true, skipped: 'dest tab missing' };
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
-  var target = _hrFindRowByKey_(dest, keyCol, o.id_number);
-  if (!target) return { ok: true, skipped: 'no destination row yet' }; // never promoted; leave to hrPromote_
+  // Serialise the find-row -> read-merge -> write span so a concurrent promote/upsert cannot move the
+  // row out from under us between the lookup and the write. Reentrant-safe (see _acquireLock_).
+  var lock = _acquireLock_();
+  lock.waitLock(30000);
+  try {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    var dest = ss.getSheetByName(destName);
+    if (!dest) return { ok: true, skipped: 'dest tab missing' };
+    var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+    var target = _hrFindRowByKey_(dest, keyCol, o.id_number);
+    if (!target) return { ok: true, skipped: 'no destination row yet' }; // never promoted; leave to hrPromote_
 
-  var built = _hrBuildRow_(o);
-  var existing = dest.getRange(target, 1, 1, HR_HEADERS.length).getValues()[0];
-  // Merge: a non-empty freshly-built value wins; otherwise keep what HR has on the sheet.
-  var merged = built.map(function (v, i) { return String(v).trim() ? v : existing[i]; });
-  dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([merged]);
-  dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // keep the folder link fresh too
-  logAudit_('hr_refresh_dest', { folderId: folderId, name: o.name, dest: destName, row: target });
-  return { ok: true, row: target };
+    var built = _hrBuildRow_(o);
+    var existing = dest.getRange(target, 1, 1, HR_HEADERS.length).getValues()[0];
+    // Merge: a non-empty freshly-built value wins; otherwise keep what HR has on the sheet.
+    var merged = built.map(function (v, i) { return String(v).trim() ? v : existing[i]; });
+    dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([merged]);
+    dest.getRange(target, 1).setRichTextValue(_hrNameRich_(o));   // keep the folder link fresh too
+    logAudit_('hr_refresh_dest', { folderId: folderId, name: o.name, dest: destName, row: target });
+    return { ok: true, row: target };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Set the "Welcome Email Sent" cell on the candidate's HR row, called when the welcome pack actually
+ *  sends (Quay 1 induction packet / Aqua welcome). Because HR promotion happens earlier (on
+ *  acceptance), the row usually already exists on the entity destination tab; we update it in place,
+ *  falling back to the staging tracking tab, and no-op if neither exists yet (a later promotion will
+ *  pick the value up from welcome_email_at via _hrBuildRow_). DRY_RUN/HR_SYNC-safe; caller wraps in
+ *  try/catch. */
+function hrMarkWelcomeSent_(folderId) {
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  if (!hrSyncEnabled_()) {
+    logAudit_('hr_welcome_sent_dryrun', { folderId: folderId, name: o.name });
+    return { ok: true, dryRun: true, would: 'mark Welcome Email Sent for ' + (o.name || o.id_number) };
+  }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
+  var col = HR_HEADERS.indexOf('Welcome Email Sent') + 1;
+  var val = fmtDate_(o.welcome_email_at || nowIso_());
+  var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
+  var tabs = [HR_TAB[entity], HR_TAB.tracking];   // prefer the "active" destination tab, else staging
+  for (var i = 0; i < tabs.length; i++) {
+    var sh = _hrEnsureTab_(ss, tabs[i], false);
+    if (!sh) continue;
+    var row = _hrFindRowByKey_(sh, keyCol, o.id_number);
+    if (row) {
+      sh.getRange(row, col).setNumberFormat('@').setValue(val);
+      return { ok: true, tab: tabs[i], row: row };
+    }
+  }
+  return { ok: true, skipped: 'no HR row yet - reflected on promotion' };
 }
 
 // ---------------------------------------------------------------- row builder
 
 /** Build the HR_HEADERS-ordered values array from an onboarding field object. Doc ticks in the
  *  boarding tracker are non-empty strings ("Received <iso>") when a doc is in, so a truthy check =
- *  received. Formula/manual HR columns (cal-checks, Ryan Greeff, welcome email) are left blank for
- *  HR to fill or for the sheet's own formulas. */
+ *  received. "Welcome Email Sent" is auto-stamped from welcome_email_at; the remaining formula/manual
+ *  HR columns (cal-checks, Ryan Greeff) are left blank for HR to fill or for the sheet's own formulas. */
 function _hrBuildRow_(o) {
   var received = function (v) { return String(v || '').trim() ? 'TRUE' : ''; };
   var sa = isSaId_(o.id_number);
@@ -210,7 +294,7 @@ function _hrBuildRow_(o) {
     'ID Received': received(o.fica_id),
     'Agreement Received': received(o.fica_contract),
     'Ryan Greeff Signed': '',
-    'Welcome Email Sent': '',
+    'Welcome Email Sent': o.welcome_email_at ? fmtDate_(o.welcome_email_at) : '',
     'Calender Check: BIRTHDAY': '',
     'Calender Check: WORK ANNIVERSARY': '',
     'Next of Kin Name': o.nok_name,
@@ -460,4 +544,113 @@ function repairHrIds_(apply) {
   });
   logAudit_('hr_id_repair_summary', summary);
   return summary;
+}
+
+// ---------------------------------------------------------------- work-permit expiry alerts
+
+/** Whole days from today (script-local midnight) until a stored work_permit_expiry, or null when the
+ *  value is not a parseable date. Stored format is 'YYYY-MM-DD' - the value comes straight from the
+ *  FICA page's <input type="date"> (Fica.js), persisted verbatim as text (Tracker _putOnb_). Using
+ *  Date.UTC for both endpoints cancels the timezone so the difference is whole calendar days. */
+function _workPermitDaysLeft_(expiry) {
+  var s = String(expiry == null ? '' : expiry).trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  var y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  var expUtc = Date.UTC(y, mo - 1, d);
+  var chk = new Date(expUtc);
+  if (chk.getUTCFullYear() !== y || chk.getUTCMonth() !== mo - 1 || chk.getUTCDate() !== d) return null;
+  var now = new Date();
+  var todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((expUtc - todayUtc) / 86400000);
+}
+
+/**
+ * Weekly HR alert for work permits that are expiring soon or have already lapsed. Nothing else ever
+ * re-reads work_permit_expiry after FICA captures it, so without this a permit can quietly expire while
+ * the person keeps access. Scans the onboarding rows, keeps active staff (provisioned_at set) whose
+ * permit is within CFG.WORK_PERMIT_ALERT_DAYS of expiry or already past it, and - when any are found -
+ * sends ONE digest to CFG.WORK_PERMIT_ALERT_TO listing each person soonest-first.
+ *
+ * Stateless / idempotent-by-cadence: no columns, no per-row marker. It only emails when someone is in
+ * window, so a weekly run is a natural non-spammy reminder cadence. Follows the DRY_RUN pattern of
+ * _requestManualAccount_ / _maybeNotifyAquaAccepted_ (Provisioning.js): in DRY_RUN it DRAFTS (previewable),
+ * when armed it sends. Never throws - wrapped in try/catch, failures go to logAudit_. Returns a small
+ * summary object { ok, count, dryRun, alerted:[{name,id,daysLeft}] }.
+ */
+function workPermitExpirySweep_() {
+  try {
+    var horizon = Number(CFG.WORK_PERMIT_ALERT_DAYS);
+    if (isNaN(horizon)) horizon = 30;
+
+    // Active, non-legacy staff only: skip migrated-legacy imports and abandoned drafts (no provisioned_at).
+    var rows = listOnboarding_(function (o) {
+      if (_isMigratedLegacy_(o)) return false;
+      if (!String(o.provisioned_at || '').trim()) return false;
+      return String(o.work_permit_expiry || '').trim() !== '';
+    });
+
+    var items = [];
+    rows.forEach(function (o) {
+      var daysLeft = _workPermitDaysLeft_(o.work_permit_expiry);
+      if (daysLeft == null) {
+        logAudit_('work_permit_unparsable', { folderId: o.folderId, name: o.name, value: String(o.work_permit_expiry) });
+        return;
+      }
+      if (daysLeft <= horizon) {
+        items.push({
+          name: o.name || o.id_number || '(unnamed)',
+          entity: o.entity || '',
+          expiry: String(o.work_permit_expiry).trim(),
+          daysLeft: daysLeft,
+          id_number: o.id_number || '',
+        });
+      }
+    });
+
+    if (!items.length) {
+      logAudit_('work_permit_sweep', { count: 0 });
+      return { ok: true, count: 0, dryRun: DRY_RUN_(), alerted: [] };
+    }
+
+    // Soonest-first: most-expired at the top, then nearest expiry.
+    items.sort(function (a, b) { return a.daysLeft - b.daysLeft; });
+
+    var recipients = (CFG.WORK_PERMIT_ALERT_TO || []).filter(Boolean);
+    var alerted = items.map(function (it) { return { name: it.name, id: it.id_number, daysLeft: it.daysLeft }; });
+
+    if (!recipients.length) {
+      logAudit_('work_permit_no_recipients', { count: items.length, alerted: alerted });
+      return { ok: false, count: items.length, error: 'no recipients', alerted: alerted };
+    }
+
+    var company = (CFG.COMPANY && CFG.COMPANY.quay1) || { name: 'Quay 1', full: 'Quay 1 International Realty' };
+    var subject = 'Work permit expiry alert - ' + items.length + ' to review';
+    var lines = items.map(function (it) {
+      var when = (it.daysLeft < 0)
+        ? ('EXPIRED ' + Math.abs(it.daysLeft) + ' day' + (Math.abs(it.daysLeft) === 1 ? '' : 's') + ' ago')
+        : (it.daysLeft === 0) ? 'expires today'
+        : (it.daysLeft + ' day' + (it.daysLeft === 1 ? '' : 's') + ' left');
+      return '- ' + it.name + (it.entity ? ' (' + it.entity + ')' : '') +
+        ': permit expiry ' + fmtDate_(it.expiry) + ', ' + when;
+    });
+    var plain = 'The following staff have a work permit that has expired or is expiring soon.\n' +
+      'Please follow up so nobody keeps access on a lapsed permit.\n\n' + lines.join('\n') +
+      '\n\nThanks,\nThe ' + company.name + ' Team';
+    var opts = { name: company.name, htmlBody: workPermitAlertHtml_(company, items) };
+
+    if (DRY_RUN_()) {
+      // Test mode: DRAFT only (previewable), mirroring _requestManualAccount_ / _maybeNotifyAquaAccepted_.
+      GmailApp.createDraft(recipients.join(','), subject, plain, opts);
+      logAudit_('work_permit_sweep_drafted', { count: items.length, to: recipients.join(','), alerted: alerted });
+      return { ok: true, count: items.length, dryRun: true, alerted: alerted };
+    }
+    GmailApp.sendEmail(recipients.join(','), subject, plain, opts);
+    logAudit_('work_permit_sweep_sent', { count: items.length, to: recipients.join(','), alerted: alerted });
+    return { ok: true, count: items.length, dryRun: false, alerted: alerted };
+  } catch (err) {
+    logAudit_('work_permit_sweep_failed', { error: String(err) });
+    return { ok: false, error: String(err) };
+  }
 }

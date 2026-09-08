@@ -100,6 +100,24 @@ var ONB_COL = {
   // (see _syncInductionCalendar_). Stored so a re-booking can delete the old events before creating
   // the new ones, rather than leaving stale duplicates. Empty until a week is booked.
   induction_calendar_ids: 59,
+  // Per-document FICA decline (appended, no shift; renumbered to 60+ on the #38 reconcile so it does
+  // not collide with induction_packet_sent_at/hubspot_team_alerted_at/induction_calendar_ids at 57-59).
+  // fica_declines_json holds the structured decline record { docs:{ id|poa|bank:{reason,by,at} },
+  // contract_incorrect?:{reason,by,at} } written by declineFica_ - the reason lives against each
+  // document, not just the candidate. declined_at / declined_by are the durable last-decline audit
+  // markers (parity with approved_at/approved_by). All three are cleared on the next FICA re-upload so
+  // a re-submission re-enters the queue clean.
+  fica_declines_json: 60, declined_at: 61, declined_by: 62,
+  // Aqua-only: when the "accepted, can join Aqua" notice was sent to AQUA_ACCEPT_NOTIFY (Alan) on
+  // admin acceptance. Idempotency marker (mirrors cma_requested_at); in DRY_RUN it DRAFTS without
+  // stamping so the notice is previewable and the real send still fires once armed. See
+  // _maybeNotifyAquaAccepted_.
+  aqua_accept_notified_at: 63,
+  // When the welcome pack actually sent to the candidate - the Quay 1 induction packet
+  // (_sendInductionPacket_) or the Aqua Google-only welcome (_sendAquaWelcome_). Feeds the HR sheet's
+  // "Welcome Email Sent" column via _hrBuildRow_ / hrMarkWelcomeSent_ so HR is not asked to track by
+  // hand something the system already did. Appended, no shift.
+  welcome_email_at: 64,
 };
 
 var ONB_HEADERS = [
@@ -117,6 +135,8 @@ var ONB_HEADERS = [
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
   'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at', 'HubSpot team alerted at',
   'Induction calendar ids',
+  'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
+  'Welcome email sent at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

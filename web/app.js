@@ -44,6 +44,13 @@
     { key: 'cma',        label: 'CMA',               sub: 'valuation login' },
     { key: 'dialfire',   label: 'Dialfire',          sub: 'dialer seat' },
   ];
+  // Aqua Promotions contractors get Google + Dialfire ONLY (matches the backend entity cap in
+  // resolveSystems_); PropData and CMA never apply to them, so those checkboxes are not offered on the
+  // Aqua form. Quay 1 gets the full stack, unchanged. These drive which options show and which default on.
+  const sysForEntity = (entity) => SYSTEMS.filter((s) => entity !== 'aqua' || s.key === 'google' || s.key === 'dialfire');
+  const sysDefaultOn = (entity, key) => entity === 'aqua'
+    ? (key === 'google' || key === 'dialfire')
+    : !!(SYSTEMS.find((s) => s.key === key) || {}).core;
 
   // Broker Activities (Quay 1) - the residential clause options from the Broker Agreement
   // template. Mirrors CFG.BROKER_ACTIVITIES on the backend AND the live recruitment frontend
@@ -305,9 +312,10 @@
         fieldText('work_hours', 'Work hours', { hint: 'e.g. Mon to Fri, 08:00 to 17:00' }) +
         fieldText('remuneration', 'Remuneration', { hint: 'Monthly package or rate.' });
 
-      // Provisioning systems: core three checked by default; cma/dialfire off (tick as needed).
-      const systems = SYSTEMS.map((s) => `<label class="check">
-        <input type="checkbox" name="sys_${s.key}" value="${s.key}" ${s.core ? 'checked' : ''}>
+      // Provisioning systems, entity-aware: Quay 1 shows the full stack (google/propdata default on,
+      // cma/dialfire optional); Aqua shows Google + Dialfire only, both default on. See sysForEntity.
+      const systems = sysForEntity(entity).map((s) => `<label class="check">
+        <input type="checkbox" name="sys_${s.key}" value="${s.key}" ${sysDefaultOn(entity, s.key) ? 'checked' : ''}>
         <span><span class="ck-label">${esc(s.label)}</span><span class="ck-sub">${esc(s.sub)}</span></span>
       </label>`).join('');
 
@@ -462,7 +470,10 @@
     const data = collect(form);
     data.entity = entity;
     // Backend reads the provisioning selection under `systems` (CONTRACTS section 6).
-    data.systems = SYSTEMS.map((s) => s.key).filter((k) => form.querySelector(`input[name="sys_${k}"]`).checked);
+    data.systems = sysForEntity(entity).map((s) => s.key).filter((k) => {
+      const box = form.querySelector(`input[name="sys_${k}"]`);
+      return box && box.checked;
+    });
     data.requester_name = USER ? USER.name : '';
     data.requester_email = USER ? USER.email : '';
 
@@ -480,7 +491,7 @@
       // Restore check defaults: core systems on, optional systems off.
       form.querySelectorAll('.check input').forEach((i) => {
         const sys = SYSTEMS.find((s) => i.name === `sys_${s.key}`);
-        i.checked = !!(sys && sys.core);
+        i.checked = !!(sys && sysDefaultOn(entity, sys.key));
         i.closest('.check').classList.toggle('is-on', i.checked);
       });
       form.querySelectorAll('[aria-invalid]').forEach((i) => i.removeAttribute('aria-invalid'));

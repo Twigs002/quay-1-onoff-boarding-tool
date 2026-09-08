@@ -131,13 +131,15 @@ var _LOCK_DEPTH = 0;
 
 /** Acquire the script lock, reentrant-safe + standalone-safe. Mirrors the Lock API (waitLock /
  *  releaseLock) so call sites read unchanged. A nested acquire in the same execution is a no-op
- *  that still balances on release; the real lock is taken once at the outermost level. */
+ *  that still balances on release; the real lock is taken once at the outermost level.
+ *  The depth counter is bumped only AFTER a successful waitLock (and never dropped below 0 on
+ *  release), so an acquire whose waitLock throws - or a stray release - cannot leak the depth and
+ *  wedge every later lock into thinking it is reentrant. */
 function _acquireLock_() {
   var reentrant = _LOCK_DEPTH > 0;
-  _LOCK_DEPTH++;
   var real = reentrant ? null : LockService.getScriptLock();
   return {
-    waitLock: function (ms) { if (real) real.waitLock(ms); },
-    releaseLock: function () { _LOCK_DEPTH--; if (real) real.releaseLock(); },
+    waitLock: function (ms) { if (real) real.waitLock(ms); _LOCK_DEPTH++; },
+    releaseLock: function () { if (_LOCK_DEPTH > 0) _LOCK_DEPTH--; if (real) real.releaseLock(); },
   };
 }

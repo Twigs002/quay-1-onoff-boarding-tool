@@ -531,6 +531,21 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .ac-cma.muted { color: var(--muted); }
 .ac-cma.warn-text { color: var(--amber); font-weight: 600; }
 
+/* Admin Check: entity toggle (Quay 1 / Aqua) + per-document decline panel. */
+.ac-ent-toggle { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.pill.s-declined { background: var(--amber-tint); color: var(--amber); }
+.ac-declined { margin-top: 8px; padding: 10px 12px; background: var(--amber-tint); border: 1px solid var(--amber-border, #F2DC8E); border-radius: 9px; font-size: 12.5px; }
+.ac-declined-title { font-weight: 700; color: var(--amber); text-transform: uppercase; letter-spacing: .5px; font-size: 11px; margin-bottom: 6px; }
+.ac-dl { padding: 5px 0; border-top: 1px solid var(--amber-border, #F2DC8E); }
+.ac-dl:first-of-type { border-top: 0; }
+.ac-dl-doc { font-weight: 700; color: var(--ink, #17223D); }
+.ac-dl-reason { color: var(--ink, #17223D); margin: 1px 0; }
+.ac-dl-meta { font-size: 11.5px; }
+.ac-decline { margin-top: 10px; }
+.ac-decline-head { font-size: 12.5px; margin-bottom: 10px; }
+.ac-dc { margin-bottom: 10px; }
+.ac-dc .field { margin-top: 8px; }
+
 /* ============================================================
    Mobile polish (<=560px). Mobile-only via this query, so the
    desktop layout above is untouched. Goals: no horizontal

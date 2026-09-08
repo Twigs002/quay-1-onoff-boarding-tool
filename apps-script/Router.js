@@ -14,7 +14,8 @@
  *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [onboarder: super/admin/broker]
  *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [onboarder: super/admin/broker]
  *   approve                        -> approveAndProvision_(folderId, ctx)         [admin]
- *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [admin]
+ *   edit_onboarding                -> editOnboarding_(body, ctx)                  [admin]
+ *   decline_fica                   -> declineFica_(folderId, {declines,contract_incorrect}, ctx) [admin]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
@@ -108,13 +109,20 @@ function _approveDispatch_(body, ctx) {
   return approveAndProvision_(folderId, ctx);
 }
 
-/** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records the
- *  reason and notifies the candidate to re-submit. Never provisions. */
+/** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records a reason
+ *  PER declined document (id/poa/bank) and/or flags the contract as incorrect, then notifies the
+ *  candidate to re-submit only what was declined. Never provisions.
+ *    body = { folderId, declines:{ id?, poa?, bank? -> reason }, contract_incorrect: reason|'',
+ *             reason?: legacy single string (back-compat) }  */
 function _declineDispatch_(body, ctx) {
   requireAdmin_(ctx);
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
-  return declineFica_(folderId, String(body.reason || ''), ctx);
+  return declineFica_(folderId, {
+    declines: (body.declines && typeof body.declines === 'object') ? body.declines : null,
+    contract_incorrect: String(body.contract_incorrect || ''),
+    reason: String(body.reason || ''),   // legacy back-compat: single whole-candidate reason
+  }, ctx);
 }
 
 /** Send a candidate a reminder to sign + submit FICA (re-sends the contract email). Any onboarder
@@ -156,11 +164,26 @@ function _provisionDispatch_(body, ctx) {
   if (!o.approved_at && !o.provisioned_at) {
     return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
   }
-  var systems = _provisionList_(body, body);
-  if (!systems) {
-    // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
-    // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+  var wasProvisioned = !!o.provisioned_at;   // a deliberate retry of an already-live row is allowed
+  // Serialise read->provision under the SAME script lock as approveAndProvision_/provisionReadyBatch_,
+  // so a manual re-provision racing the Tuesday batch cannot both mint accounts for the same person.
+  var lock = _acquireLock_();
+  lock.waitLock(30000);
+  try {
+    o = readOnboardingByFolder_(folderId) || o;   // re-read the LIVE row inside the lock
+    // If the row went provisioned while we waited for the lock (it was NOT provisioned when this
+    // request arrived), the batch or another manual provision just did it - do not double-mint.
+    if (!wasProvisioned && o.provisioned_at) {
+      return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
+    }
+    var systems = _provisionList_(body, body);
+    if (!systems) {
+      // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
+      // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
+      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    }
+    return provisionAll_(folderId, systems, ctx);
+  } finally {
+    lock.releaseLock();
   }
-  return provisionAll_(folderId, systems, ctx);
 }

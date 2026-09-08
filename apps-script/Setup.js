@@ -49,9 +49,11 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
+    // UNION of every handler either side installs, so setupTriggers stays idempotent: each newTrigger
+    // below has a matching name here so a re-run never leaves a duplicate schedule behind.
     if (fn === 'tuesdayDigest_' || fn === 'tuesdayDigestAfternoon_' || fn === 'reapOffboarding_' ||
         fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
-        fn === 'inductionPacketSweep_') ScriptApp.deleteTrigger(t);
+        fn === 'inductionPacketSweep_' || fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
@@ -74,9 +76,13 @@ function setupTriggers() {
   // anyone whose induction Wednesday is that day. Booking itself only sends the "confirmed" email now.
   ScriptApp.newTrigger('inductionPacketSweep_').timeBased()
     .everyDays(1).atHour(6).create();
+  // Work-permit expiry alert: weekly HR digest of permits expiring soon or already lapsed. Monday
+  // ~08:00 (Africa/Johannesburg per appsscript.json timeZone). See workPermitExpirySweep_ in Hr.js.
+  ScriptApp.newTrigger('workPermitExpirySweep_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), offboarding reaper ' +
     '(every 15 min), provisioning batch (Tuesday ~15:00), FICA follow-up sweep (hourly, daytime), ' +
-    'induction packet sweep (daily ~06:00).';
+    'induction packet sweep (daily ~06:00), work-permit expiry alert (Monday ~08:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */
@@ -431,3 +437,120 @@ function diagnoseHrAqua() {
 
 function _setProp_(k, v) { PropertiesService.getScriptProperties().setProperty(k, String(v)); }
 function _reqArg_(v, name) { if (!v || !String(v).trim()) throw new Error('argument "' + name + '" is required'); }
+
+// ---------------------------------------------------------------- arm / disarm onboarding
+// One-click, reversible arming of the LIVE onboarding path, run from the editor. These only ever touch
+// the two flags onboarding needs; offboarding (which suspends real accounts with no cancel window),
+// PropData-live and HubSpot seats are left untouched and must be armed separately and explicitly.
+
+/**
+ * ARM onboarding for live operation. Turns OFF dry-run so provisioning creates real Google accounts and
+ * the onboarding emails actually send (the Google-only welcome pack, the Aqua acceptance + Dialfire
+ * request to Alan and Kat, the CMA request), and turns ON HR sync so the HR sheet is written for real.
+ * Leaves OFFBOARD_ARMED, PROPDATA_LIVE and HUBSPOT_SEAT_ENABLED as they are. Reversible via
+ * disarmOnboarding(). Logs + returns the resulting flag snapshot so running it self-verifies.
+ */
+function armOnboarding() {
+  _setProp_(FLAG.DRY_RUN, '0');
+  _setProp_(FLAG.HR_SYNC_ENABLED, '1');
+  var state = _armingSnapshot_();
+  Logger.log('armOnboarding -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/**
+ * REVERT armOnboarding(): dry-run back ON and HR sync back OFF. Offboarding / PropData-live /
+ * HubSpot-seat flags are left as they are. Logs + returns the resulting flag snapshot.
+ */
+function disarmOnboarding() {
+  _setProp_(FLAG.DRY_RUN, '1');
+  _setProp_(FLAG.HR_SYNC_ENABLED, '0');
+  var state = _armingSnapshot_();
+  Logger.log('disarmOnboarding -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/** Read-only: log + return the current arming flags. Changes nothing. Run from the editor to check. */
+function flagStatus() {
+  var state = _armingSnapshot_();
+  Logger.log('flagStatus -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/** The arming-flag snapshot used by arm/disarm/flagStatus for self-verification. */
+function _armingSnapshot_() {
+  return {
+    DRY_RUN: DRY_RUN_(),
+    HR_SYNC_ENABLED: hrSyncEnabled_(),
+    OFFBOARD_ARMED: offboardArmed_(),
+    PROPDATA_LIVE: propdataLive_(),
+    HUBSPOT_SEAT_ENABLED: hubspotSeatEnabled_(),
+    CC_ENABLED: ccEnabled_(),
+  };
+}
+
+// ---------------------------------------------------------------- Quay 1 contract templates (v2.1G)
+// The two new "Blank" v2.1G agreement docs are manual-fill (underscores + hardcoded example values),
+// NOT merge templates. These one-offs turn them into merge templates the contract generator can fill
+// ({{FULL_NAME}} {{ID_NUMBER}} {{START_DATE}} {{SENIOR_BROKER}} {{COMMISSION}} {{BROKER_ACTIVITY}}),
+// then (separately, after you review) repoint the live templates at the prepared copies.
+
+/** The two new v2.1G source docs the user added to the Quay 1 parent folder. */
+var NEW_QUAY1_DOCS = {
+  sale: '1LZKvEnt35d47RerUTkJPzvhaxSCv9nIK0rMSYN89wmg',   // IGCISA Broker Agreement Residential - 2026v2.1G
+  rental: '1cugIhl1t2Q3C8zlyjz9ptfrPNynRuKorXMDr7nAveDU', // IGCISA Residential Rental Broker Agreement - v2.1G
+};
+
+/**
+ * STEP 1 (run from the editor). Copy each new v2.1G doc into the Quay 1 parent folder and insert the
+ * merge tokens genQuay1Contract_ fills. Does NOT touch the live templates. Returns + logs the new copy
+ * ids and a REVIEW checklist. The unambiguous tokens are inserted automatically; {{BROKER_ACTIVITY}}
+ * is left for you to place by hand (the "Broker Activities shall mean" clause is legal wording I will
+ * not rewrite blindly), and the {{COMMISSION}} placement is flagged for you to confirm.
+ */
+function prepareQuay1MergeTemplates() {
+  var parentId = optProp_(PROP.QUAY1_PARENT_FOLDER);
+  var parent = parentId ? DriveApp.getFolderById(parentId) : DriveApp.getRootFolder();
+  var out = {};
+  Object.keys(NEW_QUAY1_DOCS).forEach(function (kind) {
+    var copy = DriveApp.getFileById(NEW_QUAY1_DOCS[kind])
+      .makeCopy('Quay 1 ' + kind + ' agreement v2.1G (MERGE TEMPLATE)', parent);
+    var doc = DocumentApp.openById(copy.getId());
+    var b = doc.getBody();
+    // Unambiguous: the personal fields and the hardcoded example values.
+    b.replaceText('(Name:)\\s*_{2,}', '$1 {{FULL_NAME}}');
+    b.replaceText('(\\bID)\\s+_{2,}', '$1 {{ID_NUMBER}}');
+    b.replaceText('With effect from 21 March 2026', 'With effect from {{START_DATE}}');
+    b.replaceText('Justin Nortier', '{{SENIOR_BROKER}}');
+    // Best-effort, FLAGGED: the broker commission split in clause 5.1 ("50%"). The 25% partnership
+    // split in 4.3.1 is deliberately left alone - confirm which the system should fill.
+    b.replaceText('commission equal to 50%', 'commission equal to {{COMMISSION}}%');
+    doc.saveAndClose();
+    out[kind] = copy.getId();
+  });
+  var report = 'prepareQuay1MergeTemplates -> ' + JSON.stringify(out, null, 2) +
+    '\n\nREVIEW each copy before repointing:' +
+    '\n 1. {{FULL_NAME}} / {{ID_NUMBER}} landed on the Name / ID lines.' +
+    '\n 2. {{START_DATE}} replaced "21 March 2026"; {{SENIOR_BROKER}} replaced "Justin Nortier".' +
+    '\n 3. {{COMMISSION}} was placed at clause 5.1 (the broker "50%" split). The 25% in 4.3.1 was left as-is - fix if wrong.' +
+    '\n 4. PLACE {{BROKER_ACTIVITY}} BY HAND: replace the "Broker Activities shall mean" definition clause' +
+    '\n    (the one ending "(*delete inapplicable definition)") with {{BROKER_ACTIVITY}} so the system' +
+    '\n    injects the correct clause per activity. Until you do, generated contracts keep the combined clause.' +
+    '\n\nThen run: useNewQuay1Templates("' + (out.sale || '') + '", "' + (out.rental || '') + '")';
+  Logger.log(report);
+  return { ids: out, report: report };
+}
+
+/**
+ * STEP 2 (run from the editor AFTER reviewing the prepared copies). Repoint the LIVE Quay 1 Sale +
+ * Rental templates at the prepared merge copies. Pass the ids logged by prepareQuay1MergeTemplates.
+ * This changes what real generated contracts are built from, so only run it once the copies are correct.
+ */
+function useNewQuay1Templates(saleId, rentalId) {
+  if (saleId) _setProp_(PROP.QUAY1_TEMPLATE_SALE, String(saleId).trim());
+  if (rentalId) _setProp_(PROP.QUAY1_TEMPLATE_RENTAL, String(rentalId).trim());
+  var msg = 'Quay 1 templates repointed. SALE=' + optProp_(PROP.QUAY1_TEMPLATE_SALE) +
+    ' RENTAL=' + optProp_(PROP.QUAY1_TEMPLATE_RENTAL);
+  Logger.log(msg);
+  return msg;
+}

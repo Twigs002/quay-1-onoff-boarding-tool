@@ -283,9 +283,15 @@ function main() {
       'docs-ready true when signed contract + ID + POA + bank all present');
     check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x' }) === false,
       'provision gate FALSE with all docs in but NOT approved (the human gate)');
-    check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x', approved_at: '2026-01-01' }) === true,
-      'provision gate TRUE only once docs in AND approved');
-    check(ctx._provisionReady_({ fica_contract: 'x', fica_id: 'x', fica_poa: 'x', approved_at: 'x' }) === false,
+    // #38 flow: for Quay 1 the gate ALSO requires a booked induction week (induction_wed/thu), so the
+    // logins are ready in time for induction. Aqua has no induction step, so docs + approved is enough.
+    check(ctx._provisionReady_({ entity: 'aqua', fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x', approved_at: '2026-01-01' }) === true,
+      'provision gate TRUE for Aqua once docs in AND approved (no induction step)');
+    check(ctx._provisionReady_({ entity: 'quay1', fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x', approved_at: '2026-01-01' }) === false,
+      'provision gate FALSE for Quay 1 when docs in + approved but induction NOT booked (#38 gate)');
+    check(ctx._provisionReady_({ entity: 'quay1', fica_contract: 'x', fica_id: 'x', fica_poa: 'x', fica_bank: 'x', approved_at: '2026-01-01', induction_wed: '2026-01-07' }) === true,
+      'provision gate TRUE once docs in AND approved AND (Quay 1) induction booked');
+    check(ctx._provisionReady_({ entity: 'aqua', fica_contract: 'x', fica_id: 'x', fica_poa: 'x', approved_at: 'x' }) === false,
       'provision gate false when a required doc (bank) is missing');
 
     // A docs-in row that has NOT been approved is skipped by the batch (the gate holds).
@@ -295,9 +301,10 @@ function main() {
     check(resU.provisioned.indexOf('UNAPP-1') < 0, 'batch SKIPS a docs-in row that has not been approved');
 
     // DRY_RUN batch must DEFER an approved row (not mark it done), so the armed run provisions for real.
+    // #38 gate: a Quay 1 row also needs a booked induction week to be provision-ready.
     ctx.upsertOnboardingRow_({ folderId: 'DRY-1', entity: 'quay1', name: 'Dry Dan',
       fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received',
-      approved_at: '2026-01-01', systems_json: JSON.stringify(['google']) });
+      approved_at: '2026-01-01', induction_wed: '2026-01-07', systems_json: JSON.stringify(['google']) });
     ctx.provisionReadyBatch_();
     const dry = ctx.readOnboardingByFolder_('DRY-1');
     check(dry && !dry.provisioned_at, 'DRY_RUN batch does NOT stamp provisioned_at (deferred until armed)');
@@ -309,7 +316,8 @@ function main() {
     // logic is exercised without depending on a live/mocked AdminDirectory.
     armed.ctx.upsertOnboardingRow_({ folderId: 'RDY-1', entity: 'quay1', name: 'Ready Ray',
       fica_contract: 'Received', fica_id: 'Received', fica_poa: 'Received', fica_bank: 'Received',
-      approved_at: '2026-01-01', approved_by: 'boss@quay1.co.za', systems_json: JSON.stringify(['dialfire']) });
+      approved_at: '2026-01-01', approved_by: 'boss@quay1.co.za', induction_wed: '2026-01-07',
+      systems_json: JSON.stringify(['dialfire']) });
     const res1 = armed.ctx.provisionReadyBatch_();
     check(res1.provisioned.indexOf('RDY-1') >= 0, 'ARMED batch provisions an approved + docs-in row');
     const rdy = armed.ctx.readOnboardingByFolder_('RDY-1');

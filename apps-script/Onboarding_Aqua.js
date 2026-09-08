@@ -37,6 +37,10 @@ function onboardAqua_(body, ctx) {
   }
   id = idClean; f.id_number = idClean;   // normalise both: `id` writes the row, f.id_number fills the doc
   if (!isEmail_(f.email)) return { ok: false, error: 'a valid contractor email is required' };
+  // The HR sheet is written from the contract stage (hrTrackingUpsert_ below), so the five HR fields
+  // (full name, ID, cell, personal email, start date) are all captured AND validated here.
+  if (!String(f.contact || '').trim()) return { ok: false, error: 'a cell phone number is required' };
+  if (!String(f.start_date || '').trim()) return { ok: false, error: 'a start date is required' };
   var typeErr = _aquaValidateType_(f);
   if (typeErr) return { ok: false, error: typeErr };
 

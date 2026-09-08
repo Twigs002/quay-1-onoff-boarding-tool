@@ -140,10 +140,18 @@ var CFG = {
 
   // Systems provisioned by DEFAULT for a new hire per entity (RESEARCH 1.4 flags the program
   // -> system mapping as the architect's call; this is that decision). Aqua contractors get
-  // Google only by default.
+  // Google + Dialfire by default (Dialfire is request-only, via the Alan email; see
+  // ENTITY_SYSTEMS_ALLOW and _maybeNotifyAquaAccepted_ / _maybeRequestDialfire_).
   CORE_SYSTEMS: {
     quay1: ['google', 'propdata'],
-    aqua: ['google'],
+    aqua: ['google', 'dialfire'],
+  },
+  // Hard per-entity system CAP, applied in resolveSystems_ AFTER core/program/team/explicit
+  // resolution (so nothing - not an explicit tick, a team mapping, or a program - can smuggle a
+  // barred system onto that entity). Aqua Promotions contractors get Google + Dialfire ONLY, never
+  // PropData/PDMS or CMA. An entity absent from this map (quay1) has no cap and is unchanged.
+  ENTITY_SYSTEMS_ALLOW: {
+    aqua: ['google', 'dialfire'],
   },
   // Broker-facing program toggle -> lifecycle SYSTEM (RESEARCH 1.4). Only these two overlap the
   // SYSTEMS enum; whatsapp / training / other are informational and enqueue no provisioning row.
@@ -192,10 +200,27 @@ var CFG = {
   // request: on admin acceptance of a Dialfire-entitled starter, a request email (name + team) is
   // sent to these recipients to create the account. Scoped auto-send, same model as CMA_APPROVERS.
   DIALFIRE_APPROVERS: ['alan@quay1.co.za'],
+  // Aqua Promotions only: when an admin ACCEPTS an Aqua contractor on the Admin Check tab, a notice
+  // (candidate name + start details) is sent to these recipients so the contractor can join Aqua. This
+  // email is the GO-AHEAD: Alan and Kat must not begin onboarding a contractor until they receive it.
+  // In DRY_RUN it DRAFTS (previewable) and only sends once the flow is armed. See _maybeNotifyAquaAccepted_.
+  AQUA_ACCEPT_NOTIFY: ['alan@quay1.co.za', 'kat@quay1.co.za'],
+  // Per-document FICA decline: the declinable document keys and their candidate-facing labels, shared
+  // by declineFica_ (storage + plain-text mail) and ficaDeclineHtml_ (the HTML mail) so the two never
+  // drift. The signed contract is deliberately NOT here - it is handled by the separate "Contract
+  // incorrect" control, so a document is only ever flagged in one place.
+  FICA_DECLINE_LABELS: { id: 'ID document', poa: 'Proof of address', bank: 'Bank confirmation' },
 
   // Broker-initiated offboarding (phase 1): clicking "Request offboarding" just sends a simple
   // notification to these people; the full destructive offboarding stays super/admin. Extend later.
   OFFBOARD_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za', 'sheldon@quay1.co.za'],
+
+  // Work-permit expiry alerts: HR recipient list for the weekly permit-expiry digest (see
+  // workPermitExpirySweep_ in Hr.js). CONFIRM these addresses with HR before arming. Internal
+  // @quay1 addresses, not secrets.
+  WORK_PERMIT_ALERT_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
+  // How many days ahead of a work-permit expiry to start alerting (also flags already-expired permits).
+  WORK_PERMIT_ALERT_DAYS: 30,
 
   MAX_ATTEMPTS: 3,
   OFFBOARD_DELAY_MIN: 30,
