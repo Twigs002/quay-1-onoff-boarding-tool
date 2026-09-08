@@ -435,3 +435,69 @@ function _armingSnapshot_() {
     CC_ENABLED: ccEnabled_(),
   };
 }
+
+// ---------------------------------------------------------------- Quay 1 contract templates (v2.1G)
+// The two new "Blank" v2.1G agreement docs are manual-fill (underscores + hardcoded example values),
+// NOT merge templates. These one-offs turn them into merge templates the contract generator can fill
+// ({{FULL_NAME}} {{ID_NUMBER}} {{START_DATE}} {{SENIOR_BROKER}} {{COMMISSION}} {{BROKER_ACTIVITY}}),
+// then (separately, after you review) repoint the live templates at the prepared copies.
+
+/** The two new v2.1G source docs the user added to the Quay 1 parent folder. */
+var NEW_QUAY1_DOCS = {
+  sale: '1LZKvEnt35d47RerUTkJPzvhaxSCv9nIK0rMSYN89wmg',   // IGCISA Broker Agreement Residential - 2026v2.1G
+  rental: '1cugIhl1t2Q3C8zlyjz9ptfrPNynRuKorXMDr7nAveDU', // IGCISA Residential Rental Broker Agreement - v2.1G
+};
+
+/**
+ * STEP 1 (run from the editor). Copy each new v2.1G doc into the Quay 1 parent folder and insert the
+ * merge tokens genQuay1Contract_ fills. Does NOT touch the live templates. Returns + logs the new copy
+ * ids and a REVIEW checklist. The unambiguous tokens are inserted automatically; {{BROKER_ACTIVITY}}
+ * is left for you to place by hand (the "Broker Activities shall mean" clause is legal wording I will
+ * not rewrite blindly), and the {{COMMISSION}} placement is flagged for you to confirm.
+ */
+function prepareQuay1MergeTemplates() {
+  var parentId = optProp_(PROP.QUAY1_PARENT_FOLDER);
+  var parent = parentId ? DriveApp.getFolderById(parentId) : DriveApp.getRootFolder();
+  var out = {};
+  Object.keys(NEW_QUAY1_DOCS).forEach(function (kind) {
+    var copy = DriveApp.getFileById(NEW_QUAY1_DOCS[kind])
+      .makeCopy('Quay 1 ' + kind + ' agreement v2.1G (MERGE TEMPLATE)', parent);
+    var doc = DocumentApp.openById(copy.getId());
+    var b = doc.getBody();
+    // Unambiguous: the personal fields and the hardcoded example values.
+    b.replaceText('(Name:)\\s*_{2,}', '$1 {{FULL_NAME}}');
+    b.replaceText('(\\bID)\\s+_{2,}', '$1 {{ID_NUMBER}}');
+    b.replaceText('With effect from 21 March 2026', 'With effect from {{START_DATE}}');
+    b.replaceText('Justin Nortier', '{{SENIOR_BROKER}}');
+    // Best-effort, FLAGGED: the broker commission split in clause 5.1 ("50%"). The 25% partnership
+    // split in 4.3.1 is deliberately left alone - confirm which the system should fill.
+    b.replaceText('commission equal to 50%', 'commission equal to {{COMMISSION}}%');
+    doc.saveAndClose();
+    out[kind] = copy.getId();
+  });
+  var report = 'prepareQuay1MergeTemplates -> ' + JSON.stringify(out, null, 2) +
+    '\n\nREVIEW each copy before repointing:' +
+    '\n 1. {{FULL_NAME}} / {{ID_NUMBER}} landed on the Name / ID lines.' +
+    '\n 2. {{START_DATE}} replaced "21 March 2026"; {{SENIOR_BROKER}} replaced "Justin Nortier".' +
+    '\n 3. {{COMMISSION}} was placed at clause 5.1 (the broker "50%" split). The 25% in 4.3.1 was left as-is - fix if wrong.' +
+    '\n 4. PLACE {{BROKER_ACTIVITY}} BY HAND: replace the "Broker Activities shall mean" definition clause' +
+    '\n    (the one ending "(*delete inapplicable definition)") with {{BROKER_ACTIVITY}} so the system' +
+    '\n    injects the correct clause per activity. Until you do, generated contracts keep the combined clause.' +
+    '\n\nThen run: useNewQuay1Templates("' + (out.sale || '') + '", "' + (out.rental || '') + '")';
+  Logger.log(report);
+  return { ids: out, report: report };
+}
+
+/**
+ * STEP 2 (run from the editor AFTER reviewing the prepared copies). Repoint the LIVE Quay 1 Sale +
+ * Rental templates at the prepared merge copies. Pass the ids logged by prepareQuay1MergeTemplates.
+ * This changes what real generated contracts are built from, so only run it once the copies are correct.
+ */
+function useNewQuay1Templates(saleId, rentalId) {
+  if (saleId) _setProp_(PROP.QUAY1_TEMPLATE_SALE, String(saleId).trim());
+  if (rentalId) _setProp_(PROP.QUAY1_TEMPLATE_RENTAL, String(rentalId).trim());
+  var msg = 'Quay 1 templates repointed. SALE=' + optProp_(PROP.QUAY1_TEMPLATE_SALE) +
+    ' RENTAL=' + optProp_(PROP.QUAY1_TEMPLATE_RENTAL);
+  Logger.log(msg);
+  return msg;
+}
