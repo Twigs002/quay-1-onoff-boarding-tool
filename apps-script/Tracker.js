@@ -99,6 +99,11 @@ var ONB_COL = {
   // stamping so the notice is previewable and the real send still fires once armed. See
   // _maybeNotifyAquaAccepted_.
   aqua_accept_notified_at: 60,
+  // When the welcome pack actually sent to the candidate - the Quay 1 induction packet
+  // (_sendInductionPacket_) or the Aqua Google-only welcome (_sendAquaWelcome_). Feeds the HR sheet's
+  // "Welcome Email Sent" column via _hrBuildRow_ / hrMarkWelcomeSent_ so HR is not asked to track by
+  // hand something the system already did. Appended, no shift.
+  welcome_email_at: 61,
 };
 
 var ONB_HEADERS = [
@@ -116,6 +121,7 @@ var ONB_HEADERS = [
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
   'Contract emailed at', 'FICA follow-up at',
   'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
+  'Welcome email sent at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by
