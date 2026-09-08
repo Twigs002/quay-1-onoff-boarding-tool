@@ -379,3 +379,54 @@ function hubStatus() {
 
 function _setProp_(k, v) { PropertiesService.getScriptProperties().setProperty(k, String(v)); }
 function _reqArg_(v, name) { if (!v || !String(v).trim()) throw new Error('argument "' + name + '" is required'); }
+
+// ---------------------------------------------------------------- arm / disarm onboarding
+// One-click, reversible arming of the LIVE onboarding path, run from the editor. These only ever touch
+// the two flags onboarding needs; offboarding (which suspends real accounts with no cancel window),
+// PropData-live and HubSpot seats are left untouched and must be armed separately and explicitly.
+
+/**
+ * ARM onboarding for live operation. Turns OFF dry-run so provisioning creates real Google accounts and
+ * the onboarding emails actually send (the Google-only welcome pack, the Aqua acceptance + Dialfire
+ * request to Alan and Kat, the CMA request), and turns ON HR sync so the HR sheet is written for real.
+ * Leaves OFFBOARD_ARMED, PROPDATA_LIVE and HUBSPOT_SEAT_ENABLED as they are. Reversible via
+ * disarmOnboarding(). Logs + returns the resulting flag snapshot so running it self-verifies.
+ */
+function armOnboarding() {
+  _setProp_(FLAG.DRY_RUN, '0');
+  _setProp_(FLAG.HR_SYNC_ENABLED, '1');
+  var state = _armingSnapshot_();
+  Logger.log('armOnboarding -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/**
+ * REVERT armOnboarding(): dry-run back ON and HR sync back OFF. Offboarding / PropData-live /
+ * HubSpot-seat flags are left as they are. Logs + returns the resulting flag snapshot.
+ */
+function disarmOnboarding() {
+  _setProp_(FLAG.DRY_RUN, '1');
+  _setProp_(FLAG.HR_SYNC_ENABLED, '0');
+  var state = _armingSnapshot_();
+  Logger.log('disarmOnboarding -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/** Read-only: log + return the current arming flags. Changes nothing. Run from the editor to check. */
+function flagStatus() {
+  var state = _armingSnapshot_();
+  Logger.log('flagStatus -> ' + JSON.stringify(state, null, 2));
+  return state;
+}
+
+/** The arming-flag snapshot used by arm/disarm/flagStatus for self-verification. */
+function _armingSnapshot_() {
+  return {
+    DRY_RUN: DRY_RUN_(),
+    HR_SYNC_ENABLED: hrSyncEnabled_(),
+    OFFBOARD_ARMED: offboardArmed_(),
+    PROPDATA_LIVE: propdataLive_(),
+    HUBSPOT_SEAT_ENABLED: hubspotSeatEnabled_(),
+    CC_ENABLED: ccEnabled_(),
+  };
+}
