@@ -251,6 +251,45 @@ function offboardNoticeHtml_(company, oq) {
   return emailShell_(company, 'Offboarding scheduled', inner);
 }
 
+/** Internal HR notice: work permits expiring soon or already lapsed. `items` is an array of
+ *  { name, entity, expiry, daysLeft } sorted soonest-first (daysLeft negative = already expired).
+ *  Renders a table (Name, Entity, Permit expiry, Days left / EXPIRED). Every value is htmlEsc_'d.
+ *  DRAFT/send gating is the caller's job (workPermitExpirySweep_). */
+function workPermitAlertHtml_(company, items) {
+  var B = CFG.BRAND;
+  var list = items || [];
+  var th = function (t) {
+    return '<th style="text-align:left;padding:6px 12px 6px 0;font-size:11px;font-weight:700;letter-spacing:.4px;' +
+      'text-transform:uppercase;color:' + B.muted + ';border-bottom:1px solid #DCE8F6">' + htmlEsc_(t) + '</th>';
+  };
+  var td = function (v, strong) {
+    return '<td style="padding:7px 12px 7px 0;font-size:13.5px;color:' + (strong ? B.goldInk : B.slate) + ';' +
+      (strong ? 'font-weight:600;' : '') + 'border-bottom:1px solid #DCE8F6">' + htmlEsc_(v || '-') + '</td>';
+  };
+  var daysCell = function (n) {
+    var d = Number(n);
+    var label = (d < 0) ? ('EXPIRED ' + Math.abs(d) + ' day' + (Math.abs(d) === 1 ? '' : 's') + ' ago')
+      : (d === 0) ? 'Expires today'
+      : (d + ' day' + (d === 1 ? '' : 's') + ' left');
+    var colour = (d < 0) ? B.red : (d <= 7) ? B.amber : B.goldInk;
+    return '<td style="padding:7px 12px 7px 0;font-size:13.5px;font-weight:600;color:' + colour +
+      ';border-bottom:1px solid #DCE8F6">' + htmlEsc_(label) + '</td>';
+  };
+  var head = '<tr>' + th('Name') + th('Entity') + th('Permit expiry') + th('Days left') + '</tr>';
+  var body = list.length
+    ? list.map(function (r) {
+        return '<tr>' + td(r.name, true) + td(r.entity) + td(fmtDate_(r.expiry)) + daysCell(r.daysLeft) + '</tr>';
+      }).join('')
+    : '<tr><td colspan="4" style="padding:8px 0;font-size:13.5px;color:' + B.muted + '">' +
+        htmlEsc_('No work permits are expiring.') + '</td></tr>';
+  var inner =
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:' + B.slate + '">' +
+      'The following staff have a work permit that has expired or is expiring soon. Please follow up so nobody keeps access on a lapsed permit.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 8px">' +
+      head + body + '</table>';
+  return emailShell_(company, 'Work permit expiry', inner);
+}
+
 /** Documents-approved congrats + call to action to pick an induction week (gold button). */
 function inductionInviteHtml_(company, first, bookUrl) {
   var B = CFG.BRAND;
