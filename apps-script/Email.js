@@ -567,7 +567,11 @@ function aquaAcceptedHtml_(company, name, details) {
   };
   var inner =
     '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">A new Aqua Promotions contractor has been accepted and can now join Aqua.</p>' +
-    '<p style="margin:0 0 18px;font-size:16px;font-weight:700;color:' + B.goldInk + '">' + htmlEsc_(name) + ' has been accepted and can join Aqua Promotions.</p>' +
+    '<p style="margin:0 0 14px;font-size:16px;font-weight:700;color:' + B.goldInk + '">' + htmlEsc_(name) + ' has been accepted and can join Aqua Promotions.</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr><td style="padding:14px 16px">' +
+      '<div style="font-size:14px;font-weight:700;color:' + B.goldInk + '">You may now begin onboarding this contractor.</div>' +
+      '<div style="font-size:13px;line-height:1.55;color:' + B.slate + ';margin-top:4px">Please do not begin onboarding anyone until you have received this acceptance email for them.</div>' +
+    '</td></tr></table>' +
     '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">' +
       detail('Name', name) + detail('Start date', details.start_date) +
       detail('Team', details.team) + detail('Role', details.role) +

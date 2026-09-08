@@ -600,7 +600,8 @@ function _maybeNotifyAquaAccepted_(folderId, o) {
     var details = { start_date: o.start_date || '', team: o.team || '', role: o.designation || '' };
 
     var subject = 'Aqua Promotions - contractor accepted - ' + name;
-    var plain = name + ' has been accepted and can join Aqua Promotions.\n\n' +
+    var plain = name + ' has been accepted and can join Aqua Promotions.\n' +
+      'You may now begin onboarding this contractor. Do not begin onboarding anyone until you receive this acceptance email for them.\n\n' +
       'Name: ' + name + '\n' +
       (details.start_date ? 'Start date: ' + details.start_date + '\n' : '') +
       (details.team ? 'Team: ' + details.team + '\n' : '') +

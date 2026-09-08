@@ -235,8 +235,10 @@ reason. Nothing that passed review is mentioned. Send semantics unchanged from t
 
 ### 9.4 Aqua acceptance notice (NEW, previewable-until-armed)
 On admin "Accept & set up" of an `entity === 'aqua'` row, `_maybeNotifyAquaAccepted_` emails
-`CFG.AQUA_ACCEPT_NOTIFY` (alan@quay1.co.za) that the contractor is accepted and can join Aqua, with
-name + start details (`aquaAcceptedHtml_`). Same draft/send gating as the manual account-requests:
+`CFG.AQUA_ACCEPT_NOTIFY` (alan@quay1.co.za, kat@quay1.co.za) that the contractor is accepted and can
+join Aqua, with name + start details (`aquaAcceptedHtml_`). This email is the GO-AHEAD gate: it states
+"You may now begin onboarding this contractor" and that no contractor may be onboarded until this
+acceptance email is received for them. Same draft/send gating as the manual account-requests:
 DRAFT in DRY_RUN (no stamp, previewable), send + stamp `aqua_accept_notified_at` once armed. No-op
 for quay1. Fires from BOTH accept transition points (interactive `approveAndProvision_` and the
 scheduled `provisionReadyBatch_`).

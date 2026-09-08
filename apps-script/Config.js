@@ -201,9 +201,10 @@ var CFG = {
   // sent to these recipients to create the account. Scoped auto-send, same model as CMA_APPROVERS.
   DIALFIRE_APPROVERS: ['alan@quay1.co.za'],
   // Aqua Promotions only: when an admin ACCEPTS an Aqua contractor on the Admin Check tab, a notice
-  // (candidate name + start details) is sent to these recipients so the contractor can join Aqua. In
-  // DRY_RUN it DRAFTS (previewable) and only sends once the flow is armed. See _maybeNotifyAquaAccepted_.
-  AQUA_ACCEPT_NOTIFY: ['alan@quay1.co.za'],
+  // (candidate name + start details) is sent to these recipients so the contractor can join Aqua. This
+  // email is the GO-AHEAD: Alan and Kat must not begin onboarding a contractor until they receive it.
+  // In DRY_RUN it DRAFTS (previewable) and only sends once the flow is armed. See _maybeNotifyAquaAccepted_.
+  AQUA_ACCEPT_NOTIFY: ['alan@quay1.co.za', 'kat@quay1.co.za'],
   // Per-document FICA decline: the declinable document keys and their candidate-facing labels, shared
   // by declineFica_ (storage + plain-text mail) and ficaDeclineHtml_ (the HTML mail) so the two never
   // drift. The signed contract is deliberately NOT here - it is handled by the separate "Contract
