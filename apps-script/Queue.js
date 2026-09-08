@@ -238,6 +238,12 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,
+      // Per-document FICA decline state (set by declineFica_). `declined` means the reviewer asked for
+      // a re-submission; `declines` carries the per-doc reasons + optional contract_incorrect so the
+      // Admin Check UI can show what was rejected instead of a bare "ready to accept". Both clear on the
+      // candidate's next FICA re-upload (Fica.ficaUpload_), returning the row to a clean awaiting state.
+      declined: !!o.declined_at, declined_at: o.declined_at || '',
+      declines: safeJsonParse_(o.fica_declines_json, null),
     });
   });
   return out;
@@ -339,6 +345,15 @@ function setOffboardStatus_(offbId, status, googleResult, workerResult) {
     t.getRange(row, OQ_COL.worker_result_json + 1).setNumberFormat('@')
       .setValue(JSON.stringify(workerResult || {}));
   }
+}
+
+/** Live status (H) for one OQ row, trimmed + lowercased; '' if the row is gone. Read fresh from the
+ *  sheet (not a snapshot) so an atomic scheduled -> firing claim can compare-and-set under a lock. */
+function offboardStatus_(offbId) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (!row) return '';
+  return String(t.getRange(row, OQ_COL.status + 1).getValue() || '').trim().toLowerCase();
 }
 
 /** Record the one-shot trigger id (K) for an OQ row. */

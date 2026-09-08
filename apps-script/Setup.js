@@ -49,7 +49,8 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_') ScriptApp.deleteTrigger(t);
+    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_' ||
+        fn === 'ficaFollowUpSweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
@@ -59,8 +60,12 @@ function setupTriggers() {
   // in. Wednesday ~08:00 (Africa/Johannesburg per appsscript.json timeZone).
   ScriptApp.newTrigger('provisionReadyBatch_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.WEDNESDAY).atHour(8).create();
+  // FICA follow-up: hourly sweep that nudges anyone 12+ hours past their contract email who has not
+  // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
+  ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
+    .everyHours(1).create();
   return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00).';
+    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */

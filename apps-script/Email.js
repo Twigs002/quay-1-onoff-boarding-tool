@@ -40,8 +40,11 @@ function emailShell_(company, kicker, innerHtml) {
 function agreementEmailHtml_(company, first, ficaUrl) {
   var B = CFG.BRAND;
   var ficaBtn = ficaUrl
-    ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
-        '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:12px 22px;font-size:14.5px;font-weight:700;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Submit my FICA documents</a>' +
+    ? '<div style="font-size:13.5px;font-weight:700;color:' + B.goldInk + ';margin:14px 0 10px;text-align:center">Ready? Click the button below to upload your documents securely.</div>' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px"><tr><td align="center">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:11px;background:' + B.gold + ';box-shadow:0 2px 6px rgba(0,0,0,0.14)">' +
+          '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:16px 40px;font-size:17px;font-weight:800;letter-spacing:.2px;color:' + B.goldInk + ';text-decoration:none;border-radius:11px">&#128228;&nbsp; Submit my FICA documents</a>' +
+        '</td></tr></table>' +
       '</td></tr></table>'
     : '';
   var inner =
@@ -70,6 +73,33 @@ function agreementEmailHtml_(company, first, ficaUrl) {
     '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
     '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
   return emailShell_(company, company.kicker, inner);
+}
+
+/** 12-hour FICA follow-up: nudge the person to upload via their secure link, not by email reply. */
+function ficaFollowUpHtml_(company, first, ficaUrl) {
+  var B = CFG.BRAND;
+  var ficaBtn = ficaUrl
+    ? '<div style="font-size:13.5px;font-weight:700;color:' + B.goldInk + ';margin:14px 0 10px;text-align:center">Click the button below to upload your documents securely.</div>' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 4px"><tr><td align="center">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:11px;background:' + B.gold + ';box-shadow:0 2px 6px rgba(0,0,0,0.14)">' +
+          '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:16px 40px;font-size:17px;font-weight:800;letter-spacing:.2px;color:' + B.goldInk + ';text-decoration:none;border-radius:11px">&#128228;&nbsp; Submit my FICA documents</a>' +
+        '</td></tr></table>' +
+      '</td></tr></table>'
+    : '';
+  var inner =
+    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">A quick follow-up on your FICA documents. To keep your information secure and to get your setup moving, please upload your documents using your personal, secure link.</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr>' +
+      '<td style="padding:14px 16px">' +
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">Please use the link, not an email reply</div>' +
+        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">Uploading through your secure link is the only way your documents reach our system. Documents sent as an email reply, or as attachments to this message, will not be picked up. If you have already uploaded via the link, thank you, and please ignore this note.</div>' +
+        ficaBtn +
+      '</td>' +
+    '</tr></table>' +
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">If anything is unclear or you need a hand, simply reply to this email and we will gladly help.</p>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'FICA documents required', inner);
 }
 
 /** FICA received acknowledgement email. */
@@ -242,6 +272,35 @@ function inductionInviteHtml_(company, first, bookUrl) {
     '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
     '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
   return emailShell_(company, 'Documents approved', inner);
+}
+
+/** Aqua Promotions welcome pack: same welcome-pack format as Quay 1 but Google-only. Shows the
+ *  contractor's Google Workspace email + temporary password and how to switch on 2FA. Deliberately
+ *  says NOTHING about PropData or CMA (Aqua contractors get neither). `cred` = { email, temp_password }
+ *  or null (null -> a gentle "your login details will follow" line instead of the card). */
+function aquaWelcomeHtml_(company, first, cred) {
+  var B = CFG.BRAND;
+  var loginPanel = cred
+    ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border:1px solid #DCE8F6;border-left:4px solid ' + B.navy + ';border-radius:12px;background:#F3F7FC"><tr><td style="padding:18px 20px">' +
+        '<div style="font-size:12px;color:#5A6B85">Email &amp; Google Workspace</div>' +
+        '<div style="font-size:16px;font-weight:700;color:#17223D;padding:2px 0 12px;font-family:\'SF Mono\',Menlo,Consolas,monospace">' + htmlEsc_(cred.email || '-') + '</div>' +
+        '<div style="font-size:12px;color:#5A6B85">Temporary password</div>' +
+        '<div style="font-size:16px;font-weight:700;color:#17223D;padding:2px 0 12px;font-family:\'SF Mono\',Menlo,Consolas,monospace">' + htmlEsc_(cred.temp_password || '-') + '</div>' +
+        '<div style="margin-top:4px;background:#FFF6D6;border:1px solid #F2DC8E;border-radius:9px;padding:12px 14px;font-size:13px;line-height:1.55;color:#6B5A16">' +
+          '<b>On first sign-in</b> you will be asked to set your own password and switch on 2-step verification (2FA).<br><br>' +
+          '<b>To switch on 2-step verification:</b> sign in at <a href="https://mail.google.com" style="color:' + B.navy + '">mail.google.com</a> with the details above, open <b>myaccount.google.com/security</b>, choose <b>2-Step Verification &rarr; Get started</b>, then follow the prompts to confirm a code sent to your phone. It takes about a minute and keeps your account secure.' +
+        '</div>' +
+      '</td></tr></table>'
+    : '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Your Google Workspace login details will follow shortly in a separate email.</p>';
+  var inner =
+    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Welcome aboard. Your ' +
+      htmlEsc_(company.name) + ' Google Workspace account is ready. Here are your first-login details.</p>' +
+    loginPanel +
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">If anything is unclear, simply reply to this email and we will gladly help.</p>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'Welcome to ' + company.name, inner);
 }
 
 /** Induction packet: welcome + induction dates + new Google login + what to bring. */
@@ -430,9 +489,54 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
   return body;
 }
 
-/** Polite "we need a quick correction to your FICA documents" email (reason panel + re-submit button). */
-function ficaDeclineHtml_(company, first, reason, ficaUrl) {
+/** Polite "we need a quick correction" email, itemised per declined FICA document and/or contract.
+ *  `record` = { docs: { id?|poa?|bank?|general?: { reason } }, contract_incorrect?: { reason } };
+ *  only the declined items are present, so we only ever render sections that carry data. */
+function ficaDeclineHtml_(company, first, record, ficaUrl) {
   var B = CFG.BRAND;
+  record = record || {};
+  var docs = record.docs || {};
+  var labels = CFG.FICA_DECLINE_LABELS || {};
+
+  // Amber callout header + body, reused for both the FICA and contract sections.
+  var calloutOpen = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr><td style="padding:14px 16px">';
+  var calloutTitle = function (t) {
+    return '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">' + htmlEsc_(t) + '</div>';
+  };
+  var calloutClose = '</td></tr></table>';
+
+  // FICA documents section: one label + reason per declined document (fixed, sensible order).
+  var docOrder = ['id', 'poa', 'bank', 'general'];
+  var docEntries = '';
+  for (var i = 0; i < docOrder.length; i++) {
+    var key = docOrder[i];
+    if (!docs.hasOwnProperty(key)) continue;
+    var label = (key === 'general') ? 'FICA documents' : (labels[key] || key);
+    var reason = (docs[key] && docs[key].reason) || '';
+    docEntries +=
+      '<div style="font-size:14px;font-weight:700;color:' + B.goldInk + ';margin:0 0 2px">' + htmlEsc_(label) + '</div>' +
+      '<div style="font-size:14px;line-height:1.6;color:' + B.slate + ';margin:0 0 12px">' + htmlEsc_(reason) + '</div>';
+  }
+  var docsSection = docEntries
+    ? calloutOpen + calloutTitle('FICA documents to re-submit') + docEntries + calloutClose
+    : '';
+
+  // Contract section: only when the contract itself was flagged.
+  var contractSection = record.contract_incorrect
+    ? calloutOpen + calloutTitle('Your contract') +
+        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + ';margin:0 0 6px">Please re-submit your contract.</div>' +
+        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">' + htmlEsc_((record.contract_incorrect && record.contract_incorrect.reason) || '') + '</div>' +
+      calloutClose
+    : '';
+
+  // Guard: if nothing came through, still render a safe generic correction note so this never throws.
+  var sections = docsSection + contractSection;
+  if (!sections) {
+    sections = calloutOpen + calloutTitle('What needs correcting') +
+      '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">A quick correction is needed before we can finalise everything. Please re-submit using your personal, secure link below.</div>' +
+      calloutClose;
+  }
+
   var ficaBtn = ficaUrl
     ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
         '<a href="' + htmlEsc_(ficaUrl) + '" style="display:inline-block;padding:12px 22px;font-size:14.5px;font-weight:700;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Re-submit my FICA documents</a>' +
@@ -440,16 +544,39 @@ function ficaDeclineHtml_(company, first, reason, ficaUrl) {
     : '';
   var inner =
     '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
-    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Thank you for submitting your FICA documents to ' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Thank you for your submission to ' +
       htmlEsc_(company.name) + '. We just need a quick correction before we can finalise everything. Please do not worry, this is a common step and is easy to sort out.</p>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr><td style="padding:14px 16px">' +
-      '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">What needs correcting</div>' +
-      '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">' + htmlEsc_(reason || '') + '</div>' +
-    '</td></tr></table>' +
+    sections +
     '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">Once you have made the correction, please re-submit using your personal, secure link below.</p>' +
     ficaBtn +
     '<p style="margin:16px 0 0;font-size:15px;line-height:1.62;color:' + B.slate + '">If anything is unclear, simply reply to this email and we will gladly help.</p>' +
     '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
     '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
   return emailShell_(company, 'FICA correction needed', inner);
+}
+
+/** Internal notice (to a manager, not the candidate): a new Aqua Promotions contractor has been
+ *  accepted and can join Aqua. `details` = { start_date, team, role }; empty rows are omitted. */
+function aquaAcceptedHtml_(company, name, details) {
+  var B = CFG.BRAND;
+  details = details || {};
+  var detail = function (label, value) {
+    if (!value) return '';
+    return '<tr><td style="padding:3px 14px 3px 0;font-size:13px;color:' + B.muted + ';white-space:nowrap">' + htmlEsc_(label) + '</td>' +
+      '<td style="padding:3px 0;font-size:14px;color:' + B.goldInk + ';font-weight:600">' + htmlEsc_(value) + '</td></tr>';
+  };
+  var inner =
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">A new Aqua Promotions contractor has been accepted and can now join Aqua.</p>' +
+    '<p style="margin:0 0 14px;font-size:16px;font-weight:700;color:' + B.goldInk + '">' + htmlEsc_(name) + ' has been accepted and can join Aqua Promotions.</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr><td style="padding:14px 16px">' +
+      '<div style="font-size:14px;font-weight:700;color:' + B.goldInk + '">You may now begin onboarding this contractor.</div>' +
+      '<div style="font-size:13px;line-height:1.55;color:' + B.slate + ';margin-top:4px">Please do not begin onboarding anyone until you have received this acceptance email for them.</div>' +
+    '</td></tr></table>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">' +
+      detail('Name', name) + detail('Start date', details.start_date) +
+      detail('Team', details.team) + detail('Role', details.role) +
+    '</table>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Thanks,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'Aqua acceptance', inner);
 }

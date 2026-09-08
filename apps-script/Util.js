@@ -70,6 +70,24 @@ function htmlEsc_(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** JSON safe to embed inside an inline <script> body. JSON.stringify alone does NOT escape `</script>`
+ *  or the line/paragraph separators, so a server value containing `</script>` would break out of the
+ *  element and inject markup (reflected XSS). Escaping `<`/`>`/`&`/U+2028/U+2029 as \\uXXXX keeps the
+ *  value an identical JS string while making element-breakout impossible. Use for ANY value emitted
+ *  into a <script> body (see Fica.js / Induction.js candidate pages). */
+function jsInScript_(v) {
+  return JSON.stringify(v == null ? '' : v)
+    .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+/** Strip a candidate-supplied folder id to the Drive id charset [A-Za-z0-9_-]. A real Drive folder id
+ *  contains nothing else, so this is loss-free for legitimate links while removing any character that
+ *  could be used to inject markup on the token-less candidate pages. */
+function _safeFolderId_(v) {
+  return String(v == null ? '' : v).replace(/[^A-Za-z0-9_-]/g, '');
+}
+
 /** "5 March 2026" from an ISO/date string; returns the input verbatim if unparseable. */
 function fmtDate_(s) {
   if (!s) return '';

@@ -76,7 +76,16 @@ function offboardRequest_(body, ctx) {
 
   var trigger = ScriptApp.newTrigger('fireOffboarding_').timeBased()
     .after(CFG.OFFBOARD_DELAY_MIN * 60 * 1000).create();
-  setOffboardTrigger_(offbId, trigger.getUniqueId());
+  try {
+    setOffboardTrigger_(offbId, trigger.getUniqueId());
+  } catch (e) {
+    // The trigger id could not be persisted (col K stays empty). A one-shot whose id we never recorded
+    // would fire, run the row, but never be cleaned up (fireOffboarding_ only deletes by recorded id),
+    // leaking toward the 20-trigger cap. Delete it now and let reapOffboarding_ fire this row from its
+    // fire_at instead - the OQ row is already 'scheduled', so nothing is lost.
+    try { ScriptApp.deleteTrigger(trigger); } catch (e2) { /* already gone */ }
+    logAudit_('offboard_trigger_record_failed', { offb_id: offbId, error: String(e) });
+  }
 
   _draftOffboardNotice_({ offb_id: offbId, full_name: f.full_name || '', quay_email: email,
     requested_by: (ctx && ctx.email) || '', fire_at: fireAt, systems: systems });
@@ -100,9 +109,34 @@ function fireOffboarding_() {
   });
 }
 
+/**
+ * Atomically claim a row for firing. fireOffboarding_ (the one-shot) and reapOffboarding_ (the sweep)
+ * can both see the same due 'scheduled' row at the same instant; Apps Script does not serialise the two
+ * trigger handlers, so without a compare-and-set under a lock they would both tear the account down
+ * (two HubSpot seat DELETEs the moment seat-release is enabled). Returns true only for the single caller
+ * that flips 'scheduled' -> 'firing'. A stuck-'firing' recovery re-fire (reap) is allowed straight
+ * through - it is single-sourced and already gated by the stale-window check.
+ */
+function _claimOffboardFiring_(offbId, expected) {
+  if (expected === 'firing') return true;               // reap recovery of a stuck fire: proceed
+  var lock = _acquireLock_();
+  lock.waitLock(20000);
+  try {
+    if (offboardStatus_(offbId) !== 'scheduled') return false;  // another handler already claimed it
+    setOffboardStatus_(offbId, 'firing');
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /** Tear down one offboarding row. Guarded, best-effort, records partial results on error. */
 function _fireOne_(r) {
-  setOffboardStatus_(r.offb_id, 'firing');
+  if (!_claimOffboardFiring_(r.offb_id, r.status)) return;   // lost the claim to another handler
+  // Stamp when THIS firing attempt began, so reapOffboarding_ measures the stale window from the real
+  // start of firing rather than from fire_at (which, for a late/back-logged fire, can already exceed the
+  // window the instant firing begins and cause a spurious re-fire). Overwritten by the terminal result.
+  setOffboardStatus_(r.offb_id, 'firing', { firing_at: nowIso_() });
   var systems = safeJsonParse_(r.systems_json, CFG.SYSTEMS) || CFG.SYSTEMS;
   var googleResult = {};
   try {
@@ -169,9 +203,13 @@ function reapOffboarding_() {
         if (r.trigger_id) _deleteTriggerById_(r.trigger_id);
       }
     } else if (r.status === 'firing') {
-      // Stuck mid-fire (interrupted). A fire completes in seconds, so past the stale window it is
-      // hung; re-fire idempotently. fire_at is the proxy for when 'firing' began (trigger time).
-      if (fireAtValid && (now.getTime() - fireAt.getTime()) > staleMs) {
+      // Stuck mid-fire (interrupted). A fire completes in seconds, so past the stale window it is hung;
+      // re-fire idempotently. Measure from firing_at (stamped by _fireOne_ when this attempt began), NOT
+      // fire_at: a late/back-logged fire could already be older than the window the instant it starts,
+      // which would make reap re-fire a healthy row. Fall back to fire_at for rows fired before this fix.
+      var gr = safeJsonParse_(r.google_result, {}) || {};
+      var startedAt = new Date(gr.firing_at || r.fire_at);
+      if (!isNaN(startedAt.getTime()) && (now.getTime() - startedAt.getTime()) > staleMs) {
         logAudit_('offboard_reap_stuck_firing', { offb_id: r.offb_id });
         _fireOne_(r);
         if (r.trigger_id) _deleteTriggerById_(r.trigger_id);

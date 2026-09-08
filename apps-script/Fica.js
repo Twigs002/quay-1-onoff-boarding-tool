@@ -49,15 +49,21 @@ function ficaUpload_(body) {
 
   var name = meta.name || 'Candidate';
 
+  // Entity branch. The FFC / professional-status concept is broker-only (Quay 1). Aqua contractors
+  // submit no ffc_status, so the FFC validation and its PropData profile derivation are skipped.
+  var isAqua = (meta.entity === 'aqua');
+
   // Professional (FFC) status - self-declared; derives the PropData profile type (agent|specialist).
   var d0 = (body && body.details) || {};
   var ffcStatus = String((body && body.ffc_status) || d0['FFC status'] || '').trim().toLowerCase();
   var ffcNumber = String((body && body.ffc_number) || d0['FFC number'] || '').trim();
-  if (CFG.FFC_STATUSES.indexOf(ffcStatus) < 0) return { ok: false, error: 'please select your professional (FFC) status' };
-  if ((ffcStatus === 'full' || ffcStatus === 'candidate') && !ffcNumber) {
-    return { ok: false, error: 'an FFC number is required for your selected status' };
+  if (!isAqua) {
+    if (CFG.FFC_STATUSES.indexOf(ffcStatus) < 0) return { ok: false, error: 'please select your professional (FFC) status' };
+    if ((ffcStatus === 'full' || ffcStatus === 'candidate') && !ffcNumber) {
+      return { ok: false, error: 'an FFC number is required for your selected status' };
+    }
   }
-  var profileType = propdataProfileType_(ffcStatus);
+  var profileType = isAqua ? '' : propdataProfileType_(ffcStatus);
 
   // Numeric-field integrity (server-side mirror of the FICA page's input filtering, so a direct POST
   // cannot smuggle words past it). Reject BEFORE writing anything. Tax + bank account are digits only;
@@ -163,6 +169,15 @@ function ficaUpload_(body) {
 
   setOnboardingStatus_(folderId, 'FICA received');
 
+  // A successful (re)submission returns the row to a clean awaiting-acceptance state, clearing any
+  // prior per-document decline record. On a first submission these cells are already empty, so this
+  // is a harmless no-op. Guarded so a row-write failure never blocks the submission.
+  try {
+    setOnboardingCell_(folderId, ONB_COL.fica_declines_json, '');
+    setOnboardingCell_(folderId, ONB_COL.declined_at, '');
+    setOnboardingCell_(folderId, ONB_COL.declined_by, '');
+  } catch (err) { logAudit_('fica_decline_clear_failed', { folderId: folderId, error: String(err) }); }
+
   // Mirror to HR: refresh the tracking row, then promote (append-only, once) into the entity
   // destination tab now that FICA is complete. Non-fatal + DRY_RUN-safe.
   try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
@@ -170,6 +185,11 @@ function ficaUpload_(body) {
 
   if (isEmail_(meta.email)) {
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
+    // Quay 1 only: copy the candidate's senior broker on the "documents received" email so they know
+    // their new hire's FICA is in and being checked. Aqua contractors have no senior broker here.
+    // Gated by ccEnabled_ like every other internal copy (matches the decline / induction senior CC).
+    var seniorCc = (ccEnabled_() && (meta.entity || 'quay1') !== 'aqua' && isEmail_(meta.senior_email))
+      ? meta.senior_email : undefined;
     try {
       GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,
         'Hi ' + firstName_(name) + ',\n\nThank you for submitting your documents to ' +
@@ -177,6 +197,7 @@ function ficaUpload_(body) {
         'email shortly confirming your induction day.\n\n' +
         'Warm regards,\nThe ' + company.name + ' Team', {
           bcc: ccEnabled_() ? CFG.ALWAYS_CC.filter(function (x) { return x; }).join(',') : undefined,
+          cc: seniorCc,
           name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name)),
         });
     } catch (err) { logAudit_('fica_thankyou_failed', { folderId: folderId, error: String(err) }); }
@@ -211,6 +232,35 @@ function ficaForm_(folderId) {
   var companyName = htmlEsc_(company.name);
   var endpoint = optProp_(PROP.WEBAPP_URL);
   var B = CFG.BRAND;
+
+  // Entity branch. The FFC / professional-status card (card 7) is broker-only (Quay 1). Aqua
+  // contractors skip it entirely, so for aqua that card is not rendered and next of kin moves
+  // up from 8 to 7. Everything else on the form is shared byte-for-byte between entities.
+  var isAqua = !!(meta && meta.entity === 'aqua');
+  var ffcCard = isAqua ? '' :
+'<div class="card"><p class="sec">7 - Professional status</p>' +
+'<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
+'<div class="radios">' +
+'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status: I hold a valid FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner, working towards my FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status: I do not hold an FFC</span></label>' +
+'</div></div>' +
+'<div class="row" id="ffcNumRow"><label for="ffc_number">FFC number <span class="req" id="ffcNumReq">*</span></label>' +
+'<input type="text" id="ffc_number" autocomplete="off">' +
+'<p class="hint">Your Fidelity Fund Certificate number from the PPRA.</p></div>' +
+'<div class="filewrap" id="photoRow"><label for="f_photo">Headshot photo (optional)</label>' +
+'<input type="file" id="f_photo" accept="image/*">' +
+'<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your online profile up faster. Optional, but recommended.</p></div></div>';
+  var nokNum = isAqua ? '7' : '8';
+  // FFC radio wiring is broker-only. Aqua keeps a stub ffcVal() so the shared submit payload,
+  // which always reads ffc_status/ffc_number, stays valid with the card absent.
+  var ffcJs = isAqua ? 'function ffcVal(){return "";}' :
+'var ffcRadios=document.getElementsByName("ffc_status");' +
+'var ffcNumEl=document.getElementById("ffc_number"),ffcNumReq=document.getElementById("ffcNumReq");' +
+'function ffcVal(){for(var k=0;k<ffcRadios.length;k++){if(ffcRadios[k].checked)return ffcRadios[k].value;}return "";}' +
+'function ffcState(){var v=ffcVal();var needNum=(v==="full"||v==="candidate");' +
+'ffcNumEl.required=needNum;if(ffcNumReq)ffcNumReq.style.display=needNum?"":"none";}' +
+'for(var k=0;k<ffcRadios.length;k++){ffcRadios[k].addEventListener("change",ffcState);}ffcState();';
 
   var badLink = known ? '' :
     '<div class="note err show">This link is not recognised. Please use the personal link from your ' +
@@ -310,20 +360,8 @@ badLink +
 '<p class="hint">Digits only.</p></div>' +
 '<div class="filewrap"><label for="f_tax">SARS / tax number proof (optional)</label>' +
 '<input type="file" id="f_tax" accept="image/*,application/pdf"></div></div>' +
-'<div class="card"><p class="sec">7 - Professional status</p>' +
-'<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
-'<div class="radios">' +
-'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status &ndash; I hold a valid FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner &ndash; working towards my FFC</span></label>' +
-'<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status &ndash; I do not hold an FFC</span></label>' +
-'</div></div>' +
-'<div class="row" id="ffcNumRow"><label for="ffc_number">FFC number <span class="req" id="ffcNumReq">*</span></label>' +
-'<input type="text" id="ffc_number" autocomplete="off">' +
-'<p class="hint">Your Fidelity Fund Certificate number from the PPRA.</p></div>' +
-'<div class="filewrap" id="photoRow"><label for="f_photo">Headshot photo (optional)</label>' +
-'<input type="file" id="f_photo" accept="image/*">' +
-'<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your online profile up faster. Optional, but recommended.</p></div></div>' +
-'<div class="card"><p class="sec">8 - Next of kin</p>' +
+ffcCard +
+'<div class="card"><p class="sec">' + nokNum + ' - Next of kin</p>' +
 '<div class="row"><label for="nok_name">Next of kin name <span class="req">*</span></label>' +
 '<input type="text" id="nok_name" autocomplete="off" required></div>' +
 '<div class="row"><label for="nok_contact">Next of kin contact number <span class="req">*</span></label>' +
@@ -336,7 +374,7 @@ badLink +
 '<div id="note" class="note"></div></form>' +
 '<p class="foot">' + companyName + ' - your documents are stored securely and used only for FICA compliance.</p>' +
 '</div><script>' +
-'var ENDPOINT=' + JSON.stringify(endpoint) + ';var FOLDER_ID=' + JSON.stringify(folderId) + ';' +
+'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
 'var KNOWN=' + (known ? 'true' : 'false') + ';' +
 'var form=document.getElementById("ficaForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
 'if(!KNOWN&&btn){btn.disabled=true;}' +
@@ -345,12 +383,7 @@ badLink +
 'function b64(file){return new Promise(function(res,rej){var r=new FileReader();' +
 'r.onload=function(){res(String(r.result).split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});}' +
 'var MAP=[["f_contract","CONTRACT"],["f_id","ID"],["f_addr","POA"],["f_bank","BANK"],["f_tax","TAX"],["f_photo","PHOTO"],["f_permit","PERMIT"]];' +
-'var ffcRadios=document.getElementsByName("ffc_status");' +
-'var ffcNumEl=document.getElementById("ffc_number"),ffcNumReq=document.getElementById("ffcNumReq");' +
-'function ffcVal(){for(var k=0;k<ffcRadios.length;k++){if(ffcRadios[k].checked)return ffcRadios[k].value;}return "";}' +
-'function ffcState(){var v=ffcVal();var needNum=(v==="full"||v==="candidate");' +
-'ffcNumEl.required=needNum;if(ffcNumReq)ffcNumReq.style.display=needNum?"":"none";}' +
-'for(var k=0;k<ffcRadios.length;k++){ffcRadios[k].addEventListener("change",ffcState);}ffcState();' +
+ffcJs +
 // Reveal + require the work-permit block only when the ID entered is not a 13-digit SA ID.
 'var idEl=document.getElementById("id_number");' +
 'var permitBlock=document.getElementById("permitBlock");' +

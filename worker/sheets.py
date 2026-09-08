@@ -107,6 +107,27 @@ def _now_iso() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
 
+def _parse_iso(s: str) -> "dt.datetime | None":
+    """Parse an ISO timestamp to a NAIVE local datetime (comparable to dt.datetime.now()).
+
+    Tolerates both the worker's own naive-local stamps (_now_iso) and Apps Script's UTC 'Z' stamps
+    (nowIso_), so staleness math is correct regardless of which side wrote updated_at last. Returns
+    None on empty/garbage so callers can treat "no usable timestamp" as its own case.
+    """
+    s = (s or "").strip()
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        d = dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if d.tzinfo is not None:
+        d = d.astimezone().replace(tzinfo=None)   # normalise to naive local
+    return d
+
+
 class SheetBus:
     """Thin wrapper over the two queue worksheets."""
 
@@ -140,6 +161,37 @@ class SheetBus:
             out.append(qr)
         return out
 
+    def reap_stale_in_progress(self, timeout_min: int) -> list[QueueRow]:
+        """Recover rows stranded in `in_progress` by a crash/kill/sleep between claim() and finish().
+
+        Nothing else moves a row off in_progress except finish()/release_to_pending() inside
+        process_row, so a worker that dies mid-row would otherwise leave the candidate silently never
+        provisioned, with no error status to alert anyone. Any worker-owned in_progress row whose
+        updated_at is older than `timeout_min` is put back to `pending` so a later pass retries it
+        (attempts was already incremented at claim, so MAX_ATTEMPTS still caps it). A row with no
+        parseable updated_at is treated as stale (it cannot be shown to be fresh). Returns the rows
+        re-pended, for logging.
+        """
+        records = self._prov.get_all_values()
+        inv = {idx: name for name, idx in PROV_COLS.items()}
+        now = dt.datetime.now()
+        cutoff = dt.timedelta(minutes=timeout_min)
+        revived: list[QueueRow] = []
+        for i, raw in enumerate(records[1:], start=2):     # skip header
+            vals = {inv[c]: (raw[c - 1] if c - 1 < len(raw) else "")
+                    for c in inv}
+            qr = QueueRow(row_index=i, values=vals)
+            if qr.status != IN_PROGRESS:
+                continue
+            if qr.system not in WORKER_SYSTEMS:
+                continue
+            updated = _parse_iso(qr.get("updated_at"))
+            if updated is not None and (now - updated) < cutoff:
+                continue                                   # still fresh - a live worker may hold it
+            self.release_to_pending(qr)
+            revived.append(qr)
+        return revived
+
     # -------------------------------------------------- CAS claim
     def claim(self, qr: QueueRow) -> int | None:
         """Compare-and-set (CONTRACTS.md section 3). Flip status pending ->
@@ -156,7 +208,13 @@ class SheetBus:
         if (live or "").strip().lower() != PENDING:
             return None                                     # someone else took it
 
-        new_attempts = qr.attempts + 1
+        # Re-read attempts from the live cell (not the pending_provisioning snapshot) so the increment
+        # reflects any writes since the scan and the MAX_ATTEMPTS cap cannot be quietly overrun.
+        live_attempts = self._prov.cell(qr.row_index, PROV_COLS["attempts"]).value
+        try:
+            new_attempts = int((live_attempts or "0").strip() or "0") + 1
+        except ValueError:
+            new_attempts = qr.attempts + 1
         self._prov.update_cell(qr.row_index, col, IN_PROGRESS)
         self._prov.update_cell(qr.row_index, PROV_COLS["attempts"], str(new_attempts))
         self._prov.update_cell(qr.row_index, PROV_COLS["updated_at"], _now_iso())
@@ -167,22 +225,35 @@ class SheetBus:
         return new_attempts
 
     # -------------------------------------------------- result write-back
+    def _write_row_cells(self, row_index: int, updates: list[tuple[int, str]]) -> None:
+        """Write several cells of one row in a SINGLE batched API call, so a terminal write cannot be
+        torn in half by a crash between cells (which previously could leave status=done with a stale or
+        empty result_json). `updates` is a list of (1-based column, value)."""
+        from gspread.utils import rowcol_to_a1
+        self._prov.batch_update(
+            [{"range": rowcol_to_a1(row_index, col), "values": [[val]]} for col, val in updates],
+            value_input_option="RAW",
+        )
+
     def finish(self, qr: QueueRow, status: str, result: dict) -> None:
-        """Write a terminal status (done|error|skipped), result_json, updated_at.
+        """Write a terminal status (done|error|skipped), result_json, updated_at in one atomic batch.
         `attempts` was already written at claim time, so it is not rewritten here.
         """
         import json
-        self._prov.update_cell(qr.row_index, PROV_COLS["status"], status)
-        self._prov.update_cell(qr.row_index, PROV_COLS["result_json"],
-                               json.dumps(result, ensure_ascii=False))
-        self._prov.update_cell(qr.row_index, PROV_COLS["updated_at"], _now_iso())
+        self._write_row_cells(qr.row_index, [
+            (PROV_COLS["status"], status),
+            (PROV_COLS["result_json"], json.dumps(result, ensure_ascii=False)),
+            (PROV_COLS["updated_at"], _now_iso()),
+        ])
 
     def release_to_pending(self, qr: QueueRow) -> None:
         """Put a claimed-but-failed row back to pending for a later retry (used
         when attempts are still under the cap). attempts already persisted at claim.
         """
-        self._prov.update_cell(qr.row_index, PROV_COLS["status"], PENDING)
-        self._prov.update_cell(qr.row_index, PROV_COLS["updated_at"], _now_iso())
+        self._write_row_cells(qr.row_index, [
+            (PROV_COLS["status"], PENDING),
+            (PROV_COLS["updated_at"], _now_iso()),
+        ])
 
     # -------------------------------------------------- other tabs on the book
     def worksheet(self, tab_name: str):
