@@ -88,22 +88,36 @@ var ONB_COL = {
   // the automatic 12-hour "please submit via the secure link" nudge (ficaFollowUpSweep_). Empty
   // until each fires. See Onboarding_Common.js.
   contract_emailed_at: 55, fica_followup_at: 56,
-  // Per-document FICA decline (appended, no shift). fica_declines_json holds the structured decline
-  // record { docs:{ id|poa|bank:{reason,by,at} }, contract_incorrect?:{reason,by,at} } written by
-  // declineFica_ - the reason lives against each document, not just the candidate. declined_at /
-  // declined_by are the durable last-decline audit markers (parity with approved_at/approved_by).
-  // All three are cleared on the next FICA re-upload so a re-submission re-enters the queue clean.
-  fica_declines_json: 57, declined_at: 58, declined_by: 59,
+  // The full induction packet (with logins) auto-sends at 06:00 on the induction Wednesday via
+  // inductionPacketSweep_ (Induction.js). This is the send-once idempotency marker; booking only sends
+  // the lightweight "induction confirmed" email now, not the logins. Empty until the packet fires.
+  induction_packet_sent_at: 57,
+  // When we emailed the team that their HubSpot login is missing for a booked starter (fired the
+  // moment the candidate picks their induction week). Idempotency marker so the team is chased once,
+  // not again when the packet later sends. See _alertTeamHubspotMissing_ (Induction.js).
+  hubspot_team_alerted_at: 58,
+  // JSON array of the Google Calendar event ids created for this candidate's two induction mornings
+  // (see _syncInductionCalendar_). Stored so a re-booking can delete the old events before creating
+  // the new ones, rather than leaving stale duplicates. Empty until a week is booked.
+  induction_calendar_ids: 59,
+  // Per-document FICA decline (appended, no shift; renumbered to 60+ on the #38 reconcile so it does
+  // not collide with induction_packet_sent_at/hubspot_team_alerted_at/induction_calendar_ids at 57-59).
+  // fica_declines_json holds the structured decline record { docs:{ id|poa|bank:{reason,by,at} },
+  // contract_incorrect?:{reason,by,at} } written by declineFica_ - the reason lives against each
+  // document, not just the candidate. declined_at / declined_by are the durable last-decline audit
+  // markers (parity with approved_at/approved_by). All three are cleared on the next FICA re-upload so
+  // a re-submission re-enters the queue clean.
+  fica_declines_json: 60, declined_at: 61, declined_by: 62,
   // Aqua-only: when the "accepted, can join Aqua" notice was sent to AQUA_ACCEPT_NOTIFY (Alan) on
   // admin acceptance. Idempotency marker (mirrors cma_requested_at); in DRY_RUN it DRAFTS without
   // stamping so the notice is previewable and the real send still fires once armed. See
   // _maybeNotifyAquaAccepted_.
-  aqua_accept_notified_at: 60,
+  aqua_accept_notified_at: 63,
   // When the welcome pack actually sent to the candidate - the Quay 1 induction packet
   // (_sendInductionPacket_) or the Aqua Google-only welcome (_sendAquaWelcome_). Feeds the HR sheet's
   // "Welcome Email Sent" column via _hrBuildRow_ / hrMarkWelcomeSent_ so HR is not asked to track by
   // hand something the system already did. Appended, no shift.
-  welcome_email_at: 61,
+  welcome_email_at: 64,
 };
 
 var ONB_HEADERS = [
@@ -119,7 +133,8 @@ var ONB_HEADERS = [
   'Income tax number', 'Residential address', 'Work permit expiry', 'Work permit received',
   'Next of kin name', 'Next of kin contact', 'Next of kin relationship', 'Next of kin email',
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
-  'Contract emailed at', 'FICA follow-up at',
+  'Contract emailed at', 'FICA follow-up at', 'Induction packet sent at', 'HubSpot team alerted at',
+  'Induction calendar ids',
   'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
   'Welcome email sent at',
 ];

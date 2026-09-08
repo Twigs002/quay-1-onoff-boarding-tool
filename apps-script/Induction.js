@@ -29,6 +29,12 @@ function bookInduction_(body) {
 
   var monday = _asDate_(body && body.weekMonday);
   if (!monday) return { ok: false, error: 'a valid weekMonday (YYYY-MM-DD) is required' };
+  // Snap the posted date to the MONDAY of its week (same convention as _mondayOfThisWeek_), so a client
+  // that posts any day of the chosen week - or a date nudged by a timezone - still books the correct
+  // Monday-anchored Wed/Thu instead of, say, a Thursday+2 = Saturday induction.
+  var _dow = monday.getDay(); // 0 Sun .. 6 Sat
+  var _toMon = (_dow === 0 ? -6 : 1 - _dow);
+  monday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + _toMon);
 
   // Enforce the Tuesday 14:00 cut-off server-side (the page hides closed weeks, but the folderId is
   // the only credential, so a stale/replayed week must be rejected here too). Compare by date only.
@@ -42,10 +48,113 @@ function bookInduction_(body) {
   var thu = _isoDate_(_addDays_(monday, 3));
   setInduction_(folderId, wed, thu);
 
-  // Send the induction packet (dates + logins) to the candidate. Never throws - dates are saved above.
-  _sendInductionPacket_(folderId, meta, wed, thu);
+  // On booking, send only the lightweight "induction confirmed" email (dates + venue, NO logins).
+  // The full packet WITH logins is sent on the induction Wednesday morning by inductionPacketSweep_.
+  // Re-booking a different week resets the marker so the packet re-targets the new Wednesday.
+  try { setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, ''); } catch (e) { /* non-fatal */ }
+  _sendInductionConfirmed_(folderId, meta, wed, thu);
+  // Chase the team's HubSpot login NOW if it is not on record, so there is time to get it before the
+  // packet (with logins) lands on the induction morning. Idempotent + gated inside.
+  _alertTeamHubspotMissing_(folderId, meta);
+  // Put the two induction mornings on the calendar (candidate + Kat + Pagan), refreshing any from a
+  // previous booking. Non-fatal.
+  _syncInductionCalendar_(folderId, meta, wed, thu);
 
   return { ok: true, wed: wed, thu: thu };
+}
+
+/**
+ * Send the lightweight "induction confirmed" email (dates + venue + what-to-bring, NO logins) that
+ * goes out the moment a candidate books. CC the senior broker (when internal mail is on). Wrapped so a
+ * send failure never breaks booking - the dates are already saved by the caller.
+ */
+function _sendInductionConfirmed_(folderId, o, wed, thu) {
+  o = o || {};
+  try {
+    if (!isEmail_(o.email)) return;
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name + ' induction is confirmed for ' +
+      fmtDate_(wed) + ' and ' + fmtDate_(thu) + ', 09:00 - 12:00 each morning.\n\n' +
+      'Where: ' + INDUCTION_VENUE.address + '.\n\n' +
+      'On the morning of your first day we will send a second email with your logins and everything ' +
+      'else you need.\n\nWarm regards,\nThe ' + company.name + ' Team';
+    GmailApp.sendEmail(o.email,
+      'Your ' + company.name + ' induction is confirmed' + (o.name ? ' - ' + o.name : ''),
+      plain, {
+        name: company.name,
+        htmlBody: inductionConfirmedHtml_(company, o, { wed: wed, thu: thu }),
+        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
+      });
+    logAudit_('induction_confirmed_sent', { folderId: folderId, wed: wed, thu: thu });
+  } catch (e) {
+    logAudit_('induction_confirmed_failed', { folderId: folderId, error: String(e) });
+  }
+}
+
+/**
+ * Trigger target (daily ~06:00, Africa/Johannesburg): send the FULL induction packet (with logins) to
+ * every candidate whose induction Wednesday is today OR within the last ~2 days and who has not already
+ * been sent it. Stamps induction_packet_sent_at ONLY on a successful send, so a packet that failed on
+ * the morning is genuinely RETRIED by the next day's sweep (rather than being missed forever) with no
+ * risk of a duplicate. This decouples logins from booking - booking only sends the "confirmed" email;
+ * the credentials land the morning of day 1. Installed by setupTriggers().
+ */
+function inductionPacketSweep_() {
+  var tz = Session.getScriptTimeZone();
+  var now = new Date();
+  var today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  // A short trailing window so a failed 06:00 send is retried the next day(s); ISO date strings sort
+  // lexicographically, so a string range test is a correct date range test.
+  var twoDaysAgo = Utilities.formatDate(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+  var sent = 0, skipped = 0;
+  listOnboarding_(function (o) {
+    var wedIso = String(o.induction_wed || '').slice(0, 10);
+    return !_isMigratedLegacy_(o) &&
+      wedIso && wedIso >= twoDaysAgo && wedIso <= today &&
+      !String(o.induction_packet_sent_at || '').trim();
+  }).forEach(function (o) {
+    var folderId = o.folderId;
+    var ok = false;
+    try {
+      ok = _sendInductionPacket_(folderId, o, o.induction_wed, o.induction_thu);
+    } catch (e) {
+      logAudit_('induction_packet_sweep_failed', { folderId: folderId, error: String(e) });
+    }
+    if (ok) {
+      // Stamp ONLY on a real send, so the "fires once" guard is honoured for successful packets.
+      setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, nowIso_());
+      sent++;
+    } else {
+      // Do NOT stamp: leave induction_packet_sent_at empty so tomorrow's sweep retries. Alert internal
+      // so a stuck packet is noticed and can be hand-sent before the candidate arrives that morning.
+      skipped++;
+      _alertInductionPacketFailed_(folderId, o);
+    }
+  });
+  logAudit_('induction_packet_sweep', { date: today, sent: sent, skipped: skipped });
+  return 'Induction packet sweep for ' + today + ': sent ' + sent + ', errors ' + skipped + '.';
+}
+
+/** Alert INTERNAL_NOTIFY that today's induction packet could not be sent for a candidate whose
+ *  induction is TODAY, so someone can hand-send it before they arrive. The row is deliberately left
+ *  unstamped so the next daily sweep retries automatically. Never throws into the sweep. */
+function _alertInductionPacketFailed_(folderId, o) {
+  o = o || {};
+  try {
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
+    if (!to) return;
+    GmailApp.sendEmail(to,
+      company.name + ' - induction packet FAILED to send (action needed today): ' + (o.name || folderId),
+      'The induction packet for ' + (o.name || '(no name)') + ' could not be sent this morning, and ' +
+      'their induction is TODAY.\n\nfolderId: ' + folderId + '\ncandidate email: ' + (o.email || '(none/invalid)') +
+      '\n\nThe row was left unstamped so the next daily sweep will retry automatically, but please ' +
+      'hand-send their logins now if they are starting today.\n\nRegards,\nThe ' + company.name + ' Team',
+      { name: company.name });
+    logAudit_('induction_packet_failed_alert', { folderId: folderId });
+  } catch (e) {
+    logAudit_('induction_packet_failed_alert_error', { folderId: folderId, error: String(e) });
+  }
 }
 
 /**
@@ -62,7 +171,15 @@ function resendInductionPacket_(folderId, ctx) {
   var thu = String(meta.induction_thu || '').trim();
   if (!wed && !thu) return { ok: false, error: 'No induction week is booked yet - the candidate must pick a week before the packet can be resent.' };
   if (!isEmail_(meta.email)) return { ok: false, error: 'No candidate email on file for this row.' };
-  _sendInductionPacket_(folderId, meta, wed, thu);
+  var ok = _sendInductionPacket_(folderId, meta, wed, thu);
+  if (!ok) {
+    // The send did not go out - report it rather than claiming a resend, and leave the marker as-is.
+    logAudit_('induction_packet_resend_failed', { folderId: folderId, by: (ctx && ctx.email) || 'admin' });
+    return { ok: false, error: 'The induction packet could not be sent - please check the candidate email and try again.' };
+  }
+  // A successful manual resend IS a send, so stamp the marker: the daily sweep must not then send it a
+  // second time on the induction morning. (Re-booking a new week clears this marker again.)
+  try { setOnboardingCell_(folderId, ONB_COL.induction_packet_sent_at, nowIso_()); } catch (e) { /* non-fatal */ }
   logAudit_('induction_packet_resent', { folderId: folderId, by: (ctx && ctx.email) || 'admin' });
   return { ok: true, wed: wed, thu: thu, resent: true };
 }
@@ -71,9 +188,14 @@ function resendInductionPacket_(folderId, ctx) {
  * Build + send the induction packet (booked dates + Google/HubSpot logins) to the candidate, CC the
  * senior broker, and alert the team when no HubSpot login is on record. Shared by bookInduction_ (first
  * send) and resendInductionPacket_. Wrapped so a send failure never propagates to the caller.
+ *
+ * Returns TRUE only when the candidate email was ACTUALLY sent, FALSE otherwise (no/invalid candidate
+ * email, or the send threw). The daily inductionPacketSweep_ uses this to stamp induction_packet_sent_at
+ * ONLY on a real send, so a failed packet is retried the next morning instead of being marked done.
  */
 function _sendInductionPacket_(folderId, o, wed, thu) {
   o = o || {};
+  var sent = false;
   try {
     var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
     var cred = _credentialFor_(folderId);
@@ -84,8 +206,8 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
     if (!teamLogin) logAudit_('induction_hubspot_missing', { folderId: folderId, team: o.team, matched: !!hub, recorded: !!(hub && hub.recorded) });
     if (isEmail_(o.email)) {
       var loginText = cred ? ('\n\nYour first-login details:\nEmail: ' + (cred.email || '-') +
-        '\nTemporary password: ' + (cred.temp_password || '-') +
-        '\n(You will be asked to set your own password when you first sign in.)') : '';
+        '\nPassword: ' + (cred.temp_password || '-') +
+        '\n(On first sign-in, please switch on 2-step verification to keep your account secure.)') : '';
       // Never silently omit the HubSpot line - when it is not on record yet, say so instead of
       // leaving the candidate to wonder why it is missing.
       var hubText = teamLogin ? ('\n\nYour team HubSpot login:\nUsername: ' + (teamLogin.username || '-') +
@@ -107,39 +229,110 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
           htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu }, cred, teamLogin),
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
+      sent = true;   // candidate email actually went out - safe for the sweep to stamp _sent_at
       // The induction packet IS the Quay 1 welcome pack: record that it went out and reflect it on the
       // HR row (which was promoted earlier, on acceptance). Non-fatal.
       try {
         setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
         hrMarkWelcomeSent_(folderId);
       } catch (e) { logAudit_('welcome_sent_mark_failed', { folderId: folderId, error: String(e) }); }
+    } else {
+      logAudit_('induction_packet_no_email', { folderId: folderId, name: o.name });
     }
-    // Team HubSpot login NOT on record -> alert the team (CC Sheldon + Marthinus) so the new hire
-    // gets access and no one has to chase it. Suppressed when internal mail is off (ccEnabled_).
-    if (hub && !hub.recorded && isEmail_(hub.username) && ccEnabled_()) {
-      try {
-        GmailApp.sendEmail(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
-          'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
-          ' is about to start, but we do not have a HubSpot login recorded for your team. Please reply with ' +
-          'your team HubSpot password and who the verification code should go to, as soon as possible.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name, cc: CFG.CMA_APPROVERS.join(',') });
-      } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
-    }
-    // Team name not found AT ALL in "HubSpot Logins" (no row to chase a password on) - this is a data
-    // mismatch, not a missing password, so it needs an ops fix rather than a team chase. Alert Sheldon
-    // + Marthinus directly since there is no team email to send to. Same ccEnabled_() gate as above.
-    if (!hub && ccEnabled_()) {
-      try {
-        GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
-          'Hi,\n\n' + (o.name || 'A new starter') + ' is joining team "' + (o.team || '(none)') +
-          '", but that team name was not found in the "HubSpot Logins" tab, so their induction packet ' +
-          'could not include a login. Please add or correct the row for this team.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name });
-      } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
-    }
+    // Safety net: if the team login is still not on record by packet time, chase it (idempotent - it
+    // was normally already chased the moment the candidate booked, see bookInduction_). Own try/catch,
+    // so it never flips `sent` after a successful candidate send.
+    _alertTeamHubspotMissing_(folderId, o);
   } catch (err) {
+    // A throw here means the candidate send did not complete; leave sent=false so the caller retries.
     logAudit_('induction_packet_failed', { folderId: folderId, error: String(err) });
   }
+  return sent;
+}
+
+/**
+ * Chase a booked starter's missing team HubSpot login. Fired the moment they pick their induction week
+ * (bookInduction_) so there's time to get the login before the packet lands, with the packet as a
+ * safety-net caller. Idempotent via the hubspot_team_alerted_at marker (chase once). ccEnabled_ gates
+ * it. Two cases: the team is listed but has no password -> email the team (cc ops); the team is not in
+ * the "HubSpot Logins" tab at all -> email ops to fix the data. Never throws into the caller.
+ */
+function _alertTeamHubspotMissing_(folderId, o) {
+  o = o || {};
+  try {
+    if (o.hubspot_team_alerted_at) return;         // already chased once
+    if (!ccEnabled_()) return;                      // internal mail off
+    var hub = _teamHubspotLogin_(o.team);
+    if (hub && hub.recorded) return;                // login is on file - nothing to chase
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    if (hub && isEmail_(hub.username)) {
+      GmailApp.sendEmail(hub.username, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
+        'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
+        ' has just booked their induction, but we do not have a HubSpot login recorded for your team. ' +
+        'Please reply with your team HubSpot password and who the verification code should go to, as soon ' +
+        'as possible.\n\nThanks,\nThe ' + company.name + ' Team', { name: company.name, cc: CFG.CMA_APPROVERS.join(',') });
+    } else {
+      GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
+        'Hi,\n\n' + (o.name || 'A new starter') + ' has booked induction for team "' + (o.team || '(none)') +
+        '", but that team name was not found in the "HubSpot Logins" tab, so we cannot include a login. ' +
+        'Please add or correct the row for this team.\n\nThanks,\nThe ' + company.name + ' Team', { name: company.name });
+    }
+    try { setOnboardingCell_(folderId, ONB_COL.hubspot_team_alerted_at, nowIso_()); } catch (e) { /* non-fatal */ }
+    logAudit_('hubspot_team_alerted', { folderId: folderId, team: o.team, matched: !!hub });
+  } catch (err) {
+    logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(err) });
+  }
+}
+
+/**
+ * Put the candidate's two induction mornings (Wed + Thu, 09:00-12:00) on the calendar and invite the
+ * candidate + Kat, with Pagan as organiser (the script runs as the deploying user, so the events land
+ * on that calendar). Called on booking. A re-booking first deletes the events from the previous
+ * booking (their ids are stored in induction_calendar_ids) so no stale duplicates are left. The venue
+ * comes from the single-source INDUCTION_VENUE constant. Never throws into the caller.
+ */
+function _syncInductionCalendar_(folderId, o, wed, thu) {
+  o = o || {};
+  try {
+    var cal = CalendarApp.getDefaultCalendar();
+    var prior = safeJsonParse_(o.induction_calendar_ids, null);   // delete any previous booking's events
+    if (Array.isArray(prior)) {
+      prior.forEach(function (id) { try { var ev = cal.getEventById(id); if (ev) ev.deleteEvent(); } catch (e) { /* already gone */ } });
+    }
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var guests = ['kat@quay1.co.za'];                              // Pagan is organiser; Kat is invited to all
+    if (isEmail_(o.email)) guests.push(o.email);                   // the candidate, for their booked week
+    var name = o.name || 'New starter';
+    var venue = (typeof INDUCTION_VENUE !== 'undefined') ? INDUCTION_VENUE.address : '';
+    var ids = [];
+    [['Day 1', wed], ['Day 2', thu]].forEach(function (pair) {
+      var m = String(pair[1] || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return;
+      var start = new Date(+m[1], +m[2] - 1, +m[3], 9, 0, 0);
+      var end = new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0);
+      var ev = cal.createEvent(company.name + ' Induction ' + pair[0] + ' - ' + name, start, end, {
+        description: company.name + ' induction (' + pair[0] + ') for ' + name + '. 09:00 - 12:00.',
+        location: venue, guests: guests.join(','), sendInvites: true,
+      });
+      ids.push(ev.getId());
+      // Persist INCREMENTALLY after each event: if the second createEvent throws, the first event's id
+      // is already on the row so a re-book can delete it - otherwise it would be an uncleanable orphan.
+      setOnboardingCell_(folderId, ONB_COL.induction_calendar_ids, JSON.stringify(ids));
+    });
+    logAudit_('induction_calendar_synced', { folderId: folderId, events: ids.length });
+  } catch (err) {
+    logAudit_('induction_calendar_failed', { folderId: folderId, error: String(err) });
+  }
+}
+
+/** Editor one-off: run once after deploy to grant the newly-added Calendar permission (adding the
+ *  scope means the deploying user must re-authorise before the booking flow can create events). Just
+ *  touches the calendar to trigger the consent prompt. Safe to delete after. */
+function authorizeCalendar() {
+  var cal = CalendarApp.getDefaultCalendar();
+  var msg = 'Calendar authorised: ' + cal.getName();
+  Logger.log(msg);
+  return msg;
 }
 
 /** Candidate-page lookup for the induction booking status (doGet ?i=<folderId>). */
@@ -229,26 +422,92 @@ function progressReport_(folderId) {
 }
 
 /**
- * Tuesday digest of Quay1 candidates and their induction status. Auto-send is permitted for this
- * scoped onboarding-pipeline digest (SPEC section 6). Installed via setupTriggers() (Setup.js).
+ * Tuesday MORNING induction digest (~07:00). Trigger target - gives the team the day's picture so they
+ * can chase unbooked candidates before the booking cut-off. Subject unchanged from the original digest.
  */
-function tuesdayDigest_() {
+function tuesdayDigest_() { _sendInductionDigest_(''); }
+
+/**
+ * Tuesday 2pm induction digest (14:00). Trigger target - the SAME digest sent again right after the
+ * booking cut-off and one hour before the 15:00 provisioning batch, so the team has the final,
+ * post-cutoff picture of who booked. Subject is tagged "[2pm update]" so it is distinct in the inbox.
+ */
+function tuesdayDigestAfternoon_() { _sendInductionDigest_('2pm'); }
+
+/**
+ * Shared body for the Tuesday induction digest of Quay1 candidates and their induction status. `slot`
+ * tags the subject so the morning and afternoon sends are distinguishable ('' = morning, no tag;
+ * '2pm' = afternoon). Auto-send is permitted for this scoped onboarding-pipeline digest (SPEC section
+ * 6). Installed (both sends) via setupTriggers() (Setup.js).
+ */
+function _sendInductionDigest_(slot) {
   var weekStart = _mondayOfThisWeek_();
   var weekEnd = _addDays_(weekStart, 6);
-  var buckets = { dueThisWeek: [], unbooked: [] };
+  // Four buckets, each kept actionable (a past/irrelevant row is surfaced for a decision, not mislabelled):
+  //   dueThisWeek - booked for an induction Wed inside this calendar week
+  //   bookedOther - booked for a FUTURE week (booking after the Tue cut-off always picks a future week,
+  //                 so this is the common case). Future bookings are NEVER dropped.
+  //   lapsed      - booked date has already PASSED but the (approved) candidate is still on the pipeline:
+  //                 a stale or failed booking that needs re-booking, chased rather than silently dropped.
+  //   unbooked    - no induction date yet AND already actionable (approved + docs in), so the chase list
+  //                 only contains candidates who can actually book now.
+  var buckets = { dueThisWeek: [], bookedOther: [], lapsed: [], unbooked: [] };
   listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
-    if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
-    else if (!o.induction_wed && !o.induction_thu) buckets.unbooked.push(o);
+    var thu = _asDate_(o.induction_thu);
+    if (wed && wed >= weekStart && wed <= weekEnd) { buckets.dueThisWeek.push(o); return; }
+    var booked = wed || thu;
+    if (booked) {
+      if (booked >= weekStart) buckets.bookedOther.push(o);          // future week -> upcoming
+      else if (o.approved_at) buckets.lapsed.push(o);                // past booking, still approved -> rebook
+      return;
+    }
+    // No date yet: only chase candidates who CAN book now (approved + all docs in).
+    if (o.approved_at && _docsReady_(o)) buckets.unbooked.push(o);
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
-  var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
-    ' booked, ' + buckets.unbooked.length + ' awaiting)';
+  var tag = (slot === '2pm') ? ' [2pm update]' : '';
+  var lapsedTag = buckets.lapsed.length ? (', ' + buckets.lapsed.length + ' lapsed') : '';
+  var subject = company.name + ' - induction digest' + tag + ' (' + buckets.dueThisWeek.length +
+    ' this week, ' + buckets.bookedOther.length + ' upcoming' + lapsedTag + ', ' + buckets.unbooked.length + ' awaiting)';
   GmailApp.sendEmail(to, subject,
     'Induction status. Booked this week: ' + buckets.dueThisWeek.length +
+    '. Booked upcoming weeks: ' + buckets.bookedOther.length +
+    '. Lapsed (needs rebooking): ' + buckets.lapsed.length +
     '. Awaiting booking: ' + buckets.unbooked.length + '.',
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
+}
+
+/**
+ * READ-ONLY diagnostic (editor Run): dumps how the digest currently classifies every Quay1 candidate,
+ * so we can see WHY someone booked is not showing as booked - raw induction_wed/thu, the parsed date,
+ * the current-week window, and which bucket they land in (or HIDDEN = has a date but outside this
+ * calendar week, or unparseable). Also prints the Aqua/Quay1 parent folder ids. Sends nothing.
+ */
+function debugDigest() {
+  var weekStart = _mondayOfThisWeek_();
+  var weekEnd = _addDays_(weekStart, 6);
+  var lines = ['now=' + new Date() + '  weekStart=' + _isoDate_(weekStart) + '  weekEnd=' + _isoDate_(weekEnd), ''];
+  listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
+    var wed = _asDate_(o.induction_wed);
+    var inWeek = wed && wed >= weekStart && wed <= weekEnd;
+    var bucket = inWeek ? 'BOOKED_THIS_WEEK'
+      : (o.induction_wed || o.induction_thu) ? 'BOOKED_UPCOMING(has a date, not this calendar week)'
+      : 'AWAITING';
+    lines.push([(o.name || '(no name)'),
+      'wed=' + JSON.stringify(o.induction_wed || ''),
+      'thu=' + JSON.stringify(o.induction_thu || ''),
+      'parsedWed=' + (wed ? _isoDate_(wed) : 'null'),
+      'approved=' + (o.approved_at ? 'Y' : 'n'),
+      'status=' + (o.status || ''),
+      '=> ' + bucket].join('  |  '));
+  });
+  lines.push('', 'AQUA_PARENT_FOLDER=' + (optProp_(PROP.AQUA_PARENT_FOLDER) || '(unset)'),
+    'QUAY1_PARENT_FOLDER=' + (optProp_(PROP.QUAY1_PARENT_FOLDER) || '(unset)'));
+  var s = lines.join('\n');
+  Logger.log(s);
+  return s;
 }
 
 // ---------------------------------------------------------------- candidate booking page

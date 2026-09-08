@@ -145,9 +145,11 @@ check(ctx.resolveSystems_('quay1', [], ['google', 'propdata'], '', '').indexOf('
   'quay1 scope UNCHANGED (explicit propdata retained)');
 
 console.log('10. aqua contract stage validates the five HR fields (SPEC 7)');
-check(/cell phone number is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001010000000', email: 'a@b.com', start_date: '2026-09-01' }).error || ''),
+// Use a checksum-VALID SA ID so onboardAqua_'s ID validation (added in #38) passes and we reach the
+// five-HR-field checks this test actually exercises; '9001010000000' fails the SA ID checksum.
+check(/cell phone number is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001015000085', email: 'a@b.com', start_date: '2026-09-01' }).error || ''),
   'aqua onboard requires a cell number');
-check(/start date is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001010000000', email: 'a@b.com', contact: '0820000000' }).error || ''),
+check(/start date is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001015000085', email: 'a@b.com', contact: '0820000000' }).error || ''),
   'aqua onboard requires a start date');
 
 console.log('11. decline gates acceptance - a declined candidate cannot be accepted (review fix B)');

@@ -159,13 +159,17 @@ function readForUi_(ctx) {
   // The candidate pipeline: onboarded people not yet set up, so admins can review + Approve & set up.
   // Scoped to a broker's own candidates for non-admins.
   var onboarding = _onboardingPipeline_(isAdmin, email, pq);
-  if (!isAdmin && email) {
-    // Scope the provisioning queue to ALL of the broker's own candidates (by requester_email), NOT the
-    // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
+  if (!isAdmin) {
+    // Fail-safe scoping: a non-admin sees ONLY their own candidates. A blank/unknown email must match
+    // NOTHING (not everything) - otherwise a missing session email would leak every broker's queue.
+    // Scope to ALL of the broker's own candidates (by requester_email), NOT the pipeline - the pipeline
+    // excludes already-provisioned rows, but their queue rows must still show.
     var mine = {};
-    listOnboarding_().forEach(function (o) {
-      if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
-    });
+    if (email) {
+      listOnboarding_().forEach(function (o) {
+        if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
+      });
+    }
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
   }
@@ -183,7 +187,8 @@ function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    // Fail-safe: a non-admin with no/blank email matches NOTHING (see readForUi_).
+    if (!isAdmin && (!email || String(o.requester_email).toLowerCase() !== email)) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '', status: o.status || '',
@@ -221,12 +226,13 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     var s = setup[o.folderId] || { incomplete: false, error: false };
     // Drop only when fully set up: provisioned AND no create row is still pending or errored.
     if (o.provisioned_at && !s.incomplete) return;
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    // Fail-safe: a non-admin with no/blank email matches NOTHING (see readForUi_).
+    if (!isAdmin && (!email || String(o.requester_email).toLowerCase() !== email)) return;
     var sys = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(sys)) {
       sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
-    out.push({
+    var item = {
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       status: o.status || '',
       docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
@@ -244,7 +250,16 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       // candidate's next FICA re-upload (Fica.ficaUpload_), returning the row to a clean awaiting state.
       declined: !!o.declined_at, declined_at: o.declined_at || '',
       declines: safeJsonParse_(o.fica_declines_json, null),
-    });
+    };
+    // Admin-only: the editable core fields, so the Admin Check "Edit" form can pre-fill current values.
+    // Gated behind isAdmin so PII (email / ID) is not exposed to a non-admin onboarder's status read.
+    if (isAdmin) {
+      item.edit = {
+        name: o.name || '', email: o.email || '', id_number: o.id_number || '', contact: o.contact || '',
+        team: o.team || '', senior_name: o.senior_name || '', senior_email: o.senior_email || '',
+      };
+    }
+    out.push(item);
   });
   return out;
 }
@@ -283,6 +298,9 @@ function retryRow_(queueId, ctx) {
       }
       var row = i + 2;
       t.getRange(row, PQ_COL.status + 1).setNumberFormat('@').setValue('pending');
+      // Reset the attempts counter, else the worker sees it already at the cap (3) and immediately
+      // re-marks the row 'error' without running - so a retry of an EXHAUSTED row would never execute.
+      t.getRange(row, PQ_COL.attempts + 1).setValue(0);
       t.getRange(row, PQ_COL.updated_at + 1).setNumberFormat('@').setValue(nowIso_());
       return { ok: true };
     }

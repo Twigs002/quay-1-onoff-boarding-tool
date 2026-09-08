@@ -21,6 +21,10 @@
 
   const DRIVE_FOLDER = (id) => `https://drive.google.com/drive/folders/${encodeURIComponent(id)}`;
 
+  // The most-recently rendered queue, so the Edit form can read a candidate's current values (which
+  // ride along in item.edit for admins) and Cancel can restore the row without a re-fetch.
+  let _acItems = [];
+
   // The three FICA documents an admin can decline, plus the contract as a separate
   // control. Keys match the decline_fica payload; labels are the human names shown
   // in the panel, in validation errors, and in the declined-state summary line.
@@ -109,6 +113,7 @@
   }
 
   function renderAdminCheck(wrap, items) {
+    _acItems = items;
     const body = $('#acBody', wrap), meta = $('#acMeta', wrap);
     meta.textContent = items.length ? `${items.length} awaiting acceptance` : '';
     if (!items.length) {
@@ -146,6 +151,7 @@
             ${o.declined
               ? '<button type="button" class="btn btn-primary btn-sm" disabled title="This candidate was declined. They must re-submit the declined documents before they can be accepted.">Accept &amp; set up</button>'
               : `<button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>`}
+            <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(o.folderId)}">Edit</button>
             <button type="button" class="btn btn-ghost btn-sm btn-danger" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>
@@ -159,6 +165,65 @@
     body.querySelectorAll('[data-decline]').forEach((b) => {
       b.addEventListener('click', () => openDecline(wrap, b.closest('.ac-item'), b.dataset.decline, b.dataset.name));
     });
+    body.querySelectorAll('[data-edit]').forEach((b) => {
+      b.addEventListener('click', () => editOne(wrap, b));
+    });
+  }
+
+  // One editable field. `value` is HTML-escaped for the attribute; `type` defaults to text.
+  function editField(label, name, value, type) {
+    return `<div class="field">
+      <label for="ed_${name}">${esc(label)}</label>
+      <input id="ed_${name}" data-field="${name}" type="${type || 'text'}" value="${esc(value == null ? '' : value)}" autocomplete="off" spellcheck="false">
+    </div>`;
+  }
+
+  // Swap a candidate's row for an inline edit form pre-filled with their current details. Only a
+  // whitelisted set of human-entered fields is editable; the backend re-validates each on save.
+  function editOne(wrap, b) {
+    const folderId = b.dataset.edit;
+    const item = _acItems.find((x) => x.folderId === folderId);
+    if (!item) return;
+    const e = item.edit || {};
+    const row = b.closest('.pipe-row');
+    if (!row) return;
+    const form = el(`<div class="pipe-row ac-edit">
+      <div class="pipe-main">
+        <div class="pipe-name">Edit ${esc(item.name || '(no name)')}</div>
+        <div class="ac-edit-grid">
+          ${editField('Name', 'name', e.name)}
+          ${editField('ID / passport number', 'id_number', e.id_number)}
+          ${editField('Email', 'email', e.email, 'email')}
+          ${editField('Contact number', 'contact', e.contact, 'tel')}
+          ${editField('Team', 'team', e.team)}
+          ${editField('Senior broker', 'senior_name', e.senior_name)}
+          ${editField('Senior broker email', 'senior_email', e.senior_email, 'email')}
+        </div>
+        <div class="ac-edit-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-save="1">Save changes</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-cancel="1">Cancel</button>
+        </div>
+      </div>
+    </div>`);
+    row.replaceWith(form);
+    $('[data-cancel]', form).addEventListener('click', () => renderAdminCheck(wrap, _acItems));
+    $('[data-save]', form).addEventListener('click', () => saveEdit(wrap, form, item));
+  }
+
+  async function saveEdit(wrap, form, item) {
+    const fields = {};
+    form.querySelectorAll('[data-field]').forEach((inp) => { fields[inp.dataset.field] = inp.value; });
+    const saveBtn = $('[data-save]', form);
+    saveBtn.classList.add('loading'); saveBtn.disabled = true;
+    try {
+      const r = await api(KINDS.editOnboarding || 'edit_onboarding', { folderId: item.folderId, fields });
+      toast('Saved', (r && r.message) ? r.message : 'Details updated.', 'ok');
+      H.setStatusCache([]);          // the Progress report should refetch the corrected details
+      loadAdminCheck(wrap, true);    // re-render the queue with the new values
+    } catch (err) {
+      toast('Could not save', err.message, 'err');
+      saveBtn.classList.remove('loading'); saveBtn.disabled = false;
+    }
   }
 
   // Full declined detail shown inline on the row: for each declined document (and the contract) its

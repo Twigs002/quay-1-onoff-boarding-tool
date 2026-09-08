@@ -236,3 +236,64 @@ function ficaFollowUpSweep_() {
   });
   if (due.length) logAudit_('fica_followup_sweep', { sent: due.length });
 }
+
+/**
+ * ADMIN edit of a candidate's core information (kind:'edit_onboarding'). Corrects mistakes such as a
+ * misfiled ID number, a wrong email, or the wrong team on the Onboarding row. Only a WHITELISTED set of
+ * human-entered fields can be changed here - never the pipeline markers (approved_at, provisioned_at,
+ * the FICA doc ticks, etc.), so an edit can never quietly re-open or skip a gate. Each field is
+ * validated/normalised the same way intake validates it. requireAdmin_ is asserted. Re-syncs the HR
+ * sheet afterwards so the master HR tabs pick up the correction. Returns { ok, fields:[changed keys] }.
+ */
+function editOnboarding_(body, ctx) {
+  requireAdmin_(ctx);
+  var folderId = String((body && body.folderId) || '').trim();
+  if (!folderId) return { ok: false, error: 'missing reference' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+
+  var f = (body && body.fields) || {};
+  var changes = {};
+
+  if ('name' in f) {
+    var name = String(f.name == null ? '' : f.name).trim();
+    if (!name) return { ok: false, error: 'Name cannot be empty.' };
+    changes.name = name;
+  }
+  if ('email' in f) {
+    var email = String(f.email == null ? '' : f.email).trim();
+    if (email && !isEmail_(email)) return { ok: false, error: 'That email address does not look valid.' };
+    changes.email = email;
+  }
+  if ('senior_email' in f) {
+    var se = String(f.senior_email == null ? '' : f.senior_email).trim();
+    if (se && !isEmail_(se)) return { ok: false, error: 'The senior broker email does not look valid.' };
+    changes.senior_email = se;
+  }
+  if ('id_number' in f) {
+    var idClean = String(f.id_number == null ? '' : f.id_number).replace(/\s+/g, '');
+    if (idClean) {
+      if (!/^[A-Za-z0-9]+$/.test(idClean) || !/\d/.test(idClean)) {
+        return { ok: false, error: 'That ID / passport number looks wrong - it should be letters and digits only.' };
+      }
+      if (/^\d{13}$/.test(idClean) && !saIdChecksumOk_(idClean)) {
+        return { ok: false, error: 'That 13-digit SA ID fails its checksum - please re-check the digits.' };
+      }
+    }
+    changes.id_number = idClean;
+  }
+  if ('contact' in f) changes.contact = String(f.contact == null ? '' : f.contact).trim();
+  if ('team' in f) changes.team = String(f.team == null ? '' : f.team).trim();
+  if ('senior_name' in f) changes.senior_name = String(f.senior_name == null ? '' : f.senior_name).trim();
+
+  var keys = Object.keys(changes);
+  if (!keys.length) return { ok: false, error: 'No changes to save.' };
+  keys.forEach(function (k) { setOnboardingCell_(folderId, ONB_COL[k], changes[k]); });
+  logAudit_('onboard_edited', { folderId: folderId, by: (ctx && ctx.email) || 'admin', fields: keys });
+  // Keep the HR master sheet in step with the correction (best-effort; the row edit already stands).
+  // Refresh the destination row too so a correction reaches an already-promoted person's entity tab,
+  // not just the tracking tab.
+  try { hrTrackingUpsert_(folderId); hrRefreshDest_(folderId); }
+  catch (e) { logAudit_('hr_tracking_failed', { folderId: folderId, error: String(e) }); }
+  return { ok: true, message: 'Saved.', fields: keys };
+}

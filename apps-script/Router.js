@@ -14,6 +14,7 @@
  *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [onboarder: super/admin/broker]
  *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [onboarder: super/admin/broker]
  *   approve                        -> approveAndProvision_(folderId, ctx)         [admin]
+ *   edit_onboarding                -> editOnboarding_(body, ctx)                  [admin]
  *   decline_fica                   -> declineFica_(folderId, {declines,contract_incorrect}, ctx) [admin]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
@@ -85,6 +86,7 @@ function dispatch_(kind, body, ctx) {
     case 'onboard_quay1': return onboardQuay1_(body, ctx);
     case 'onboard_aqua': return onboardAqua_(body, ctx);
     case 'approve': return _approveDispatch_(body, ctx);
+    case 'edit_onboarding': return editOnboarding_(body, ctx);
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
@@ -162,11 +164,26 @@ function _provisionDispatch_(body, ctx) {
   if (!o.approved_at && !o.provisioned_at) {
     return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
   }
-  var systems = _provisionList_(body, body);
-  if (!systems) {
-    // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
-    // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+  var wasProvisioned = !!o.provisioned_at;   // a deliberate retry of an already-live row is allowed
+  // Serialise read->provision under the SAME script lock as approveAndProvision_/provisionReadyBatch_,
+  // so a manual re-provision racing the Tuesday batch cannot both mint accounts for the same person.
+  var lock = _acquireLock_();
+  lock.waitLock(30000);
+  try {
+    o = readOnboardingByFolder_(folderId) || o;   // re-read the LIVE row inside the lock
+    // If the row went provisioned while we waited for the lock (it was NOT provisioned when this
+    // request arrived), the batch or another manual provision just did it - do not double-mint.
+    if (!wasProvisioned && o.provisioned_at) {
+      return { ok: true, already: true, message: 'already set up on ' + o.provisioned_at };
+    }
+    var systems = _provisionList_(body, body);
+    if (!systems) {
+      // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
+      // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
+      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    }
+    return provisionAll_(folderId, systems, ctx);
+  } finally {
+    lock.releaseLock();
   }
-  return provisionAll_(folderId, systems, ctx);
 }

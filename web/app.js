@@ -24,6 +24,7 @@
     onboardQuay1: 'onboard_quay1',
     onboardAqua: 'onboard_aqua',
     approve: 'approve',
+    editOnboarding: 'edit_onboarding',
     remind: 'remind',
     resendPacket: 'resend_packet',
     status: 'status',
@@ -276,7 +277,7 @@
     function renderForm() {
       const common =
         fieldText('name', 'Full name', { required: true }) +
-        fieldText('id_number', 'ID number', { required: true }) +
+        fieldText('id_number', 'ID number', { required: true, hint: '13-digit SA ID, or passport number (letters + digits, no spaces)' }) +
         // Nationality is revealed + required only when the ID is not a 13-digit SA ID (i.e. a foreign
         // passport). For non-SA starters this pairs with a required work-permit upload on the FICA page.
         `<div class="field" id="nationalityWrap" hidden>

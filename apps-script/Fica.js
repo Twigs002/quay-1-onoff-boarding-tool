@@ -34,6 +34,21 @@ function ficaLink_(folderId) {
   return base ? (base + '?f=' + encodeURIComponent(folderId)) : '';
 }
 
+/** Before writing a fresh FICA file, archive any prior file in the folder with the SAME target name by
+ *  timestamp-renaming it "superseded <iso> - <name>". A FICA re-submission would otherwise leave two
+ *  same-named files in the folder (Drive permits duplicates), making the current document ambiguous.
+ *  Renaming (rather than trashing) keeps the earlier copy for audit. Non-fatal: failures just log. */
+function _archivePriorFicaFiles_(folder, targetName) {
+  try {
+    var it = folder.getFilesByName(targetName);
+    while (it.hasNext()) {
+      var f = it.next();
+      try { f.setName('superseded ' + nowIso_() + ' - ' + targetName); }
+      catch (e) { logAudit_('fica_archive_rename_failed', { name: targetName, error: String(e) }); }
+    }
+  } catch (e) { logAudit_('fica_archive_failed', { name: targetName, error: String(e) }); }
+}
+
 /** Store an uploaded FICA submission and tick the matching R..V columns. Token-less; gated by
  *  the folderId existing as an Onboarding row. body = { folderId, details, files:[{label, ext,
  *  mimeType, dataBase64}] }. */
@@ -57,6 +72,16 @@ function ficaUpload_(body) {
   var d0 = (body && body.details) || {};
   var ffcStatus = String((body && body.ffc_status) || d0['FFC status'] || '').trim().toLowerCase();
   var ffcNumber = String((body && body.ffc_number) || d0['FFC number'] || '').trim();
+  // Correction mode: the candidate was declined and is re-submitting ONLY the flagged documents. For
+  // anything they leave blank, fall back to what is already on file, so a partial re-submission is
+  // neither rejected for a now-blank FFC nor allowed to wipe previously-correct data (paired with the
+  // skip-blank upsert below). Same detection as ficaForm_'s correction banner.
+  var _decl = safeJsonParse_(meta.fica_declines_json, null);
+  var _correcting = !!(_decl && ((_decl.docs && Object.keys(_decl.docs).length) || _decl.contract_incorrect));
+  if (_correcting) {
+    if (!ffcStatus) ffcStatus = String(meta.ffc_status || '').trim().toLowerCase();
+    if (!ffcNumber) ffcNumber = String(meta.ffc_number || '').trim();
+  }
   if (!isAqua) {
     if (CFG.FFC_STATUSES.indexOf(ffcStatus) < 0) return { ok: false, error: 'please select your professional (FFC) status' };
     if ((ffcStatus === 'full' || ffcStatus === 'candidate') && !ffcNumber) {
@@ -128,7 +153,11 @@ function ficaUpload_(body) {
   var photoFileId = '';
   prepared.forEach(function (p) {
     try {
-      var blob = Utilities.newBlob(p.bytes, p.mime, p.label + ' - ' + name + '.' + p.ext);
+      var fileName = p.label + ' - ' + name + '.' + p.ext;
+      // Re-submission hygiene: archive any prior file of the same name so the folder never ends up with
+      // two same-named documents (Drive allows it) where nobody can tell which is current.
+      _archivePriorFicaFiles_(ficaFolder, fileName);
+      var blob = Utilities.newBlob(p.bytes, p.mime, fileName);
       var file = ficaFolder.createFile(blob);
       if (p.label === 'PHOTO') photoFileId = file.getId();   // the branded profile photo source
       var key = FICA_LABEL_KEY[p.label];
@@ -138,9 +167,10 @@ function ficaUpload_(body) {
     }
   });
 
-  // Persist the typed details alongside the files.
+  // Persist the typed details alongside the files (archive any prior copy first, same hygiene as above).
   var d = (body && body.details) || {};
   var lines = Object.keys(d).map(function (k) { return k + ': ' + d[k]; });
+  _archivePriorFicaFiles_(ficaFolder, 'FICA details - ' + name + '.txt');
   ficaFolder.createFile('FICA details - ' + name + '.txt',
     'FICA submission for ' + name + '\nReceived: ' + nowIso_() + '\n\n' + lines.join('\n'), 'text/plain');
 
@@ -150,21 +180,27 @@ function ficaUpload_(body) {
   var birthday = pick('birthday', 'Birthday') || saIdBirthday_(effectiveId);
 
   // Persist FFC status/number, the derived PropData profile type, and the HR fields onto the row.
+  // keep(): a BLANK typed value becomes undefined, which upsertOnboardingRow_ leaves untouched - so a
+  // partial re-submission (correction mode) can never overwrite previously-correct address/bank/tax/NoK
+  // data with an empty box. A non-blank value still overwrites as before.
+  var keep = function (v) { return v ? v : undefined; };
   upsertOnboardingRow_({
-    folderId: folderId, ffc_status: ffcStatus, ffc_number: ffcNumber, propdata_profile_type: profileType,
+    folderId: folderId, ffc_status: ffcStatus, ffc_number: keep(ffcNumber), propdata_profile_type: profileType,
     birthday: birthday,
-    bank_name: pick('bank_name', 'Bank'),
-    account_number: pick('account_number', 'Account number'),
-    account_type: pick('account_type', 'Account type'),
-    tax_number: pick('tax_number', 'Income tax number'),
-    residential_address: pick('home_address', 'Residential address'),
-    work_permit_expiry: pick('work_permit_expiry', 'Work permit expiry'),
-    work_permit_received: hasPermit ? ('Received ' + nowIso_()) : '',
-    nok_name: pick('nok_name', 'Next of kin name'),
-    nok_contact: pick('nok_contact', 'Next of kin contact'),
-    nok_relationship: pick('nok_relationship', 'Next of kin relationship'),
-    nok_email: pick('nok_email', 'Next of kin email'),
-    photo_file_id: photoFileId,
+    bank_name: keep(pick('bank_name', 'Bank')),
+    account_number: keep(pick('account_number', 'Account number')),
+    account_type: keep(pick('account_type', 'Account type')),
+    tax_number: keep(pick('tax_number', 'Income tax number')),
+    residential_address: keep(pick('home_address', 'Residential address')),
+    work_permit_expiry: keep(pick('work_permit_expiry', 'Work permit expiry')),
+    // Only stamp work_permit_received when a permit was actually uploaded this time; do NOT clear a
+    // prior stamp on a partial re-submission that omits the permit.
+    work_permit_received: hasPermit ? ('Received ' + nowIso_()) : undefined,
+    nok_name: keep(pick('nok_name', 'Next of kin name')),
+    nok_contact: keep(pick('nok_contact', 'Next of kin contact')),
+    nok_relationship: keep(pick('nok_relationship', 'Next of kin relationship')),
+    nok_email: keep(pick('nok_email', 'Next of kin email')),
+    photo_file_id: keep(photoFileId),
   });
 
   setOnboardingStatus_(folderId, 'FICA received');
@@ -178,11 +214,14 @@ function ficaUpload_(body) {
     setOnboardingCell_(folderId, ONB_COL.declined_by, '');
   } catch (err) { logAudit_('fica_decline_clear_failed', { folderId: folderId, error: String(err) }); }
 
-  // Mirror to HR: refresh the STAGING tracking row so HR can watch the starter fill in. Promotion into
-  // HR's entity "active" tab is deliberately NOT done here - it happens only once an admin ACCEPTS the
-  // starter (approveAndProvision_ / provisionReadyBatch_), so a declined or never-hired candidate never
-  // lands in HR's active tab. Non-fatal + DRY_RUN/HR_SYNC-safe.
-  try { hrTrackingUpsert_(folderId); }
+  // Mirror to HR: refresh the STAGING tracking row so HR can watch the starter fill in, then refresh
+  // the entity destination row IN PLACE. Promotion (first append to HR's active tab) is deliberately
+  // NOT done here - it happens only once an admin ACCEPTS the starter (approveAndProvision_ /
+  // provisionReadyBatch_), so a declined or never-hired candidate never lands in HR's active tab.
+  // hrRefreshDest_ no-ops when the person has no destination row yet, so it only carries later FICA
+  // (e.g. an imported contractor whose real docs arrive after acceptance) onto an already-promoted
+  // row - it never itself promotes. Non-fatal + DRY_RUN/HR_SYNC-safe.
+  try { hrTrackingUpsert_(folderId); hrRefreshDest_(folderId); }
   catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
   if (isEmail_(meta.email)) {
@@ -239,11 +278,21 @@ function ficaForm_(folderId) {
   // contractors skip it entirely, so for aqua that card is not rendered and next of kin moves
   // up from 8 to 7. Everything else on the form is shared byte-for-byte between entities.
   var isAqua = !!(meta && meta.entity === 'aqua');
+
+  // Correction mode: when this candidate was declined per-document (declineFica_), they re-submit ONLY
+  // the flagged documents. In that mode the typed HR fields (address/bank/tax/NoK) and the FFC card are
+  // NOT required - the values are already on file and the server keeps anything left blank (ficaUpload_
+  // skip-blank + FFC fallback), so a partial correction never forces re-typing or wipes stored data.
+  var _declines = safeJsonParse_(meta && meta.fica_declines_json, null);
+  var _dcl = (_declines && _declines.docs) || {};
+  var _correcting = !!(_declines && (Object.keys(_dcl).length || _declines.contract_incorrect));
+  var reqText = _correcting ? '' : ' required';   // typed HR fields: required on first submit, optional on correction
+
   var ffcCard = isAqua ? '' :
 '<div class="card"><p class="sec">7 - Professional status</p>' +
 '<div class="row"><label>Your FFC (Fidelity Fund Certificate) status <span class="req">*</span></label>' +
 '<div class="radios">' +
-'<label class="radio"><input type="radio" name="ffc_status" value="full" required><span>Full status: I hold a valid FFC</span></label>' +
+'<label class="radio"><input type="radio" name="ffc_status" value="full"' + reqText + '><span>Full status: I hold a valid FFC</span></label>' +
 '<label class="radio"><input type="radio" name="ffc_status" value="candidate"><span>Candidate practitioner, working towards my FFC</span></label>' +
 '<label class="radio"><input type="radio" name="ffc_status" value="none"><span>No status: I do not hold an FFC</span></label>' +
 '</div></div>' +
@@ -255,14 +304,10 @@ function ficaForm_(folderId) {
 '<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your online profile up faster. Optional, but recommended.</p></div></div>';
   var nokNum = isAqua ? '7' : '8';
 
-  // Correction mode: when this candidate was declined per-document (declineFica_), they should
-  // re-submit ONLY the documents that were flagged, not the whole set. Read the decline record and
-  // require just those document uploads; on a normal first submission all four stay required. The
-  // re-tick logic in ficaUpload_ already tolerates a partial file set (it ticks only what is uploaded)
-  // and clears the decline record on submit.
-  var _declines = safeJsonParse_(meta && meta.fica_declines_json, null);
-  var _dcl = (_declines && _declines.docs) || {};
-  var _correcting = !!(_declines && (Object.keys(_dcl).length || _declines.contract_incorrect));
+  // Per-declined-document upload requirements (correction detection computed above): require just the
+  // flagged document uploads; on a normal first submission all four stay required. The re-tick logic in
+  // ficaUpload_ tolerates a partial file set (it ticks only what is uploaded) and clears the decline
+  // record on submit.
   var _reqDoc = function (declined) { return (!_correcting || declined) ? ' required' : ''; };
   var reqContract = _reqDoc(!!(_declines && _declines.contract_incorrect));
   var reqId = _reqDoc(!!_dcl.id);
@@ -366,36 +411,36 @@ correctionBanner +
 '<p class="hint">Required because your ID is not a 13-digit South African ID. For South African IDs we read your date of birth from the ID automatically.</p></div></div>' +
 '<div class="card"><p class="sec">4 - Proof of address</p>' +
 '<div class="row"><label for="home_address">Residential address <span class="req">*</span></label>' +
-'<textarea id="home_address" placeholder="Street, suburb, city, postal code" required></textarea></div>' +
+'<textarea id="home_address" placeholder="Street, suburb, city, postal code"' + reqText + '></textarea></div>' +
 '<div class="filewrap"><label for="f_addr">Proof of address <span class="req">*</span></label>' +
 '<input type="file" id="f_addr" accept="image/*,application/pdf"' + reqAddr + '>' +
 '<p class="hint">A utility bill, bank statement or lease dated within the last 3 months.</p></div></div>' +
 '<div class="card"><p class="sec">5 - Bank details</p>' +
 '<div class="row"><label for="bank_name">Bank <span class="req">*</span></label>' +
-'<input type="text" id="bank_name" autocomplete="off" required></div>' +
+'<input type="text" id="bank_name" autocomplete="off"' + reqText + '></div>' +
 '<div class="row"><label for="account_number">Account number <span class="req">*</span></label>' +
-'<input type="text" id="account_number" inputmode="numeric" autocomplete="off" required>' +
+'<input type="text" id="account_number" inputmode="numeric" autocomplete="off"' + reqText + '>' +
 '<p class="hint">Digits only.</p></div>' +
 '<div class="row"><label for="account_type">Type of account <span class="req">*</span></label>' +
-'<select id="account_type" required><option value="">Select...</option>' +
+'<select id="account_type"' + reqText + '><option value="">Select...</option>' +
 '<option value="Cheque">Cheque</option><option value="Savings">Savings</option>' +
 '<option value="Transmission">Transmission</option><option value="Other">Other</option></select></div>' +
 '<div class="filewrap"><label for="f_bank">Bank confirmation letter or statement <span class="req">*</span></label>' +
 '<input type="file" id="f_bank" accept="image/*,application/pdf"' + reqBank + '></div></div>' +
 '<div class="card"><p class="sec">6 - Tax</p>' +
 '<div class="row"><label for="tax_number">Income tax number <span class="req">*</span></label>' +
-'<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required>' +
+'<input type="text" id="tax_number" inputmode="numeric" autocomplete="off"' + reqText + '>' +
 '<p class="hint">Digits only.</p></div>' +
 '<div class="filewrap"><label for="f_tax">SARS / tax number proof (optional)</label>' +
 '<input type="file" id="f_tax" accept="image/*,application/pdf"></div></div>' +
 ffcCard +
 '<div class="card"><p class="sec">' + nokNum + ' - Next of kin</p>' +
 '<div class="row"><label for="nok_name">Next of kin name <span class="req">*</span></label>' +
-'<input type="text" id="nok_name" autocomplete="off" required></div>' +
+'<input type="text" id="nok_name" autocomplete="off"' + reqText + '></div>' +
 '<div class="row"><label for="nok_contact">Next of kin contact number <span class="req">*</span></label>' +
-'<input type="text" id="nok_contact" inputmode="tel" autocomplete="off" required></div>' +
+'<input type="text" id="nok_contact" inputmode="tel" autocomplete="off"' + reqText + '></div>' +
 '<div class="row"><label for="nok_relationship">Relationship <span class="req">*</span></label>' +
-'<input type="text" id="nok_relationship" autocomplete="off" required></div>' +
+'<input type="text" id="nok_relationship" autocomplete="off"' + reqText + '></div>' +
 '<div class="row"><label for="nok_email">Next of kin email</label>' +
 '<input type="text" id="nok_email" inputmode="email" autocomplete="off"></div></div>' +
 '<button type="submit" class="btn" id="submitBtn">Submit my FICA documents</button>' +
