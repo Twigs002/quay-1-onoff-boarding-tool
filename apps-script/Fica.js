@@ -178,9 +178,11 @@ function ficaUpload_(body) {
     setOnboardingCell_(folderId, ONB_COL.declined_by, '');
   } catch (err) { logAudit_('fica_decline_clear_failed', { folderId: folderId, error: String(err) }); }
 
-  // Mirror to HR: refresh the tracking row, then promote (append-only, once) into the entity
-  // destination tab now that FICA is complete. Non-fatal + DRY_RUN-safe.
-  try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
+  // Mirror to HR: refresh the STAGING tracking row so HR can watch the starter fill in. Promotion into
+  // HR's entity "active" tab is deliberately NOT done here - it happens only once an admin ACCEPTS the
+  // starter (approveAndProvision_ / provisionReadyBatch_), so a declined or never-hired candidate never
+  // lands in HR's active tab. Non-fatal + DRY_RUN/HR_SYNC-safe.
+  try { hrTrackingUpsert_(folderId); }
   catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
   if (isEmail_(meta.email)) {
@@ -252,6 +254,31 @@ function ficaForm_(folderId) {
 '<input type="file" id="f_photo" accept="image/*">' +
 '<p class="hint">Submit a clear head-and-shoulders headshot to receive your email signature and get your online profile up faster. Optional, but recommended.</p></div></div>';
   var nokNum = isAqua ? '7' : '8';
+
+  // Correction mode: when this candidate was declined per-document (declineFica_), they should
+  // re-submit ONLY the documents that were flagged, not the whole set. Read the decline record and
+  // require just those document uploads; on a normal first submission all four stay required. The
+  // re-tick logic in ficaUpload_ already tolerates a partial file set (it ticks only what is uploaded)
+  // and clears the decline record on submit.
+  var _declines = safeJsonParse_(meta && meta.fica_declines_json, null);
+  var _dcl = (_declines && _declines.docs) || {};
+  var _correcting = !!(_declines && (Object.keys(_dcl).length || _declines.contract_incorrect));
+  var _reqDoc = function (declined) { return (!_correcting || declined) ? ' required' : ''; };
+  var reqContract = _reqDoc(!!(_declines && _declines.contract_incorrect));
+  var reqId = _reqDoc(!!_dcl.id);
+  var reqAddr = _reqDoc(!!_dcl.poa);
+  var reqBank = _reqDoc(!!_dcl.bank);
+  var _corrLabels = [];
+  if (_declines && _declines.contract_incorrect) _corrLabels.push('your signed contract');
+  if (_dcl.id) _corrLabels.push('your ID document');
+  if (_dcl.poa) _corrLabels.push('your proof of address');
+  if (_dcl.bank) _corrLabels.push('your bank confirmation');
+  var correctionBanner = _correcting
+    ? '<div class="card" style="border-left:4px solid ' + B.gold + '"><p class="sec">Just a quick correction</p>' +
+      '<p class="hint">We only need you to re-upload: <b>' + htmlEsc_(_corrLabels.join(', ')) + '</b>. ' +
+      'The other documents you already sent are on file - only the item' + (_corrLabels.length > 1 ? 's' : '') +
+      ' above need re-uploading. You can leave the rest as is.</p></div>'
+    : '';
   // FFC radio wiring is broker-only. Aqua keeps a stub ffcVal() so the shared submit payload,
   // which always reads ffc_status/ffc_number, stays valid with the card absent.
   var ffcJs = isAqua ? 'function ffcVal(){return "";}' :
@@ -313,16 +340,17 @@ function ficaForm_(folderId) {
 '<p>' + (name ? ('Hi ' + name + '. ') : '') + 'Please submit your FICA documents below. It only takes a minute.</p></div>' +
 badLink +
 '<form id="ficaForm" novalidate>' +
+correctionBanner +
 '<div class="card"><p class="sec">1 - Signed agreement</p>' +
 '<div class="filewrap"><label for="f_contract">Your signed ' + companyName + ' agreement <span class="req">*</span></label>' +
-'<input type="file" id="f_contract" accept="image/*,application/pdf" required>' +
+'<input type="file" id="f_contract" accept="image/*,application/pdf"' + reqContract + '>' +
 '<p class="hint">Upload the agreement you received by email, signed. We create your accounts once this and your FICA documents are in.</p></div></div>' +
 '<div class="card"><p class="sec">2 - Identity</p>' +
 '<div class="row"><label for="id_number">ID or passport number <span class="req">*</span></label>' +
 '<input type="text" id="id_number" inputmode="text" autocomplete="off" required>' +
 '<p class="hint">South African ID: 13 digits. Passport: letters and numbers only, no spaces.</p></div>' +
 '<div class="filewrap"><label for="f_id">Certified copy of your ID or passport <span class="req">*</span></label>' +
-'<input type="file" id="f_id" accept="image/*,application/pdf" required></div>' +
+'<input type="file" id="f_id" accept="image/*,application/pdf"' + reqId + '></div>' +
 // Work permit block - revealed only when the ID entered is not a 13-digit South African ID.
 '<div id="permitBlock" style="display:none">' +
 '<div class="row" style="margin-top:14px"><label for="work_permit_expiry">Work permit expiry date <span class="req">*</span></label>' +
@@ -340,7 +368,7 @@ badLink +
 '<div class="row"><label for="home_address">Residential address <span class="req">*</span></label>' +
 '<textarea id="home_address" placeholder="Street, suburb, city, postal code" required></textarea></div>' +
 '<div class="filewrap"><label for="f_addr">Proof of address <span class="req">*</span></label>' +
-'<input type="file" id="f_addr" accept="image/*,application/pdf" required>' +
+'<input type="file" id="f_addr" accept="image/*,application/pdf"' + reqAddr + '>' +
 '<p class="hint">A utility bill, bank statement or lease dated within the last 3 months.</p></div></div>' +
 '<div class="card"><p class="sec">5 - Bank details</p>' +
 '<div class="row"><label for="bank_name">Bank <span class="req">*</span></label>' +
@@ -353,7 +381,7 @@ badLink +
 '<option value="Cheque">Cheque</option><option value="Savings">Savings</option>' +
 '<option value="Transmission">Transmission</option><option value="Other">Other</option></select></div>' +
 '<div class="filewrap"><label for="f_bank">Bank confirmation letter or statement <span class="req">*</span></label>' +
-'<input type="file" id="f_bank" accept="image/*,application/pdf" required></div></div>' +
+'<input type="file" id="f_bank" accept="image/*,application/pdf"' + reqBank + '></div></div>' +
 '<div class="card"><p class="sec">6 - Tax</p>' +
 '<div class="row"><label for="tax_number">Income tax number <span class="req">*</span></label>' +
 '<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required>' +

@@ -150,6 +150,23 @@ check(/cell phone number is required/.test(post({ kind: 'onboard_aqua', accessTo
 check(/start date is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001010000000', email: 'a@b.com', contact: '0820000000' }).error || ''),
   'aqua onboard requires a start date');
 
+console.log('11. decline gates acceptance - a declined candidate cannot be accepted (review fix B)');
+ctx.upsertOnboardingRow_({ folderId: 'GATE-1', entity: 'quay1', name: 'Gaby Gate', email: 'gaby@personal.com',
+  fica_contract: 'Received x', fica_id: 'Received x', fica_poa: 'Received x', fica_bank: 'Received x' });
+post({ kind: 'decline_fica', accessToken: 'jwt', folderId: 'GATE-1', declines: { bank: 'wrong account holder' } });
+const gate = post({ kind: 'approve', accessToken: 'jwt', folderId: 'GATE-1' });
+check(gate.ok === false && /declined/.test(gate.error || ''),
+  `approve is refused while declined_at is set${gate.ok ? ' -> WRONGLY ALLOWED' : ''}`);
+ctx.setOnboardingCell_('GATE-1', ctx.ONB_COL.declined_at, '');   // simulate the candidate re-uploading (ficaUpload_ clears it)
+const gate2 = post({ kind: 'approve', accessToken: 'jwt', folderId: 'GATE-1' });
+check(!(gate2.error && /declined/.test(gate2.error)), 'once the decline is cleared, approval is no longer blocked by the decline gate');
+
+console.log('12. provisionAll_ re-applies the Aqua entity cap (review fix D)');
+ctx.upsertOnboardingRow_({ folderId: 'CAP-1', entity: 'aqua', name: 'Cappy Cap', email: 'cap@personal.com', approved_at: '2026-01-01' });
+const cap = ctx.provisionAll_('CAP-1', ['google', 'propdata', 'cma', 'dialfire'], { email: 'boss@quay1.co.za', role: { is_admin: true } });
+check(!!(cap.results && cap.results.google) && !cap.results.propdata && !cap.results.cma,
+  `provisionAll_ strips propdata/cma for an aqua person even when passed explicitly (got ${Object.keys(cap.results || {}).join(',') || 'none'})`);
+
 console.log();
 if (FAIL.length) {
   console.log(`RESULT: SEAM NOT YET CONFORMED (${FAIL.length} check(s) fail CONTRACTS section 8)`);
