@@ -14,7 +14,7 @@
  *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [onboarder: super/admin/broker]
  *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [onboarder: super/admin/broker]
  *   approve                        -> approveAndProvision_(folderId, ctx)         [admin]
- *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [admin]
+ *   decline_fica                   -> declineFica_(folderId, {declines,contract_incorrect}, ctx) [admin]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
@@ -107,13 +107,20 @@ function _approveDispatch_(body, ctx) {
   return approveAndProvision_(folderId, ctx);
 }
 
-/** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records the
- *  reason and notifies the candidate to re-submit. Never provisions. */
+/** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records a reason
+ *  PER declined document (id/poa/bank) and/or flags the contract as incorrect, then notifies the
+ *  candidate to re-submit only what was declined. Never provisions.
+ *    body = { folderId, declines:{ id?, poa?, bank? -> reason }, contract_incorrect: reason|'',
+ *             reason?: legacy single string (back-compat) }  */
 function _declineDispatch_(body, ctx) {
   requireAdmin_(ctx);
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
-  return declineFica_(folderId, String(body.reason || ''), ctx);
+  return declineFica_(folderId, {
+    declines: (body.declines && typeof body.declines === 'object') ? body.declines : null,
+    contract_incorrect: String(body.contract_incorrect || ''),
+    reason: String(body.reason || ''),   // legacy back-compat: single whole-candidate reason
+  }, ctx);
 }
 
 /** Send a candidate a reminder to sign + submit FICA (re-sends the contract email). Any onboarder

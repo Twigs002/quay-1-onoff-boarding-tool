@@ -69,8 +69,15 @@ function hrTrackingUpsert_(folderId) {
   var row = _hrBuildRow_(o);
 
   if (!hrSyncEnabled_()) {
-    logAudit_('hr_tracking_dryrun', { folderId: folderId, name: o.name, id: o.id_number });
-    return { ok: true, dryRun: true, would: 'upsert tracking row for ' + (o.name || o.id_number) };
+    // Previewable dry-run: surface the exact fields that WOULD be written to the HR sheet, so the
+    // write can be reviewed before HR_SYNC is armed. The five contract-stage HR fields are named
+    // explicitly; the full HR_HEADERS-ordered row is included for a complete preview.
+    var preview = {
+      name: o.name, id_number: o.id_number, contact: o.contact, email: o.email, start_date: o.start_date,
+    };
+    logAudit_('hr_tracking_dryrun', { folderId: folderId, tab: HR_TAB.tracking, fields: preview });
+    return { ok: true, dryRun: true, tab: HR_TAB.tracking,
+      would: 'upsert tracking row for ' + (o.name || o.id_number), fields: preview, row: row };
   }
 
   var ss = SpreadsheetApp.openById(hrSheetId_());

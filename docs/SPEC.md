@@ -191,3 +191,96 @@ Accessibility: WCAG AA contrast, keyboard nav, dark text on yellow (never white-
 - Dialfire user-management portal path unconfirmed → dialfire provisioner scaffolded, marked
   NEEDS-PORTAL-MAP.
 - HubSpot seat auto-create/release has licensing cost → gate behind a config flag, default off.
+
+## 9. Aqua admin check + per-document FICA decline (added 2026-09-08)
+
+Extends the shared onboarding path so Aqua Promotions contractors run the SAME flow as Quay 1,
+with only two deliberate differences (the FICA field set, and the acceptance notification). Built
+non-destructively: the existing Quay 1 path is unchanged; both entities share one implementation
+parameterised by entity. Ships inert - the only NEW email (the Aqua acceptance notice) drafts in
+DRY_RUN and sends only once armed.
+
+### 9.1 New Onboarding columns (appended after the folderId key, no existing column shifts)
+- `fica_declines_json` (57): structured decline record set by `declineFica_`. Shape:
+  `{ docs: { id?|poa?|bank?: { reason, by, at } }, contract_incorrect?: { reason, by, at } }`.
+  The reason lives against each document, not just the candidate. `general` may appear under
+  `docs` for a legacy single-reason decline (back-compat).
+- `declined_at` (58), `declined_by` (59): durable last-decline audit markers (parity with
+  approved_at/approved_by).
+- `aqua_accept_notified_at` (60): idempotency marker for the Aqua acceptance notice. In DRY_RUN it
+  is deliberately NOT stamped (draft-only), so the real send fires once armed.
+
+All four clear on the candidate's next FICA re-upload (`ficaUpload_`), so a re-submission returns
+the row to a clean awaiting-acceptance state.
+
+### 9.2 `decline_fica` wire (Router `_declineDispatch_` -> `declineFica_`)
+Admin-only. New request body (legacy `{ reason }` still accepted as one general decline):
+```
+{ kind:"decline_fica", folderId, declines:{ id?:reason, poa?:reason, bank?:reason },
+  contract_incorrect: reason|"" }
+```
+At least one declined document OR a contract_incorrect reason is required, else
+`{ ok:false, error:"select at least one document to decline or tick Contract incorrect" }`.
+Declinable FICA documents are `id`, `poa`, `bank` only (labels in `CFG.FICA_DECLINE_LABELS`). The
+signed contract is NOT a declinable FICA document - it is handled solely by the `contract_incorrect`
+control, so a document is only ever flagged in one place. Status is set to `FICA declined`; FICA
+ticks are left intact (a fresh upload re-ticks and clears the decline record).
+
+### 9.3 Decline email (candidate-facing, auto-sends as today)
+`ficaDeclineHtml_(company, first, record, ficaUrl)` renders, in order and only when present: a
+"FICA documents to re-submit" section listing each declined document with its own reason, then a
+"Your contract" section (only if contract_incorrect) telling them to re-submit the contract with the
+reason. Nothing that passed review is mentioned. Send semantics unchanged from the old decline
+(candidate-facing auto-send; only internal CC is gated by CC_ENABLED).
+
+### 9.4 Aqua acceptance notice (NEW, previewable-until-armed)
+On admin "Accept & set up" of an `entity === 'aqua'` row, `_maybeNotifyAquaAccepted_` emails
+`CFG.AQUA_ACCEPT_NOTIFY` (alan@quay1.co.za) that the contractor is accepted and can join Aqua, with
+name + start details (`aquaAcceptedHtml_`). Same draft/send gating as the manual account-requests:
+DRAFT in DRY_RUN (no stamp, previewable), send + stamp `aqua_accept_notified_at` once armed. No-op
+for quay1. Fires from BOTH accept transition points (interactive `approveAndProvision_` and the
+scheduled `provisionReadyBatch_`).
+
+### 9.5 Aqua FICA form (`ficaForm_` / `ficaUpload_`)
+The Aqua form is the Quay 1 form minus question 7 "Professional status" (the FFC status radio, FFC
+number, and the headshot photo that shares that card); "Next of kin" renumbers from 8 to 7 with no
+gap. Server-side, `ficaUpload_` skips FFC validation for `entity === 'aqua'` so an Aqua candidate can
+submit with no FFC status. Quay 1 form + validation are byte-identical to before.
+
+### 9.6 Admin Check tab (web/app.admincheck.js)
+Two top buttons, "Quay 1 Admin Checks" / "Aqua Admin Checks", filter the one queue by entity
+(default Quay 1); the screen is functionally identical for both. Decline is an inline panel with a
+per-document decline control (ID / Proof of address / Bank), each revealing its own reason box, plus
+a separate "Contract incorrect" checkbox with its own reason box. A declined row shows
+"Declined - awaiting re-submission" and an inline "What was declined" block listing, per declined
+document and the contract, the reason recorded and who declined it and when (from the `declined` /
+`declines` fields now carried on the `status` snapshot). The answer to a question about a candidate
+is on the screen without opening anything else.
+
+### 9.7 Aqua contract stage captures HR data
+`onboardAqua_` captures and now VALIDATES the five HR fields at the contract stage: full name, ID
+number, cell (`contact`), personal email, start date (cell + start date are the newly enforced
+required checks). It already calls `hrTrackingUpsert_` (Hr.js) at that stage, which writes those into
+the HR "New Starters (Tracking)" tab. HR writes are gated by `HR_SYNC_ENABLED` (a Script Property,
+independent of `DRY_RUN`, default OFF); when off, the write is a PREVIEW - `hrTrackingUpsert_` returns
+`{ dryRun:true, tab, would, fields:{name,id_number,contact,email,start_date}, row }` and logs the same,
+so the exact HR write is reviewable before HR sync is armed.
+
+### 9.8 Aqua provisioning scope (Google + Dialfire only)
+`CFG.CORE_SYSTEMS.aqua = ['google','dialfire']` and a new hard per-entity cap
+`CFG.ENTITY_SYSTEMS_ALLOW = { aqua:['google','dialfire'] }`, enforced in `resolveSystems_` AFTER
+core/program/team/explicit resolution - so no explicit tick, team mapping, or program can ever put
+PropData/PDMS or CMA on an Aqua hire (dropped systems are logged as `entity_scope_filtered`). quay1 is
+uncapped and unchanged. Dialfire is request-only for Aqua: `provisionAll_` does NOT enqueue a Dialfire
+worker job for an aqua person (it would only error), and `_maybeRequestDialfire_` emails
+`DIALFIRE_APPROVERS` (alan@quay1.co.za) with the contractor's name/team on accept (DRY_RUN drafts,
+sends once armed). So an accepted Aqua contractor triggers two Alan emails, both previewable-until-armed:
+the acceptance notice (SPEC 9.4) and the Dialfire request.
+
+### 9.9 Aqua Google-only welcome pack
+Aqua has no induction step, so at the moment of real (non-dry-run) provisioning an Aqua contractor
+gets `_sendAquaWelcome_` instead of the "pick your induction week" invite. It reads the Google
+credential (`_credentialFor_`) and sends `aquaWelcomeHtml_` - the same welcome-pack format as Quay 1
+but containing ONLY the Google Workspace email + temporary password + how to switch on 2FA. Nothing
+about PropData or CMA appears. quay1 still gets the induction invite. Both provisioning paths
+(interactive `approveAndProvision_` and scheduled `provisionReadyBatch_`) branch on entity.

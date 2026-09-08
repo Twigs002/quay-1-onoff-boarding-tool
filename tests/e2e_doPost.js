@@ -102,6 +102,54 @@ const rbOff = bpost({ kind: 'offboard', accessToken: 'jwt', full_name: 'Jane Doe
 check(/forbidden/.test(rbOff.error || ''),
   `broker offboard -> forbidden (offboarding stays super/admin)${rbOff.ok ? ' -> WRONGLY ALLOWED' : ''}`);
 
+console.log('7. decline_fica: structured per-document declines + contract_incorrect (SPEC 9.2)');
+ctx.upsertOnboardingRow_({ folderId: 'DECL-1', entity: 'quay1', name: 'Deb Decline', email: 'deb@personal.com' });
+// (a) nothing selected -> validation error
+const dNone = post({ kind: 'decline_fica', accessToken: 'jwt', folderId: 'DECL-1' });
+check(dNone.ok === false && /at least one/.test(dNone.error || ''),
+  'decline with nothing selected -> validation error');
+// (b) per-document declines + contract incorrect -> ok, reasons stored AGAINST each document
+const dOk = post({ kind: 'decline_fica', accessToken: 'jwt', folderId: 'DECL-1',
+  declines: { id: 'blurry scan', bank: 'wrong account holder' }, contract_incorrect: 'commission % is wrong' });
+check(dOk.ok === true && dOk.declined === true, 'structured decline returns ok/declined');
+const declRow = ctx.readOnboardingByFolder_('DECL-1');
+const declRec = JSON.parse(declRow.fica_declines_json || '{}');
+check(!!(declRec.docs && declRec.docs.id && /blurry/.test(declRec.docs.id.reason) && declRec.docs.bank && !declRec.docs.poa),
+  'reasons stored PER document (id + bank present with their own reasons, poa absent)');
+check(!!(declRec.contract_incorrect && /commission/.test(declRec.contract_incorrect.reason)),
+  'contract_incorrect stored separately with its own reason');
+check(String(declRow.status) === 'FICA declined' && !!declRow.declined_at && declRow.declined_by === 'boss@quay1.co.za',
+  'status FICA declined + durable declined_at/declined_by stamped (who + when)');
+// (c) legacy single { reason } still accepted (back-compat, never regress the old client)
+ctx.upsertOnboardingRow_({ folderId: 'DECL-2', entity: 'quay1', name: 'Leg Acy', email: 'leg@personal.com' });
+check(post({ kind: 'decline_fica', accessToken: 'jwt', folderId: 'DECL-2', reason: 'general problem' }).ok === true,
+  'legacy single { reason } decline still accepted (back-compat)');
+
+console.log('8. aqua acceptance notice: drafts (not sends) in DRY_RUN, no-op for quay1 (SPEC 9.4)');
+ctx.upsertOnboardingRow_({ folderId: 'AQ-1', entity: 'aqua', name: 'Aqua Contractor', email: 'aq@personal.com', start_date: '2026-09-01', team: 'Promo', designation: 'Promoter' });
+check(ctx._maybeNotifyAquaAccepted_('AQ-1', ctx.readOnboardingByFolder_('AQ-1')) === false,
+  'aqua notice in DRY_RUN drafts and returns false (deferred send once armed)');
+check(!ctx.readOnboardingByFolder_('AQ-1').aqua_accept_notified_at,
+  'aqua notice NOT stamped in DRY_RUN (previewable; the real send still fires once armed)');
+ctx.upsertOnboardingRow_({ folderId: 'Q1-1', entity: 'quay1', name: 'Quay Person' });
+check(ctx._maybeNotifyAquaAccepted_('Q1-1', ctx.readOnboardingByFolder_('Q1-1')) === false,
+  'aqua notice is a no-op for a quay1 row');
+
+console.log('9. aqua provisioning scope: Google + Dialfire only, PropData/CMA stripped (SPEC 8)');
+const aqSys = ctx.resolveSystems_('aqua', [], null, '', '');
+check(aqSys.indexOf('google') >= 0 && aqSys.indexOf('dialfire') >= 0 && aqSys.indexOf('propdata') < 0 && aqSys.indexOf('cma') < 0,
+  'aqua defaults to google + dialfire (no propdata, no cma)');
+const aqExplicit = ctx.resolveSystems_('aqua', ['cma'], ['google', 'propdata', 'cma', 'dialfire'], '', '').slice().sort().join(',');
+check(aqExplicit === 'dialfire,google', `aqua caps an explicit propdata/cma request to google + dialfire only (got ${aqExplicit})`);
+check(ctx.resolveSystems_('quay1', [], ['google', 'propdata'], '', '').indexOf('propdata') >= 0,
+  'quay1 scope UNCHANGED (explicit propdata retained)');
+
+console.log('10. aqua contract stage validates the five HR fields (SPEC 7)');
+check(/cell phone number is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001010000000', email: 'a@b.com', start_date: '2026-09-01' }).error || ''),
+  'aqua onboard requires a cell number');
+check(/start date is required/.test(post({ kind: 'onboard_aqua', accessToken: 'jwt', name: 'A B', id_number: '9001010000000', email: 'a@b.com', contact: '0820000000' }).error || ''),
+  'aqua onboard requires a start date');
+
 console.log();
 if (FAIL.length) {
   console.log(`RESULT: SEAM NOT YET CONFORMED (${FAIL.length} check(s) fail CONTRACTS section 8)`);
