@@ -205,6 +205,11 @@ var CFG = {
   // email is the GO-AHEAD: Alan and Kat must not begin onboarding a contractor until they receive it.
   // In DRY_RUN it DRAFTS (previewable) and only sends once the flow is armed. See _maybeNotifyAquaAccepted_.
   AQUA_ACCEPT_NOTIFY: ['alan@quay1.co.za', 'kat@quay1.co.za'],
+  // "Flow Set Up" handoff: the moment a new starter is provisioned, an email goes to these
+  // recipients with the starter's personal details + PropData specialist number so Diego can set
+  // up their Flow. Fires once per starter (guarded by provisioned_at), for every onboard. See
+  // _sendFlowSetup_ in Provisioning.js. Scoped auto-send, same model as CMA_APPROVERS.
+  FLOW_SETUP_TO: ['diego@quay1.co.za'],
   // Per-document FICA decline: the declinable document keys and their candidate-facing labels, shared
   // by declineFica_ (storage + plain-text mail) and ficaDeclineHtml_ (the HTML mail) so the two never
   // drift. The signed contract is deliberately NOT here - it is handled by the separate "Contract

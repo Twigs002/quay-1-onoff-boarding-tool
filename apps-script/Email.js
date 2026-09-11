@@ -188,6 +188,35 @@ function dialfireRequestHtml_(company, name, team) {
   return accountRequestHtml_(company, 'Dialfire account request', 'Dialfire', name, team, '', '');
 }
 
+/** "Flow Set Up" handoff email. Sent to CFG.FLOW_SETUP_TO the moment a new starter is provisioned,
+ *  so Diego can set up their Flow. Lists the starter's personal details plus their PropData account
+ *  (the numbered specialist reference for property specialists; full agents carry no number). `info`
+ *  is a plain object: { name, surname, email, phone, id_number, tax_number, commission,
+ *  propdata_account }. */
+function flowSetupHtml_(company, info) {
+  var B = CFG.BRAND;
+  var detail = function (label, value) {
+    return '<tr><td style="padding:3px 14px 3px 0;font-size:13px;color:' + B.muted + ';white-space:nowrap">' + htmlEsc_(label) + '</td>' +
+      '<td style="padding:3px 0;font-size:14px;color:' + B.goldInk + ';font-weight:600">' + htmlEsc_(value || '-') + '</td></tr>';
+  };
+  var inner =
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">Please set up <strong>Flow</strong> for the following new ' +
+      htmlEsc_(company.name) + ' starter.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">' +
+      detail('Name', info.name) +
+      detail('Surname', info.surname) +
+      detail('Email', info.email) +
+      detail('Phone number', info.phone) +
+      detail('ID number', info.id_number) +
+      detail('Tax number', info.tax_number) +
+      detail('Commission %', info.commission) +
+      detail('PropData account', info.propdata_account) +
+    '</table>' +
+    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Thanks,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'Flow set up', inner);
+}
+
 /** Human label for a self-declared FFC (Fidelity Fund Certificate) status. Empty = not yet declared
  *  (the candidate has not completed FICA), which we surface distinctly from an explicit "No status". */
 function ffcStatusLabel_(ffc) {

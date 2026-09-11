@@ -296,6 +296,7 @@ function provisionReadyBatch_() {
       // sends as the interactive accept path.
       if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
       else _sendInductionInvite_(o.folderId, o);
+      _sendFlowSetup_(o.folderId, o);                   // Flow set-up handoff, same one-time transition (all entities)
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
       _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       _maybeNotifyAquaAccepted_(o.folderId, o);         // Aqua "can join" notice (no-op for quay1)
@@ -386,6 +387,7 @@ function approveAndProvision_(folderId, ctx) {
     // Aqua contractor instead gets the Google-only welcome pack. Both CC the senior when CC is on.
     if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
     else _sendInductionInvite_(folderId, o);
+    _sendFlowSetup_(folderId, o);   // hand the starter's details to Diego for Flow set-up (once, all entities)
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
   } finally {
     lock.releaseLock();
@@ -443,6 +445,66 @@ function _sendAquaWelcome_(folderId, o) {
     setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
     hrMarkWelcomeSent_(folderId);
   } catch (e) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * "Flow Set Up" handoff. Sent ONCE, the moment a row first reaches the provisioned state - from
+ * BOTH transition points (interactive approveAndProvision_ and scheduled provisionReadyBatch_),
+ * riding the same provisioned_at guard as the induction invite / Aqua welcome so there is no double
+ * send. Emails CFG.FLOW_SETUP_TO the starter's details so Diego can set up their Flow, for every
+ * onboard regardless of entity. Fully guarded: any missing data or a mail failure logs and returns
+ * without breaking provisioning. The PropData "account" is the numbered specialist reference
+ * (property specialists only); it is looked up live from the PropData roster and may be blank/pending
+ * if the worker has not created the profile yet.
+ */
+function _sendFlowSetup_(folderId, o) {
+  try {
+    var to = (CFG.FLOW_SETUP_TO || []).filter(function (a) { return isEmail_(a); });
+    if (!to.length) { logAudit_('flow_setup_skipped_no_recipient', { folderId: folderId }); return; }
+    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
+    var full = String(o.name || '').trim();
+    var parts = full.split(/\s+/);
+    var first = parts.shift() || '';
+    var surname = parts.join(' ');
+    var info = {
+      name: first || full,
+      surname: surname,
+      email: o.email || '',
+      phone: o.contact || '',
+      id_number: o.id_number || '',
+      tax_number: o.tax_number || '',
+      commission: o.commission || '',
+      propdata_account: _flowPropdataAccount_(o),
+    };
+    var subject = 'Flow Set Up - ' + (full || first || 'new starter');
+    var plain = 'Please set up Flow for the following new ' + company.name + ' starter.\n\n' +
+      'Name: ' + info.name + '\nSurname: ' + info.surname + '\nEmail: ' + info.email +
+      '\nPhone number: ' + info.phone + '\nID number: ' + info.id_number +
+      '\nTax number: ' + info.tax_number + '\nCommission %: ' + info.commission +
+      '\nPropData account: ' + info.propdata_account + '\n';
+    GmailApp.sendEmail(to.join(','), subject, plain,
+      { name: company.name, htmlBody: flowSetupHtml_(company, info) });
+    logAudit_('flow_setup_sent', { folderId: folderId, to: to.join(','), propdata: info.propdata_account });
+  } catch (e) { logAudit_('flow_setup_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * The PropData "account" value for the Flow email. For a property specialist this is the numbered
+ * specialist reference; for a full agent there is no number. The number is not stored on the
+ * onboarding row, so prefer the row's specialist_ref if ever populated, else look it up live from
+ * the PropData roster by email (the same source the Programs tab uses). Returns a human string:
+ * the number, 'Full agent - no specialist number', or 'Pending - specialist profile not created yet'.
+ */
+function _flowPropdataAccount_(o) {
+  var isSpecialist = String(o.propdata_profile_type || '').trim().toLowerCase() === 'specialist';
+  if (o.specialist_ref) return String(o.specialist_ref).trim();
+  var number = '';
+  try {
+    var rec = _propdataMaps_(sheet_()).byEmail[_normEmail_(o.email)];
+    if (rec && rec.type === 'specialist' && rec.number) number = String(rec.number).trim();
+  } catch (e) { logAudit_('flow_setup_propdata_lookup_failed', { error: String(e) }); }
+  if (number) return number;
+  return isSpecialist ? 'Pending - specialist profile not created yet' : 'Full agent - no specialist number';
 }
 
 /**
