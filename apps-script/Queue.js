@@ -177,12 +177,25 @@ function readForUi_(ctx) {
   return { ok: true, rows: pq, provisioning: pq, offboarding: oq, onboarding: onboarding, booked: booked };
 }
 
-/** Onboarded people who have BOOKED an induction week (induction_wed/thu set), so an admin can resend
- *  their induction packet from the Progress report. Non-admins see only candidates they onboarded. */
+/** True once a booked induction is in the PAST (its last day - Thu, or Wed if no Thu - is before
+ *  today). Drives the "Induction booked" list's auto-clean so it only ever shows UPCOMING inductions
+ *  and finished hires fall off by themselves. Unparseable dates are treated as not-passed (kept). */
+function _inductionDayPassed_(o) {
+  var last = _asDate_(o.induction_thu) || _asDate_(o.induction_wed);
+  if (!last) return false;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return last < today;
+}
+
+/** Onboarded people who have an UPCOMING booked induction week (induction_wed/thu set and not yet
+ *  passed), so an admin can resend their induction packet from the Progress report. The list
+ *  auto-drops a hire once their induction day is past. Non-admins see only candidates they onboarded. */
 function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
+    if (_inductionDayPassed_(o)) return;                // Option A: drop once the induction day has passed
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
@@ -219,8 +232,11 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     // active pipeline so they never appear in the tracker or surface as "ready to approve".
     if (_isMigratedLegacy_(o)) return;
     var s = setup[o.folderId] || { incomplete: false, error: false };
-    // Drop only when fully set up: provisioned AND no create row is still pending or errored.
-    if (o.provisioned_at && !s.incomplete) return;
+    // Keep a hire on the pipeline until fully set up AND induction is booked. Fully set up but not
+    // yet booked stays visible as "Induction to be picked"; once they book, they move to the booked
+    // list and drop off here. A still-pending/errored setup also keeps them (via s.incomplete).
+    var booked = !!(o.induction_wed || o.induction_thu);
+    if (o.provisioned_at && !s.incomplete && booked) return;
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     var sys = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(sys)) {
@@ -235,6 +251,9 @@ function _onboardingPipeline_(isAdmin, email, pq) {
       reminded_at: o.reminded_at || '',
       // Provisioning progress so the UI can keep a hire visible until every system succeeds.
       provisioned: !!o.provisioned_at, setup_incomplete: !!s.incomplete, setup_error: !!s.error,
+      // Induction booking so the pipeline can show "Induction to be picked" (accepted + set up but
+      // not yet booked) vs a booked hire (which moves to the booked list below).
+      induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '', induction_booked: booked,
       // CMA is not auto-provisioned; accepting a CMA-entitled candidate emails the approvers. Surface
       // it so the Admin Check tab can warn the reviewer that accepting will send a (paid) CMA request.
       cma_entitled: sys.indexOf('cma') >= 0, cma_requested: !!o.cma_requested_at,

@@ -780,10 +780,12 @@
     const docPill = HUB.docPill;
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
+      const booked = !!(o.induction_booked || o.induction_wed || o.induction_thu);
       const state = (o.approved && o.setup_error) ? { c: 's-error', t: 'Setup error · needs attention' }
         : (o.approved && o.setup_incomplete) ? { c: 's-inprogress', t: 'Setting up accounts' }
-        : o.approved ? { c: 's-done', t: 'Approved · setting up' }
-        : o.docs_ready ? { c: 's-ready', t: 'Ready to approve' }
+        : (o.approved && !booked) ? { c: 's-ready', t: 'Induction to be picked' }
+        : o.approved ? { c: 's-done', t: 'Induction booked' }
+        : o.docs_ready ? { c: 's-ready', t: 'Documents in · awaiting acceptance' }
         : { c: 's-pending', t: 'Waiting on documents' };
       const docs = `<div class="docs">
         ${docPill(o.docs && o.docs.contract, 'Contract')}${docPill(o.docs && o.docs.id, 'ID')}

@@ -35,6 +35,17 @@ var PROPDATA_HEADERS = ['First Name', 'Last Name', 'Email', 'Active'];
 var PROGRAMS_CACHE_KEY = 'programs_tree_v1';
 var PROGRAMS_CACHE_TTL = 120; // seconds
 
+/** Drop the memoised Programs tree so the next read rebuilds from source. Call after any change to
+ *  WHO shows on Programs (a new onboard, a provisioning completion, a removal) so new starters appear
+ *  immediately instead of waiting out PROGRAMS_CACHE_TTL. Never throws - if the cache is down, the
+ *  short TTL self-heals anyway. */
+function bustProgramsCache_() {
+  try {
+    var c = CacheService.getScriptCache();
+    if (c) c.remove(PROGRAMS_CACHE_KEY);
+  } catch (e) { /* cache down / unavailable - the TTL expiry covers it */ }
+}
+
 /** Assemble the Programs tree, scoped to the caller's role. Requires an authed ctx. */
 function programsData_(ctx) {
   if (!ctx || !ctx.role) throw new Error('unauthorized');
