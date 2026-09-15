@@ -251,8 +251,8 @@ function ffcStatusLabel_(ffc) {
   }
 }
 
-/** Tuesday induction digest (auto-send permitted for this scoped pipeline). Each candidate row shows
- *  full name, phone number, team, and FFC status; the booked bucket also shows the induction Wed. */
+/** Tuesday induction digest (auto-send permitted for this scoped pipeline). Two sections - "Booked
+ *  this week" and "Awaiting booking" - each a table of Name, Phone, and FFC status. */
 function inductionDigestHtml_(company, buckets) {
   var B = CFG.BRAND;
   var th = function (t) {
@@ -263,15 +263,13 @@ function inductionDigestHtml_(company, buckets) {
     return '<td style="padding:7px 12px 7px 0;font-size:13.5px;color:' + (strong ? B.goldInk : B.slate) + ';' +
       (strong ? 'font-weight:600;' : '') + 'border-bottom:1px solid #DCE8F6">' + htmlEsc_(v || '-') + '</td>';
   };
-  var table = function (title, rows, empty, showInduction) {
-    var head = '<tr>' + th('Name') + th('Phone') + th('Team') + th('FFC status') +
-      (showInduction ? th('Induction') : '') + '</tr>';
+  var table = function (title, rows, empty) {
+    var head = '<tr>' + th('Name') + th('Phone') + th('FFC status') + '</tr>';
     var body = rows.length
       ? rows.map(function (r) {
-          return '<tr>' + td(r.name, true) + td(r.contact) + td(r.team) + td(ffcStatusLabel_(r.ffc_status)) +
-            (showInduction ? td(r.induction_wed ? 'Wed ' + fmtDate_(r.induction_wed) : '-') : '') + '</tr>';
+          return '<tr>' + td(r.name, true) + td(r.contact) + td(ffcStatusLabel_(r.ffc_status)) + '</tr>';
         }).join('')
-      : '<tr><td colspan="' + (showInduction ? 5 : 4) + '" style="padding:8px 0;font-size:13.5px;color:' + B.muted + '">' +
+      : '<tr><td colspan="3" style="padding:8px 0;font-size:13.5px;color:' + B.muted + '">' +
           htmlEsc_(empty) + '</td></tr>';
     return '<div style="margin:0 0 20px"><div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:' +
       B.amber + ';margin:0 0 8px">' + htmlEsc_(title) + ' (' + rows.length + ')</div>' +
@@ -281,8 +279,8 @@ function inductionDigestHtml_(company, buckets) {
   var inner =
     '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:' + B.slate + '">Induction status for the week. ' +
       buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' booked for induction.</p>' +
-    table('Booked this week', buckets.dueThisWeek, 'No inductions booked this week.', true) +
-    table('Awaiting booking', buckets.unbooked, 'Everyone due is booked.', false);
+    table('Booked this week', buckets.dueThisWeek, 'No inductions booked this week.') +
+    table('Awaiting booking', buckets.unbooked, 'Everyone due is booked.');
   return emailShell_(company, 'Induction digest', inner);
 }
 
