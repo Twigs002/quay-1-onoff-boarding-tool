@@ -265,6 +265,47 @@ function listOnboarding_(filterFn) {
   return out;
 }
 
+/** Delete the Onboarding row for a folderId. Returns true when a row was removed, false when the
+ *  folderId is not on the tab. The CALLER decides WHICH rows may be removed (see removeOnboarding_);
+ *  this is the raw sheet op. Deleting shifts lower rows up, which is fine for one-at-a-time removal. */
+function deleteOnboardingRow_(folderId) {
+  var sh = _onbTab_();
+  var row = findOnboardingRow_(folderId);
+  if (!row) return false;
+  sh.deleteRow(row);
+  return true;
+}
+
+/** Admin cleanup: the onboarding rows that are safe to remove (terminal status only) as light
+ *  objects for the "Completed onboardings" panel. Never includes an in-flight candidate. */
+function listCompletedOnboarding_() {
+  var removable = CFG.REMOVABLE_STATUSES || [];
+  return listOnboarding_(function (o) {
+    return removable.indexOf(String(o.status || '').trim().toLowerCase()) >= 0;
+  }).map(function (o) {
+    return { folderId: o.folderId, name: o.name, entity: o.entity, team: o.team,
+      status: o.status, start_date: o.start_date };
+  });
+}
+
+/** Admin cleanup: remove ONE onboarding row from the tracker, but ONLY when its status is terminal
+ *  (Provisioned / Migrated legacy). The status is re-checked here so a stale or hand-crafted folderId
+ *  can never delete an in-flight candidate. Logs the removal. Returns { ok, removed:{name,status} }
+ *  or { ok:false, error }. Accounts and HR records are untouched; this only clears the pipeline row. */
+function removeOnboarding_(folderId, ctx) {
+  folderId = String(folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  var status = String(o.status || '').trim().toLowerCase();
+  if ((CFG.REMOVABLE_STATUSES || []).indexOf(status) < 0) {
+    return { ok: false, error: 'refused: only completed rows (Provisioned or Migrated legacy) can be removed - this one is "' + o.status + '"' };
+  }
+  if (!deleteOnboardingRow_(folderId)) return { ok: false, error: 'onboarding row not found' };
+  logAudit_('onboarding_removed', { folderId: folderId, name: o.name, status: o.status, by: (ctx && ctx.email) || 'admin' });
+  return { ok: true, removed: { name: o.name, status: o.status } };
+}
+
 /** True for existing staff imported from the old tracker. These carry status "Migrated (legacy)"
  *  (written only by scripts/migrate_legacy_candidates.py) and are already onboarded, so they must
  *  not appear in the active tool: the tracker/approval pipeline, the induction digest, or the teams
