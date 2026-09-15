@@ -297,7 +297,8 @@ function provisionReadyBatch_() {
       // sends as the interactive accept path.
       if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
       else _sendInductionInvite_(o.folderId, o);
-      _sendFlowSetup_(o.folderId, o);                   // Flow set-up handoff, same one-time transition (all entities)
+      // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for
+      // that week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to induction week.
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
       _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
       _maybeNotifyAquaAccepted_(o.folderId, o);         // Aqua "can join" notice (no-op for quay1)
@@ -389,7 +390,8 @@ function approveAndProvision_(folderId, ctx) {
     // Aqua contractor instead gets the Google-only welcome pack. Both CC the senior when CC is on.
     if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
     else _sendInductionInvite_(folderId, o);
-    _sendFlowSetup_(folderId, o);   // hand the starter's details to Diego for Flow set-up (once, all entities)
+    // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for that
+    // week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to their induction week.
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
   } finally {
     lock.releaseLock();
@@ -461,6 +463,7 @@ function _sendAquaWelcome_(folderId, o) {
  */
 function _sendFlowSetup_(folderId, o) {
   try {
+    if (o && o.flow_setup_at) return;   // already handed to Diego - never send a starter twice
     var to = (CFG.FLOW_SETUP_TO || []).filter(function (a) { return isEmail_(a); });
     if (!to.length) { logAudit_('flow_setup_skipped_no_recipient', { folderId: folderId }); return; }
     var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
@@ -486,8 +489,31 @@ function _sendFlowSetup_(folderId, o) {
       '\nPropData account: ' + info.propdata_account + '\n';
     GmailApp.sendEmail(to.join(','), subject, plain,
       { name: company.name, htmlBody: flowSetupHtml_(company, info) });
+    setOnboardingCell_(folderId, ONB_COL.flow_setup_at, nowIso_());   // idempotency: sent once per starter
     logAudit_('flow_setup_sent', { folderId: folderId, to: to.join(','), propdata: info.propdata_account });
   } catch (e) { logAudit_('flow_setup_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * Tuesday ~15:00 sweep (TIME-TRIGGER target, installed by setupTriggers). Emails Diego
+ * (CFG.FLOW_SETUP_TO) a Flow Set Up for every Quay 1 candidate booked to induct THIS week
+ * (induction_wed within this Mon-Sun), so he can set up their Flow before the Wed/Thu induction.
+ * Idempotent: _sendFlowSetup_ stamps flow_setup_at and skips anyone already sent, so a re-run or a
+ * starter carried across weeks is never emailed twice. Quay 1 only (Aqua has no induction).
+ */
+function flowSetupInductionWeek_() {
+  var weekStart = _mondayOfThisWeek_();
+  var weekEnd = _addDays_(weekStart, 6);
+  var n = 0;
+  listOnboarding_(function (o) {
+    if ((o.entity || 'quay1') !== 'quay1' || _isMigratedLegacy_(o) || o.flow_setup_at) return false;
+    var wed = _asDate_(o.induction_wed);
+    return !!(wed && wed >= weekStart && wed <= weekEnd);
+  }).forEach(function (o) {
+    _sendFlowSetup_(o.folderId, o);   // sends to Diego + stamps flow_setup_at; guarded + idempotent inside
+    n++;
+  });
+  logAudit_('flow_setup_week_run', { matched: n });
 }
 
 /**

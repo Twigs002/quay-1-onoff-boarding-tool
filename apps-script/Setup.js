@@ -51,7 +51,8 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' || fn === 'reapOffboarding_' ||
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' || fn === 'flowSetupInductionWeek_' ||
+        fn === 'reapOffboarding_' ||
         fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
         fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
   });
@@ -67,6 +68,10 @@ function setupTriggers() {
   // (Apps Script granularity), so it lands before the 1:45 deadline. See tuesdayInductionNudge_.
   ScriptApp.newTrigger('tuesdayInductionNudge_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(12).create();
+  // Flow Set Up handoff to Diego at ~15:00 for everyone inducting THIS week, so he can set up their
+  // Flow before the Wed/Thu induction. Idempotent (flow_setup_at), Quay 1 only. See flowSetupInductionWeek_.
+  ScriptApp.newTrigger('flowSetupInductionWeek_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(15).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
   // Deferred provisioning: create accounts once a week for everyone whose signed contract + FICA are
@@ -82,8 +87,8 @@ function setupTriggers() {
   ScriptApp.newTrigger('workPermitExpirySweep_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
   return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), Tuesday induction nudge ' +
-    '(~12:00), offboarding reaper (every 15 min), provisioning batch (Wednesday ~08:00), FICA ' +
-    'follow-up sweep (hourly, daytime), work-permit expiry alert (Monday ~08:00).';
+    '(~12:00), Tuesday Flow Set Up to Diego (~15:00), offboarding reaper (every 15 min), provisioning ' +
+    'batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), work-permit expiry alert (Monday ~08:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */

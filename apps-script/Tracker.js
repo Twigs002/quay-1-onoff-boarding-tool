@@ -104,6 +104,9 @@ var ONB_COL = {
   // "Welcome Email Sent" column via _hrBuildRow_ / hrMarkWelcomeSent_ so HR is not asked to track by
   // hand something the system already did. Appended, no shift.
   welcome_email_at: 61,
+  // Flow set-up handoff to Diego (appended, no shift). Idempotency marker: stamped when the Flow Set
+  // Up email is sent for this starter by the Tuesday induction-week sweep, so no one is ever sent twice.
+  flow_setup_at: 62,
 };
 
 var ONB_HEADERS = [
@@ -121,7 +124,7 @@ var ONB_HEADERS = [
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
   'Contract emailed at', 'FICA follow-up at',
   'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
-  'Welcome email sent at',
+  'Welcome email sent at', 'Flow set-up at',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by
