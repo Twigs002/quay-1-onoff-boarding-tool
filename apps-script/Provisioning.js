@@ -474,6 +474,7 @@ function _sendFlowSetup_(folderId, o) {
     var info = {
       name: first || full,
       surname: surname,
+      team: o.team || '',
       email: o.email || '',
       phone: o.contact || '',
       id_number: o.id_number || '',
@@ -483,7 +484,7 @@ function _sendFlowSetup_(folderId, o) {
     };
     var subject = 'Flow Set Up - ' + (full || first || 'new starter');
     var plain = 'Please set up Flow for the following new ' + company.name + ' starter.\n\n' +
-      'Name: ' + info.name + '\nSurname: ' + info.surname + '\nEmail: ' + info.email +
+      'Name: ' + info.name + '\nSurname: ' + info.surname + '\nTeam: ' + info.team + '\nEmail: ' + info.email +
       '\nPhone number: ' + info.phone + '\nID number: ' + info.id_number +
       '\nTax number: ' + info.tax_number + '\nCommission %: ' + info.commission +
       '\nPropData account: ' + info.propdata_account + '\n';

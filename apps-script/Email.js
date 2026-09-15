@@ -214,7 +214,7 @@ function inductionNudgeHtml_(company, first, bookUrl) {
 /** "Flow Set Up" handoff email. Sent to CFG.FLOW_SETUP_TO the moment a new starter is provisioned,
  *  so Diego can set up their Flow. Lists the starter's personal details plus their PropData account
  *  (the numbered specialist reference for property specialists; full agents carry no number). `info`
- *  is a plain object: { name, surname, email, phone, id_number, tax_number, commission,
+ *  is a plain object: { name, surname, team, email, phone, id_number, tax_number, commission,
  *  propdata_account }. */
 function flowSetupHtml_(company, info) {
   var B = CFG.BRAND;
@@ -228,6 +228,7 @@ function flowSetupHtml_(company, info) {
     '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">' +
       detail('Name', info.name) +
       detail('Surname', info.surname) +
+      detail('Team', info.team) +
       detail('Email', info.email) +
       detail('Phone number', info.phone) +
       detail('ID number', info.id_number) +
