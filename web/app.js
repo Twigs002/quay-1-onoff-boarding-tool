@@ -831,18 +831,25 @@
   }
 
   function renderStatus(body, meta, rows) {
-    if (!rows.length) {
+    // "Account setup" self-cleans: show only rows still in flight or needing attention (pending /
+    // in progress / error). Completed rows (done/skipped) are hidden so finished hires don't pile up
+    // here. statusCache keeps the FULL set (set by the caller) for the offboard picker.
+    const active = (rows || []).filter((r) => {
+      const st = String(r.status || '').toLowerCase();
+      return st !== 'done' && st !== 'skipped';
+    });
+    if (!active.length) {
       if (meta) meta.textContent = '';
-      body.innerHTML = '';   // the pipeline above already shows in-progress candidates
+      body.innerHTML = '';   // nothing needs attention; the pipeline above shows in-progress hires
       return;
     }
     const canRetry = USER && USER.isSuper;
-    if (meta) meta.textContent = `${rows.length} queue row(s)`;
+    if (meta) meta.textContent = `${active.length} account-setup row(s)`;
     const heading = `<div class="pipe-subhead">Account setup</div>`;
     const head = `<thead><tr>
       <th>Person</th><th>Entity</th><th>System</th><th>Action</th><th>Status</th><th>Detail</th>
       ${canRetry ? '<th aria-label="Retry"></th>' : ''}</tr></thead>`;
-    const trs = rows.map((row) => {
+    const trs = active.map((row) => {
       const st = String(row.status || 'pending').toLowerCase().replace(/\s+/g, '_');
       const cls = STATUS_CLASS[st] || 's-pending';
       const lbl = STATUS_LABEL[st] || row.status || 'Pending';
