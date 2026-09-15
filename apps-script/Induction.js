@@ -251,6 +251,37 @@ function tuesdayDigest_() {
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
 }
 
+/**
+ * Tuesday noon nudge (TIME-TRIGGER target, installed by setupTriggers at ~12:00). Emails each Quay 1
+ * candidate who has been INVITED (provisioned) but has NOT yet booked an induction week, telling them
+ * to pick one before the 1:45 PM cutoff or roll to next week. The senior broker is CC'd when CC is on.
+ * Auto-send is permitted for this scoped onboarding pipeline (same class as the induction invite).
+ * Quay 1 only - Aqua has no induction step. Fully guarded: a bad row or mail failure is logged and
+ * skipped, never breaking the run.
+ */
+function tuesdayInductionNudge_() {
+  var company = CFG.COMPANY.quay1;
+  var sent = 0;
+  listOnboarding_(function (o) {
+    return (o.entity || 'quay1') === 'quay1' && !_isMigratedLegacy_(o) &&
+      o.provisioned_at && !o.induction_wed && !o.induction_thu && isEmail_(o.email);
+  }).forEach(function (o) {
+    try {
+      var link = inductionLink_(o.folderId);
+      var first = firstName_(o.name);
+      GmailApp.sendEmail(o.email,
+        'Action needed: book your ' + company.name + ' induction today' + (first ? ' - ' + first : ''),
+        'Hi ' + first + ',\n\nYou have not picked your induction week yet. Please book it here: ' + link +
+        '\n\nBOOK BY 1:45 PM TODAY or you will have to join induction the following week.\n\n' +
+        'Warm regards,\nThe ' + company.name + ' Team',
+        { name: company.name, htmlBody: inductionNudgeHtml_(company, first, link),
+          cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+      sent++;
+    } catch (e) { logAudit_('induction_nudge_failed', { folderId: o.folderId, error: String(e) }); }
+  });
+  logAudit_('induction_nudge_run', { sent: sent });
+}
+
 // ---------------------------------------------------------------- candidate booking page
 
 /** Serve the branded candidate induction-booking page (doGet ?i=<folderId>). Token-less: the

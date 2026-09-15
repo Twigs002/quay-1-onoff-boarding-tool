@@ -188,6 +188,29 @@ function dialfireRequestHtml_(company, name, team) {
   return accountRequestHtml_(company, 'Dialfire account request', 'Dialfire', name, team, '', '');
 }
 
+/** Tuesday noon nudge to a candidate who was invited but has NOT yet picked an induction week. Leads
+ *  with an unmissable deadline: book by 1:45 PM today or roll to next week. `bookUrl` is their booking
+ *  link (empty pre-deploy). Auto-send permitted for this scoped onboarding pipeline (like the invite). */
+function inductionNudgeHtml_(company, first, bookUrl) {
+  var B = CFG.BRAND;
+  var bookBtn = bookUrl
+    ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
+        '<a href="' + htmlEsc_(bookUrl) + '" style="display:inline-block;padding:14px 26px;font-size:15px;font-weight:800;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Pick my induction week</a>' +
+      '</td></tr></table>'
+    : '';
+  var inner =
+    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">You have not picked your induction week yet. Please choose it now so we can confirm your start.</p>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#FDECEC;border:2px solid ' + B.red + ';border-radius:12px"><tr><td style="padding:20px;text-align:center">' +
+      '<div style="font-size:24px;line-height:1.2;font-weight:800;color:' + B.red + '">Book by 1:45 PM today</div>' +
+      '<div style="font-size:15px;font-weight:600;color:' + B.slate + ';margin-top:8px">or you will have to join induction the following week.</div>' +
+    '</td></tr></table>' +
+    bookBtn +
+    '<p style="margin:18px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
+    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
+  return emailShell_(company, 'Book your induction', inner);
+}
+
 /** "Flow Set Up" handoff email. Sent to CFG.FLOW_SETUP_TO the moment a new starter is provisioned,
  *  so Diego can set up their Flow. Lists the starter's personal details plus their PropData account
  *  (the numbered specialist reference for property specialists; full agents carry no number). `info`
