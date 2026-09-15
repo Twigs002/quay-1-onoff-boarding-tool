@@ -187,6 +187,7 @@ function upsertOnboardingRow_(data) {
       if (k === 'programs' && typeof v !== 'string') v = JSON.stringify(v);
       _putOnb_(sh, row, ONB_COL[k], v);
     });
+    if (isNew) bustProgramsCache_();   // a brand-new starter should appear on Programs immediately
     return { row: row, isNew: isNew };
   } finally {
     lock.releaseLock();
@@ -303,6 +304,7 @@ function removeOnboarding_(folderId, ctx) {
   }
   if (!deleteOnboardingRow_(folderId)) return { ok: false, error: 'onboarding row not found' };
   logAudit_('onboarding_removed', { folderId: folderId, name: o.name, status: o.status, by: (ctx && ctx.email) || 'admin' });
+  bustProgramsCache_();   // a removed starter should disappear from Programs immediately
   return { ok: true, removed: { name: o.name, status: o.status } };
 }
 

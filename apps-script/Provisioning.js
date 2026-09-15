@@ -289,6 +289,7 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
+      bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
       // Promote into HR's entity "active" tab on acceptance (same single promotion point as the
       // interactive accept path; append-once, idempotent, HR_SYNC/DRY_RUN-safe).
       try { hrPromote_(o.folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: o.folderId, error: String(e) }); }
@@ -379,6 +380,7 @@ function approveAndProvision_(folderId, ctx) {
     }
     setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
     setOnboardingStatus_(folderId, 'Provisioned');
+    bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
     // Now the starter is accepted AND set up: promote them into HR's entity "active" tab (append-once,
     // idempotent). This is the ONLY place HR promotion happens - NOT at FICA upload - so a declined or
     // never-hired candidate never lands in HR's active tab. Non-fatal + HR_SYNC/DRY_RUN-safe.
