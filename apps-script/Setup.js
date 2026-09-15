@@ -44,16 +44,29 @@ function setupHub() {
   return msg;
 }
 
-/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00)
- *  and the offboarding stuck-row reaper (every 15 min). */
+/** Install the recurring time-driven triggers (idempotent): the Tuesday induction digest (~07:00 and
+ *  ~14:00), the Tuesday induction nudge (~12:00), the offboarding stuck-row reaper (every 15 min),
+ *  the Wednesday provisioning batch, the hourly FICA follow-up sweep, and the Monday work-permit
+ *  alert. Safe to re-run: it clears its own triggers first, so no duplicates and no lost 2pm digest. */
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_' ||
-        fn === 'ficaFollowUpSweep_' || fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' || fn === 'reapOffboarding_' ||
+        fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
+        fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
   });
+  // Induction digest goes out TWICE on Tuesday: a morning pass (~07:00) and a final pass (~14:00) so
+  // seniors get an updated booked/awaiting list after the noon nudge. Both are installed here so
+  // re-running setupTriggers never drops a hand-added 2pm trigger.
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
+  ScriptApp.newTrigger('tuesdayDigest_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(14).create();
+  // Noon nudge to candidates who have not yet booked induction: pick one before the 1:45 PM cutoff or
+  // roll to next week (senior CC'd when CC is on). atHour(12) fires within the 12:00-13:00 window
+  // (Apps Script granularity), so it lands before the 1:45 deadline. See tuesdayInductionNudge_.
+  ScriptApp.newTrigger('tuesdayInductionNudge_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(12).create();
   ScriptApp.newTrigger('reapOffboarding_').timeBased()
     .everyMinutes(15).create();
   // Deferred provisioning: create accounts once a week for everyone whose signed contract + FICA are
@@ -68,9 +81,9 @@ function setupTriggers() {
   // ~08:00 (Africa/Johannesburg per appsscript.json timeZone). See workPermitExpirySweep_ in Hr.js.
   ScriptApp.newTrigger('workPermitExpirySweep_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
-  return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), ' +
-    'work-permit expiry alert (Monday ~08:00).';
+  return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), Tuesday induction nudge ' +
+    '(~12:00), offboarding reaper (every 15 min), provisioning batch (Wednesday ~08:00), FICA ' +
+    'follow-up sweep (hourly, daytime), work-permit expiry alert (Monday ~08:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */
