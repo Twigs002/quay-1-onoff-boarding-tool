@@ -195,6 +195,9 @@ var CFG = {
   // Internal recipient lists (internal @quay1 addresses, not secrets; matches live Aqua CONFIG).
   ALWAYS_CC: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za'],
   INTERNAL_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za'],
+  // Recipients of the Tuesday induction digest specifically. Kept separate from INTERNAL_NOTIFY (which
+  // also drives offboarding alerts) so the digest audience can differ - Lieze is off the digest.
+  DIGEST_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
   SYSTEM_PROVISION_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
   // CMA access costs money, so it is not auto-created. When an admin ACCEPTS a CMA-entitled candidate
   // on the Admin Check tab, an approval-request email auto-sends to these approvers (see _maybeRequestCma_).

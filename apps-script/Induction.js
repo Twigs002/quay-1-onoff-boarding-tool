@@ -244,7 +244,7 @@ function tuesdayDigest_() {
     else if (!o.induction_wed && !o.induction_thu && o.contract_emailed_at) buckets.unbooked.push(o);
   });
   var company = CFG.COMPANY.quay1;
-  var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
+  var to = CFG.DIGEST_NOTIFY.filter(function (x) { return x; }).join(',');
   var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
     ' booked, ' + buckets.unbooked.length + ' awaiting)';
   GmailApp.sendEmail(to, subject,
