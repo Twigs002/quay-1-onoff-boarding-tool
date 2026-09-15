@@ -239,7 +239,9 @@ function tuesdayDigest_() {
   listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
     if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
-    else if (!o.induction_wed && !o.induction_thu) buckets.unbooked.push(o);
+    // Awaiting = anyone who has been SENT their contract (contract_emailed_at stamped) but has not yet
+    // booked an induction week. Scoping to contract-sent keeps out rows that are not yet live starters.
+    else if (!o.induction_wed && !o.induction_thu && o.contract_emailed_at) buckets.unbooked.push(o);
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.INTERNAL_NOTIFY.filter(function (x) { return x; }).join(',');
