@@ -22,6 +22,8 @@
  *   offboard_notify                -> requestOffboardNotify_(body, ctx)           [onboarder]
  *   status                         -> Queue.readForUi_(ctx)           [authed, role-scoped]
  *   programs                       -> Programs.programsData_(ctx)     [authed, role-scoped]
+ *   list_completed                 -> listCompletedOnboarding_()      [admin]
+ *   remove_onboarding              -> removeOnboarding_(folderId, ctx)[admin]
  *   retry                          -> Queue.retryRow_(queue_id, ctx)  [super]
  *
  * doGet routes: FICA form (?f=<folderId> -> HTML), induction booking page (?i=<folderId> -> HTML),
@@ -93,6 +95,8 @@ function dispatch_(kind, body, ctx) {
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
     case 'status': return readForUi_(ctx);
     case 'programs': return programsData_(ctx);
+    case 'list_completed': return _listCompletedDispatch_(body, ctx);
+    case 'remove_onboarding': return _removeOnboardingDispatch_(body, ctx);
     case 'retry': return retryRow_(String(body.queue_id || ''), ctx);
     default: return { ok: false, error: 'unknown action: ' + kind };
   }
@@ -105,6 +109,20 @@ function _approveDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return approveAndProvision_(folderId, ctx);
+}
+
+/** List completed onboardings (kind:'list_completed'). Admin-only. Powers the "Completed onboardings"
+ *  cleanup panel: terminal-status rows an admin may clear from the tracker. Read-only. */
+function _listCompletedDispatch_(body, ctx) {
+  requireAdmin_(ctx);
+  return { ok: true, rows: listCompletedOnboarding_() };
+}
+
+/** Remove a completed onboarding row (kind:'remove_onboarding'). Admin-only, guarded to terminal
+ *  status inside removeOnboarding_. Only clears the tracker row; accounts and HR records are untouched. */
+function _removeOnboardingDispatch_(body, ctx) {
+  requireAdmin_(ctx);
+  return removeOnboarding_(String(body.folderId || ''), ctx);
 }
 
 /** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records a reason

@@ -31,6 +31,8 @@
     retry: 'retry',
     offboard: 'offboard',
     offboardNotify: 'offboard_notify',
+    listCompleted: 'list_completed',
+    removeOnboarding: 'remove_onboarding',
   };
 
   // Provisioning systems (docs/CONTRACTS.md section 6). google/propdata are the
@@ -612,10 +614,12 @@
         <div id="bookedBody"></div>
         <div id="provBody"></div>
       </div>
+      ${canAdminCheck() ? `<div class="card card-pad"><div id="completedBody"></div></div>` : ''}
     </div>`);
     root.appendChild(wrap);
     $('#provRefresh', wrap).addEventListener('click', () => loadStatus(wrap, true));
     loadStatus(wrap, false);
+    if (canAdminCheck()) loadCompleted(wrap);
   }
 
   const STATUS_CLASS = {
@@ -650,6 +654,60 @@
     renderPipeline(pipe, meta, pipeline, wrap);
     renderBooked($('#bookedBody', wrap), (r.booked || []));
     renderStatus(body, null, rows);
+  }
+
+  // Admin-only cleanup: completed onboardings still sitting on the tracker. Removing a row only
+  // clears this pipeline entry; the person's Google/PropData accounts and HR record are untouched.
+  async function loadCompleted(wrap) {
+    const host = $('#completedBody', wrap);
+    if (!host) return;
+    host.innerHTML = `<div class="section-head"><h2>Completed onboardings</h2>
+      <p>Finished starters still on the tracker. Removing one only clears this pipeline row; their Google, PropData and HR records stay exactly as they are.</p></div>
+      <div class="skeleton"></div>`;
+    let r = null;
+    try { r = await api(KINDS.listCompleted, {}); }
+    catch (err) {
+      host.innerHTML = `<div class="section-head"><h2>Completed onboardings</h2></div>
+        <div class="state"><div class="state-title">Could not load</div><div>${esc(err.message)}</div></div>`;
+      return;
+    }
+    renderCompleted(host, wrap, (r.rows || []));
+  }
+
+  function renderCompleted(host, wrap, rows) {
+    const head = `<div class="section-head"><h2>Completed onboardings</h2>
+      <p>Finished starters still on the tracker. Removing one only clears this pipeline row; their Google, PropData and HR records stay exactly as they are.</p></div>`;
+    if (!rows.length) {
+      host.innerHTML = `${head}<div class="state"><div class="state-title">Nothing to clear</div><div>No completed onboardings are left on the tracker.</div></div>`;
+      return;
+    }
+    const rowHtml = (o) => {
+      const sub = [o.team, o.entity === 'aqua' ? 'Aqua Promotions' : 'Quay 1'].filter(Boolean).join(' · ');
+      return `<div class="toolbar" data-folder="${esc(o.folderId)}" style="border-top:1px solid #E5E9F0;padding-top:10px;margin-top:10px">
+        <div><b>${esc(o.name || '-')}</b> <span class="muted">${esc(o.status || '')}</span>
+          <div class="muted">${esc(sub)}</div></div>
+        <button type="button" class="btn btn-ghost btn-sm js-remove">Remove</button>
+      </div>`;
+    };
+    host.innerHTML = `${head}<div>${rows.map(rowHtml).join('')}</div>`;
+    host.querySelectorAll('.js-remove').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const rowEl = btn.closest('[data-folder]');
+        const folderId = rowEl && rowEl.getAttribute('data-folder');
+        const name = rowEl && rowEl.querySelector('b') ? rowEl.querySelector('b').textContent : '';
+        if (!folderId) return;
+        if (!window.confirm(`Remove ${name || 'this starter'} from the tracker? Their accounts and records are not affected.`)) return;
+        btn.disabled = true; btn.textContent = 'Removing...';
+        try {
+          await api(KINDS.removeOnboarding, { folderId });
+          toast('Removed from tracker', `${name || 'The row'} was cleared from the pipeline. Accounts and records are untouched.`, 'ok');
+          loadCompleted(wrap);
+        } catch (err) {
+          btn.disabled = false; btn.textContent = 'Remove';
+          toast('Could not remove', err.message, 'err');
+        }
+      });
+    });
   }
 
   // Candidates who have booked an induction week: a compact list with a "Resend induction packet" button.

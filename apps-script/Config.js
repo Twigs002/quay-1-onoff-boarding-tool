@@ -133,6 +133,10 @@ var CFG = {
   ACTIONS: ['create', 'deactivate'],
   QUEUE_STATUS: ['pending', 'in_progress', 'done', 'error', 'skipped'],
   OFFB_STATUS: ['scheduled', 'firing', 'done', 'error'],
+  // Onboarding statuses that are TERMINAL (fully done), so an admin may remove the row from the
+  // tracker on the "Completed onboardings" panel. Nothing mid-flight is ever removable; the remove
+  // handler re-checks this server-side even if a stale folderId is posted. Lower-case for comparison.
+  REMOVABLE_STATUSES: ['provisioned', 'migrated (legacy)'],
   // FFC (Fidelity Fund Certificate) status the candidate self-declares on the FICA page. 'full' (a
   // valid FFC holder) -> a full PropData agent profile (photo+name+phone+email); 'candidate' (working
   // towards it) and 'none' -> a numbered PropData specialist profile. See propdataProfileType_.
