@@ -57,8 +57,10 @@ function agreementEmailHtml_(company, first, ficaUrl) {
     : '';
   var inner =
     '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
-    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Welcome to ' + htmlEsc_(company.name) +
-      '. Your ' + htmlEsc_(company.kicker) + ' is attached to this email.</p>' +
+    '<p style="margin:0 0 14px;font-size:15px;line-height:1.62;color:' + B.slate + '">Welcome to ' + htmlEsc_(company.name) +
+      ' - we are genuinely glad to have you on the team, and we are here to help you get off to the very best start.</p>' +
+    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">To get you set up there are just two quick steps: sign your ' + htmlEsc_(company.kicker) +
+      ' (attached) and upload a few documents using your secure link below. We have kept it as simple as possible - it only takes a few minutes.</p>' +
     inductionNotice +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#FFF6D6;border:1px solid #F0DFA0;border-radius:10px"><tr>' +
       '<td width="46" valign="middle" style="padding:12px 0 12px 14px"><div style="width:26px;height:26px;border-radius:7px;background:' + B.gold + ';color:' + B.goldInk + ';text-align:center;line-height:26px;font-size:14px">&#128206;</div></td>' +
@@ -68,9 +70,9 @@ function agreementEmailHtml_(company, first, ficaUrl) {
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:' + B.amberT + ';border:1px solid #F5E3B3;border-radius:10px"><tr>' +
       '<td style="padding:14px 16px">' +
         '<div style="font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:' + B.amber + ';margin:0 0 8px">FICA - required</div>' +
-        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">To comply with FICA, please submit the following using your personal, secure link below:' +
+        '<div style="font-size:14px;line-height:1.6;color:' + B.slate + '">FICA is South Africa\'s financial-compliance law (the Financial Intelligence Centre Act); every firm must verify these details before it can pay you, so this is a normal and required step. Please submit the following using your personal, secure link below:' +
           '<ol style="margin:8px 0 12px;padding:0 0 0 20px">' +
-            '<li style="margin:0 0 4px">A certified copy of your ID or valid passport</li>' +
+            '<li style="margin:0 0 4px">A certified copy of your ID or valid passport <span style="color:' + B.muted + '">(a certified copy is one stamped by a police station or commissioner of oaths; most SAPS stations do this for free)</span></li>' +
             '<li style="margin:0 0 4px">Proof of your residential address, not older than 3 months (e.g. a utility bill or bank statement)</li>' +
             '<li style="margin:0 0 4px">A bank confirmation letter or recent bank statement showing your account details</li>' +
             '<li style="margin:0 0 4px">Your income tax number (and SARS proof of it, if you have one)</li>' +
@@ -112,8 +114,22 @@ function ficaFollowUpHtml_(company, first, ficaUrl) {
 }
 
 /** FICA received acknowledgement email. */
-function ficaThankYouHtml_(company, first) {
+function ficaThankYouHtml_(company, first, induction) {
   var B = CFG.BRAND;
+  var hasWk = induction && induction.wed;
+  // When the induction week is already known (Quay 1, assigned from the FICA submission time), show it
+  // right here so the candidate and their senior broker learn it immediately, not days later.
+  var inductionBlock = hasWk
+    ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#FFF3D6;border:1px solid ' + B.gold + ';border-radius:10px"><tr><td style="padding:16px 18px">' +
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:' + B.goldInk + '">Your induction</div>' +
+        '<div style="font-size:16px;font-weight:800;color:' + B.navyDark + ';margin-top:4px">' +
+          htmlEsc_(fmtDate_(induction.wed)) + (induction.thu ? ' and ' + htmlEsc_(fmtDate_(induction.thu)) : '') + '</div>' +
+        '<div style="font-size:13.5px;line-height:1.55;color:' + B.slate + ';margin-top:6px">We will confirm the finer details - times, address and what to bring - once your documents are approved.</div>' +
+      '</td></tr></table>'
+    : '';
+  var nextLine = hasWk
+    ? 'There is nothing further you need to do right now. We look forward to welcoming you at induction.'
+    : 'There is nothing further you need to do right now. Please look out for another email shortly confirming your induction day.';
   var inner =
     '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
     '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Thank you for submitting your documents to ' +
@@ -122,7 +138,8 @@ function ficaThankYouHtml_(company, first) {
       '<td width="46" valign="middle" style="padding:12px 0 12px 14px"><div style="width:26px;height:26px;border-radius:7px;background:' + B.gold + ';color:' + B.goldInk + ';text-align:center;line-height:26px;font-size:15px">&#10003;</div></td>' +
       '<td valign="middle" style="padding:12px 15px 12px 6px;font-size:13.5px;color:' + B.goldInk + ';font-weight:600">FICA documents received</td>' +
     '</tr></table>' +
-    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">There is nothing further you need to do right now. Please look out for another email shortly confirming your induction day.</p>' +
+    inductionBlock +
+    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">' + nextLine + '</p>' +
     '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
     '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
   return emailShell_(company, 'FICA documents received', inner);
@@ -244,8 +261,9 @@ function ffcStatusLabel_(ffc) {
 
 /** Tuesday induction digest (auto-send permitted for this scoped pipeline). Two sections - "Booked
  *  this week" and "Awaiting booking" - each a table of Name, Phone, and FFC status. */
-function inductionDigestHtml_(company, buckets) {
+function inductionDigestHtml_(company, buckets, health) {
   var B = CFG.BRAND;
+  health = health || {};
   var th = function (t) {
     return '<th style="text-align:left;padding:6px 12px 6px 0;font-size:11px;font-weight:700;letter-spacing:.4px;' +
       'text-transform:uppercase;color:' + B.muted + ';border-bottom:1px solid #DCE8F6">' + htmlEsc_(t) + '</th>';
@@ -284,6 +302,16 @@ function inductionDigestHtml_(company, buckets) {
       buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' due for induction.</p>' +
     table('Due this week', buckets.dueThisWeek, 'No inductions due this week.', true) +
     table('Awaiting FICA', buckets.unbooked, 'Everyone with a contract out has submitted FICA.');
+  // Operator health footer: system alerts logged this week + holiday-table heads-up (both invisible
+  // otherwise). Only rendered when there is something to report.
+  if (health.alerts || health.holidayWarning) {
+    var items = '';
+    if (health.alerts) items += '<div style="font-size:13.5px;line-height:1.55;color:' + B.red + ';font-weight:600;margin:0 0 6px">' +
+      health.alerts + ' system alert' + (health.alerts === 1 ? '' : 's') + ' logged this week - see the Alerts tab in the tracker.</div>';
+    if (health.holidayWarning) items += '<div style="font-size:13.5px;line-height:1.55;color:' + B.slate + '">' + htmlEsc_(health.holidayWarning) + '</div>';
+    inner += '<div style="margin:22px 0 0;padding:14px 16px;background:#FBF3F2;border:1px solid #F1D6D2;border-radius:10px">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:' + B.muted + ';margin:0 0 8px">System health</div>' + items + '</div>';
+  }
   return emailShell_(company, 'Induction digest', inner);
 }
 
@@ -462,7 +490,12 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
     'An overview of our marketing resources, document systems, and training materials',
     'Who to contact across the business, so you always know where to go for support',
   ]);
-  var day2 = dayCard(induction.thu, 'Day 2 - Programs (with Pagan)', ['HubSpot', 'PropData', 'Flow', 'CMA']);
+  var day2 = dayCard(induction.thu, 'Day 2 - Programs (with Pagan)', [
+    'HubSpot - our CRM, where your leads, contacts and deals live',
+    'PropData - where your property listings are created and managed',
+    'Flow - our broker app, for your day-to-day workflow',
+    'CMA - the tool for preparing comparative market analyses for clients',
+  ]);
 
   var contactRow = function (what, who, email, last) {
     var bb = last ? '' : 'border-bottom:1px solid #ECF1F8;';
@@ -480,6 +513,7 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
       '<div style="font-size:27px;font-weight:800;color:#ffffff;text-transform:uppercase;letter-spacing:.5px;line-height:1.12">Welcome aboard,<br>' + htmlEsc_(first) + '</div></td></tr>' +
     '<tr><td style="padding:32px 40px 8px">' +
       '<p style="margin:0 0 20px;font-size:15px;line-height:1.62;color:#5A6B85">We are genuinely thrilled to have you with us. Everything you need for a confident first two weeks is right here in this one email. Have a read before your first morning and you will walk in ready.</p>' +
+      (induction.rescheduled ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#FFF3D6;border:1px solid #FDC503;border-radius:10px"><tr><td style="padding:14px 18px;font-size:14px;line-height:1.55;color:#6B5A16"><b>Please note:</b> your induction has been rescheduled to the dates below. We look forward to seeing you then.</td></tr></table>' : '') +
       // Crew manifest
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 0;border-radius:12px;overflow:hidden;background:#2C4682"><tr><td style="padding:16px 18px">' +
         '<div style="font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#FDC503;margin:0 0 11px">Crew Manifest &#9875;</div>' +
@@ -494,7 +528,9 @@ function inductionPacketHtml_(company, o, induction, cred, hubspot) {
       // Logins
       sec('Your Quay 1 logins') + loginPanel + hubPanel + propdataNote +
       // Induction
-      sec('Your induction · two mornings, 09:00 - 12:00') + day1 + day2 +
+      sec('Your induction · two mornings, 09:00 - 12:00') +
+      '<p style="margin:0 0 12px;font-size:13.5px;line-height:1.6;color:#5A6B85">Your induction days were set automatically from when your FICA documents came in, so there is nothing to book. Here are your two mornings:</p>' +
+      day1 + day2 +
       // Where
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border:1px solid #DCE8F6;border-radius:12px;background:#F5F8FD"><tr>' +
         '<td valign="middle" style="padding:15px 8px 15px 18px"><div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A96AE">Where</div>' +

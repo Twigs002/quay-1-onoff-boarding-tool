@@ -66,8 +66,12 @@ function _ensureInductionWeekForProvisioning_(o) {
   // Provisioning on the induction Wednesday or Thursday must keep this week, not bump to the next.
   var lastDay = thu || wed;
   var stale = !!(lastDay && lastDay < today);    // YYYY-MM-DD compares lexically
-  if (wed && thu && !stale) return { wed: wed, thu: thu };
+  if (wed && thu && !stale) return { wed: wed, thu: thu, rescheduled: false };
   var wk = assignInductionWeek_(nowIso_());
+  // rescheduled = a week the candidate was ALREADY told (via the FICA-received email) has passed and we
+  // are moving them; the packet then leads with a gentle "rescheduled" note. An empty week (never
+  // assigned) is a first-time assignment, not a reschedule.
+  var rescheduled = stale;
   try {
     if (!DRY_RUN_()) {
       setInduction_(o.folderId, wk.wed, wk.thu);
@@ -75,12 +79,12 @@ function _ensureInductionWeekForProvisioning_(o) {
     }
     logAudit_(stale ? 'induction_reassigned_stale' : 'induction_assigned_at_provision',
       { folderId: o.folderId, was_wed: wed || '', wed: wk.wed, thu: wk.thu, dry: DRY_RUN_() });
-    return { wed: wk.wed, thu: wk.thu };
+    return { wed: wk.wed, thu: wk.thu, rescheduled: rescheduled };
   } catch (e) {
     // Persist failed: return whatever is actually on the row so the packet never cites a week the
     // tracker/digest/flow have no record of. Blank dates fall through to the packet's defensive line.
     logAudit_('induction_provision_assign_failed', { folderId: o.folderId, error: String(e) });
-    return { wed: wed, thu: thu };
+    return { wed: wed, thu: thu, rescheduled: false };
   }
 }
 
@@ -91,7 +95,7 @@ function _ensureInductionWeekForProvisioning_(o) {
  * resendInductionPacket_ (which refuses when no week is set). Wrapped so a send failure never
  * propagates to the caller.
  */
-function _sendInductionPacket_(folderId, o, wed, thu) {
+function _sendInductionPacket_(folderId, o, wed, thu, rescheduled) {
   o = o || {};
   try {
     var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
@@ -120,13 +124,15 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
       var bookedLine = (wed || thu)
         ? ' induction is booked for ' + fmtDate_(wed) + ' and ' + fmtDate_(thu) + '.'
         : ' induction week will be confirmed with you shortly.';
-      var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name + bookedLine +
+      // When a previously-communicated week had passed and we rescheduled, lead with a gentle note.
+      var reschedLine = rescheduled ? ' Please note your induction has been rescheduled.' : '';
+      var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name + bookedLine + reschedLine +
         loginText + hubText + propdataText + linksText + '\n\nWarm regards,\nThe ' + company.name + ' Team';
       GmailApp.sendEmail(o.email,
         'Your ' + company.name + ' Induction Packet' + (o.name ? ' - ' + o.name : ''),
         plain, {
           name: company.name,
-          htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu }, cred, teamLogin),
+          htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu, rescheduled: rescheduled }, cred, teamLogin),
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
       // The induction packet IS the Quay 1 welcome pack: record that it went out and reflect it on the
@@ -272,13 +278,56 @@ function tuesdayDigest_() {
   var to = CFG.DIGEST_NOTIFY.filter(function (x) { return x; }).join(',');
   var awaitingAccept = buckets.dueThisWeek.filter(function (o) { return !o.approved_at; }).length;
   var holidayClashes = buckets.dueThisWeek.filter(function (o) { return o.induction_holiday_flag; }).length;
+  // Operator health line: system alerts logged this week (swallowed *_failed events) + a heads-up when
+  // the SA public-holiday table is about to run out. Both are otherwise invisible to whoever reads this.
+  var health = {
+    alerts: _recentAlertCount_(_isoDate_(_addDays_(new Date(), -7))),
+    holidayWarning: _holidayTableWarning_(),
+  };
   var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
-    ' due, ' + buckets.unbooked.length + ' awaiting FICA)';
+    ' due, ' + buckets.unbooked.length + ' awaiting FICA)' + (health.alerts ? ' [' + health.alerts + ' alert' + (health.alerts === 1 ? '' : 's') + ']' : '');
   var body = 'Induction status. Due this week: ' + buckets.dueThisWeek.length +
     ' (' + awaitingAccept + ' still awaiting acceptance). Awaiting FICA: ' + buckets.unbooked.length + '.' +
-    (holidayClashes ? '\n\nATTENTION: ' + holidayClashes + ' induction day this week clashes with a SA public holiday - see the Status column.' : '');
+    (holidayClashes ? '\n\nATTENTION: ' + holidayClashes + ' induction day this week clashes with a SA public holiday - see the Status column.' : '') +
+    (health.alerts ? '\n\nSystem alerts this week: ' + health.alerts + ' - see the Alerts tab in the tracker.' : '') +
+    (health.holidayWarning ? '\n\n' + health.holidayWarning : '');
   GmailApp.sendEmail(to, subject, body,
-    { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
+    { name: company.name, htmlBody: inductionDigestHtml_(company, buckets, health) });
+}
+
+/** Count Alerts-tab rows logged on/after `sinceIso` (a YYYY-MM-DD). 0 when the tab/tracker is absent. */
+function _recentAlertCount_(sinceIso) {
+  try {
+    var id = optProp_(PROP.TRACKER_SHEET_ID);
+    if (!id) return 0;
+    var t = SpreadsheetApp.openById(id).getSheetByName(CFG.TAB.ALERTS);
+    if (!t) return 0;
+    var last = t.getLastRow();
+    if (last < 2) return 0;
+    var when = t.getRange(2, 1, last - 1, 1).getValues();
+    var since = String(sinceIso || '').slice(0, 10);
+    var n = 0;
+    for (var i = 0; i < when.length; i++) { if (String(when[i][0]).slice(0, 10) >= since) n++; }
+    return n;
+  } catch (e) { return 0; }
+}
+
+/** A heads-up string when the SA public-holiday table is about to run out (so induction dates keep
+ *  getting holiday-checked), else ''. Warns from October of the last covered year, and urgently once
+ *  the current year is past the table. */
+function _holidayTableWarning_() {
+  var hs = CFG.SA_PUBLIC_HOLIDAYS || [];
+  if (!hs.length) return '';
+  var maxYear = 0;
+  hs.forEach(function (h) { var y = parseInt(String(h).slice(0, 4), 10); if (y > maxYear) maxYear = y; });
+  var now = new Date();
+  if (now.getFullYear() > maxYear) {
+    return 'The SA public-holiday table ended ' + maxYear + '. Add this year\'s holidays to SA_PUBLIC_HOLIDAYS (Config.js) - induction dates are no longer being holiday-checked against a real table.';
+  }
+  if (now.getFullYear() === maxYear && now.getMonth() >= 9) {
+    return 'The SA public-holiday table ends ' + maxYear + '. Please add ' + (maxYear + 1) + '\'s holidays to SA_PUBLIC_HOLIDAYS (Config.js) before year-end so induction dates keep being holiday-checked.';
+  }
+  return '';
 }
 
 // tuesdayInductionNudge_ (the Tuesday-noon "book before 1:45" nudge) was removed when induction became

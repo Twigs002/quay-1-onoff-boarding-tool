@@ -120,6 +120,29 @@ function logAudit_(kind, detail) {
     Logger.log('[audit] ' + nowIso_() + ' ' + String(kind) + ' ' +
       (typeof detail === 'string' ? detail : JSON.stringify(detail)));
   } catch (e) { /* logging must never throw into a handler */ }
+  // Mirror alert-worthy events (any *_failed) to a visible Alerts tab - Logger.log alone is invisible
+  // to the HR/admin who operates this. Best-effort + fully guarded: alerts must never break a handler.
+  try {
+    if (/_failed$/.test(String(kind))) _appendAlert_(String(kind), detail);
+  } catch (e2) { /* alerts are best-effort */ }
+}
+
+/** Append one row to the operator-visible Alerts tab (created lazily). Never throws; a no-op when the
+ *  tracker is not configured yet. Called by logAudit_ for *_failed events. */
+function _appendAlert_(kind, detail) {
+  var id = optProp_(PROP.TRACKER_SHEET_ID);
+  if (!id) return;
+  var ss = SpreadsheetApp.openById(id);
+  var t = ss.getSheetByName(CFG.TAB.ALERTS);
+  if (!t) {
+    t = ss.insertSheet(CFG.TAB.ALERTS);
+    t.getRange(1, 1, 1, 3).setValues([['When (SAST)', 'Kind', 'Details']]).setFontWeight('bold');
+    t.setFrozenRows(1);
+  }
+  var row = t.getLastRow() + 1;
+  t.getRange(row, 1, 1, 3).setNumberFormat('@').setValues([[
+    nowIso_(), kind, (typeof detail === 'string' ? detail : JSON.stringify(detail || {})),
+  ]]);
 }
 
 // ---------------------------------------------------------------- concurrency lock

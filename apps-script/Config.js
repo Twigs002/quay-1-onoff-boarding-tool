@@ -117,6 +117,10 @@ var CFG = {
     // PRIVATE tracker (only admins/superusers can open it), so sheet sharing IS the access control.
     // Written by recordCredential_ on a live googleCreate_; upsert by quay_email (no duplicates).
     CREDENTIALS: 'Google Credentials',
+    // Operator-visible alert log: every *_failed audit event is mirrored here by logAudit_ so a silent
+    // swallowed failure (FICA file, auto-assign, HR sync, packet, provisioning) is actually SEEN. The
+    // Tuesday digest reports a count. Written lazily by _appendAlert_; headers ensured by setupHub.
+    ALERTS: 'Alerts',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',
