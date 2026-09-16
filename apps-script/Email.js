@@ -254,13 +254,25 @@ function inductionDigestHtml_(company, buckets) {
     return '<td style="padding:7px 12px 7px 0;font-size:13.5px;color:' + (strong ? B.goldInk : B.slate) + ';' +
       (strong ? 'font-weight:600;' : '') + 'border-bottom:1px solid #DCE8F6">' + htmlEsc_(v || '-') + '</td>';
   };
-  var table = function (title, rows, empty) {
-    var head = '<tr>' + th('Name') + th('Phone') + th('FFC status') + '</tr>';
+  // `withNote` adds a Status column (booked-this-week table only) that flags rows still awaiting
+  // acceptance and any induction day that clashes with a SA public holiday (induction_holiday_flag).
+  var table = function (title, rows, empty, withNote) {
+    var span = withNote ? 4 : 3;
+    var head = '<tr>' + th('Name') + th('Phone') + th('FFC status') + (withNote ? th('Status') : '') + '</tr>';
     var body = rows.length
       ? rows.map(function (r) {
-          return '<tr>' + td(r.name, true) + td(r.contact) + td(ffcStatusLabel_(r.ffc_status)) + '</tr>';
+          var note = '';
+          if (withNote) {
+            var flags = [];
+            if (!r.approved_at) flags.push('Awaiting acceptance');
+            if (r.induction_holiday_flag) flags.push('Holiday clash');
+            note = '<td style="padding:7px 12px 7px 0;font-size:13px;font-weight:600;color:' +
+              (flags.length ? B.red : B.muted) + ';border-bottom:1px solid #DCE8F6">' +
+              htmlEsc_(flags.join('; ') || 'Ready') + '</td>';
+          }
+          return '<tr>' + td(r.name, true) + td(r.contact) + td(ffcStatusLabel_(r.ffc_status)) + note + '</tr>';
         }).join('')
-      : '<tr><td colspan="3" style="padding:8px 0;font-size:13.5px;color:' + B.muted + '">' +
+      : '<tr><td colspan="' + span + '" style="padding:8px 0;font-size:13.5px;color:' + B.muted + '">' +
           htmlEsc_(empty) + '</td></tr>';
     return '<div style="margin:0 0 20px"><div style="font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:' +
       B.amber + ';margin:0 0 8px">' + htmlEsc_(title) + ' (' + rows.length + ')</div>' +
@@ -269,9 +281,9 @@ function inductionDigestHtml_(company, buckets) {
   };
   var inner =
     '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:' + B.slate + '">Induction status for the week. ' +
-      buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' booked for induction.</p>' +
-    table('Booked this week', buckets.dueThisWeek, 'No inductions booked this week.') +
-    table('Awaiting booking', buckets.unbooked, 'Everyone due is booked.');
+      buckets.dueThisWeek.length + ' candidate' + (buckets.dueThisWeek.length === 1 ? '' : 's') + ' due for induction.</p>' +
+    table('Due this week', buckets.dueThisWeek, 'No inductions due this week.', true) +
+    table('Awaiting FICA', buckets.unbooked, 'Everyone with a contract out has submitted FICA.');
   return emailShell_(company, 'Induction digest', inner);
 }
 

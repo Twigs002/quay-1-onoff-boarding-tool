@@ -195,6 +195,9 @@ function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
+    // Induction dates are now stamped at FICA-submit (pre-approval). The packet is only ever SENT at
+    // provisioning, so "resend" only applies to a provisioned hire - and never to a declined one.
+    if (!o.provisioned_at || o.declined_at) return;
     if (_inductionDayPassed_(o)) return;                // Option A: drop once the induction day has passed
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     out.push({
@@ -235,7 +238,10 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     // Keep a hire on the pipeline until fully set up AND induction is booked. Fully set up but not
     // yet booked stays visible as "Induction to be picked"; once they book, they move to the booked
     // list and drop off here. A still-pending/errored setup also keeps them (via s.incomplete).
-    var booked = !!(o.induction_wed || o.induction_thu);
+    // "Booked" = a CONFIRMED induction (dates AND provisioned). Induction dates are now stamped at
+    // FICA-submit, so keying on dates alone would mislabel a not-yet-provisioned candidate as booked.
+    // (The drop condition below already requires provisioned_at, so its behaviour is unchanged.)
+    var booked = !!((o.induction_wed || o.induction_thu) && o.provisioned_at);
     if (o.provisioned_at && !s.incomplete && booked) return;
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     var sys = safeJsonParse_(o.systems_json, null);
