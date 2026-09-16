@@ -122,19 +122,21 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
           'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
           ' is about to start, but we do not have a HubSpot login recorded for your team. Please reply with ' +
           'your team HubSpot password and who the verification code should go to, as soon as possible.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name, cc: CFG.CMA_APPROVERS.join(',') });
+          'Thanks,\nThe ' + company.name + ' Team', { name: company.name, cc: 'sheldon@quay1.co.za' });
       } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
     }
-    // Team name not found AT ALL in "HubSpot Logins" (no row to chase a password on) - this is a data
-    // mismatch, not a missing password, so it needs an ops fix rather than a team chase. Alert Sheldon
-    // + Marthinus directly since there is no team email to send to. Same ccEnabled_() gate as above.
+    // Team name not on the "HubSpot Logins" tab at all: still chase the login from the TEAM, sending to
+    // the team's own group email (<team>@quay1.co.za, from GROUPS_JSON where available) and CC'ing
+    // Sheldon. Same ccEnabled_() gate as above. Falls back to Sheldon if no team email resolves.
     if (!hub && ccEnabled_()) {
       try {
-        GmailApp.sendEmail(CFG.CMA_APPROVERS.join(','), 'HubSpot Logins: team "' + (o.team || '') + '" not found - new starter',
-          'Hi,\n\n' + (o.name || 'A new starter') + ' is joining team "' + (o.team || '(none)') +
-          '", but that team name was not found in the "HubSpot Logins" tab, so their induction packet ' +
-          'could not include a login. Please add or correct the row for this team.\n\n' +
-          'Thanks,\nThe ' + company.name + ' Team', { name: company.name });
+        var teamEmail = _teamGroupEmail_(o.team);
+        var noHubTo = isEmail_(teamEmail) ? teamEmail : 'sheldon@quay1.co.za';
+        GmailApp.sendEmail(noHubTo, 'HubSpot login needed - new ' + (o.team || '') + ' team member starting',
+          'Hi ' + (o.team || 'team') + ' team,\n\nYour new team member ' + (o.name || 'a new starter') +
+          ' is about to start, but we do not have a HubSpot login recorded for your team. Please reply with ' +
+          'your team HubSpot username, password and who the verification code should go to, as soon as possible.\n\n' +
+          'Thanks,\nThe ' + company.name + ' Team', { name: company.name, cc: 'sheldon@quay1.co.za' });
       } catch (e2) { logAudit_('hubspot_team_alert_failed', { folderId: folderId, error: String(e2) }); }
     }
   } catch (err) {
@@ -177,6 +179,20 @@ function _teamHubspotLogin_(team) {
     }
   }
   return null;
+}
+
+/** The team's own Google group email (<team>@quay1.co.za). Prefers the real group from GROUPS_JSON
+ *  (excluding the company-wide champions@ group); falls back to a normalised <team>@domain. '' when
+ *  the team is blank. Used to chase a HubSpot login from a team not on the "HubSpot Logins" tab. */
+function _teamGroupEmail_(team) {
+  try {
+    var groups = _groupsForTeam_(team) || [];
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i] && groups[i] !== CFG.COMPANY_GROUP) return groups[i];
+    }
+  } catch (e) { /* fall through to the naive derivation */ }
+  var slug = String(team || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return slug ? slug + '@' + CFG.DOMAIN : '';
 }
 
 /** Find the Google-account credential for a folderId in the private Credentials tab. Returns
