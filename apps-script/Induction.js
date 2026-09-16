@@ -137,13 +137,6 @@ function inductionLookup_(folderId) {
   };
 }
 
-/** The candidate induction-booking link. Empty string when WEBAPP_URL is not yet set (pre-deploy).
- *  Mirrors ficaLink_ exactly, but with the ?i= (induction) query in place of ?f= (FICA). */
-function inductionLink_(folderId) {
-  var base = prop_(PROP.WEBAPP_URL, false);
-  return base ? base + '?i=' + encodeURIComponent(folderId) : '';
-}
-
 /** Look up a team's HubSpot login in the 'HubSpot Logins' tab. Returns { team, username, password,
  *  code_to, recorded } (recorded = a password is on file) or null when the team is not listed.
  *  Columns: Team | Division | HubSpot Username | HubSpot Password | Code goes to (name) | ... */
@@ -395,16 +388,3 @@ function _mondayOfThisWeek_() {
   return new Date(mon.getFullYear(), mon.getMonth(), mon.getDate());
 }
 
-/**
- * The earliest induction week a candidate may book, as that week's Monday. Induction runs on the
- * Wednesday + Thursday of a week; the cut-off to join a given week is that week's Tuesday 14:00
- * (SA time - see appsscript.json). Before this week's Tuesday 14:00 the current week is still open;
- * from Tuesday 14:00 onward the current week is closed and the earliest becomes next week. This is
- * what stops a last-minute finisher joining tomorrow's induction (they roll to next week instead).
- */
-function _earliestBookableMonday_() {
-  var monday = _mondayOfThisWeek_();
-  var cutoff = new Date(monday.getTime() + (24 + 14) * 60 * 60 * 1000); // Tuesday 14:00 this week
-  var now = new Date();
-  return now.getTime() < cutoff.getTime() ? monday : _addDays_(monday, 7);
-}
