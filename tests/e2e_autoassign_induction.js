@@ -50,7 +50,7 @@ armed.getSheet('Onboarding');
 armed.ctx.upsertOnboardingRow_({ folderId: 'BB-1', entity: 'quay1', name: 'Ben Booked', email: 'ben@personal.com' });
 const rb = armed.ctx.ficaUpload_(ficaBody('BB-1'));
 const rowB = armed.ctx.readOnboardingByFolder_('BB-1');
-const expect = armed.ctx.assignInductionWeek_(armed.ctx.nowIso_());   // same clock second the upload used
+const expect = armed.ctx.assignInductionWeek_(rowB.fica_submitted_at);   // the persisted timestamp, not a fresh clock read (no cutoff-second flake)
 check(rb && rb.ok === true, `ficaUpload_ succeeds${rb && rb.ok ? '' : ' -> ' + (rb && rb.error)}`);
 check(rowB.induction_wed === expect.wed && rowB.induction_thu === expect.thu,
   `ARMED: induction Wed/Thu = auto-assigned week (${rowB.induction_wed} / ${rowB.induction_thu} vs ${expect.wed} / ${expect.thu})`);
@@ -66,6 +66,35 @@ const rowC = armed.ctx.readOnboardingByFolder_('CC-1');
 check(rc && rc.ok === true, `ficaUpload_ succeeds for Aqua${rc && rc.ok ? '' : ' -> ' + (rc && rc.error)}`);
 check(!rowC.induction_wed && !rowC.induction_thu && !rowC.fica_submitted_at,
   'Aqua: no induction week and no fica_submitted_at (induction is Quay 1 only)');
+
+// -- Candidate D: Quay 1, ARMED, ALREADY PROVISIONED. A resubmission must NOT move the assigned week. -
+console.log('D. Provisioned candidate resubmits FICA - assigned week must NOT silently move');
+armed.ctx.upsertOnboardingRow_({ folderId: 'DD-1', entity: 'quay1', name: 'Dan Done', email: 'dan@personal.com',
+  provisioned_at: '2026-01-01T00:00:00Z', induction_wed: '2026-01-07', induction_thu: '2026-01-08' });
+const rd = armed.ctx.ficaUpload_(ficaBody('DD-1'));
+const rowD = armed.ctx.readOnboardingByFolder_('DD-1');
+check(rd && rd.ok === true, `ficaUpload_ succeeds${rd && rd.ok ? '' : ' -> ' + (rd && rd.error)}`);
+check(rowD.induction_wed === '2026-01-07' && rowD.induction_thu === '2026-01-08',
+  `provisioned candidate keeps original week (${rowD.induction_wed} / ${rowD.induction_thu}, expected 2026-01-07 / 2026-01-08)`);
+
+// -- Provisioning-time safety net: empty or stale (past) induction dates re-assign to an upcoming week -
+console.log('E. _ensureInductionWeekForProvisioning_ re-assigns empty/past dates to a real upcoming week');
+const todayIso = armed.ctx._isoDate_(new Date());
+// (a) empty dates -> assign fresh
+armed.ctx.upsertOnboardingRow_({ folderId: 'EE-1', entity: 'quay1', name: 'Ed Empty', email: 'ed@personal.com' });
+const iwEmpty = armed.ctx._ensureInductionWeekForProvisioning_(armed.ctx.readOnboardingByFolder_('EE-1'));
+check(!!iwEmpty.wed && iwEmpty.wed >= todayIso, `empty dates -> upcoming week assigned (${iwEmpty.wed})`);
+check(armed.ctx.readOnboardingByFolder_('EE-1').induction_wed === iwEmpty.wed, 'empty-date re-assignment is persisted to the row');
+// (b) stale (past) dates -> re-assign, never email a past date
+armed.ctx.upsertOnboardingRow_({ folderId: 'EE-2', entity: 'quay1', name: 'Stan Stale', email: 'stan@personal.com',
+  induction_wed: '2020-01-08', induction_thu: '2020-01-09' });
+const iwStale = armed.ctx._ensureInductionWeekForProvisioning_(armed.ctx.readOnboardingByFolder_('EE-2'));
+check(iwStale.wed >= todayIso, `stale past week -> re-assigned to upcoming (${iwStale.wed}, was 2020-01-08)`);
+// (c) a valid upcoming week is left untouched
+armed.ctx.upsertOnboardingRow_({ folderId: 'EE-3', entity: 'quay1', name: 'Val Valid', email: 'val@personal.com',
+  induction_wed: '2099-01-07', induction_thu: '2099-01-08' });
+const iwValid = armed.ctx._ensureInductionWeekForProvisioning_(armed.ctx.readOnboardingByFolder_('EE-3'));
+check(iwValid.wed === '2099-01-07' && iwValid.thu === '2099-01-08', `valid upcoming week left untouched (${iwValid.wed})`);
 
 console.log();
 if (FAIL.length) {

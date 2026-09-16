@@ -180,9 +180,14 @@ function ficaUpload_(body) {
 
   // AUTO-ASSIGN the induction week from THIS submission time (Quay 1 only - Aqua has no induction).
   // Replaces the old candidate pick: the Tuesday 14:00 SAST cutoff (assignInductionWeek_) decides the
-  // week, Wed + Thu of it. A resubmission after a decline re-runs here, so a later submission can move
-  // the person to a later week. DRY_RUN logs the assignment and writes nothing. Non-fatal.
-  if (!isAqua) {
+  // week, Wed + Thu of it. A resubmission after a decline re-runs here (declined candidates are never
+  // provisioned), so a later submission can move the person to a later week. But once a candidate is
+  // PROVISIONED their packet (with the assigned dates) has already gone out, so we must NOT silently
+  // move their week on a later resubmission - skip re-assignment in that case. DRY_RUN logs and writes
+  // nothing. Non-fatal.
+  if (!isAqua && meta.provisioned_at) {
+    logAudit_('induction_autoassign_skipped_provisioned', { folderId: folderId, induction_wed: meta.induction_wed || '' });
+  } else if (!isAqua) {
     try {
       var submittedAt = nowIso_();
       var wk = assignInductionWeek_(submittedAt);
