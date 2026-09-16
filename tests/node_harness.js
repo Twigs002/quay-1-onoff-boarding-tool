@@ -216,9 +216,8 @@ function main() {
       "onboarding adds broker to their team group (Wombats -> wombats@quay1.co.za)");
     check(gc && gc.email === 'jane@quay1.co.za',
       'account email is firstname@quay1.co.za (fallback firstname.lastname@ on clash)');
-    check(gc && gc.tempPw && gc.tempPw.length >= 12 && gc.tempPw !== 'GJane@002' &&
-          /[A-Z]/.test(gc.tempPw) && /[a-z]/.test(gc.tempPw) && /[0-9]/.test(gc.tempPw),
-      'temp password is random + strong, not derived from the name (security fix)');
+    check(gc && gc.tempPw === 'GJane@002',
+      'temp password is the standard G<FirstName>@002 (GJane@002), changed at first login');
   } else {
     blocked('DRY_RUN suppression (googleCreate_/propdataCreate_)', 'Provisioning.* not defined (stub)');
   }

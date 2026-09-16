@@ -820,30 +820,29 @@ function _pushGroup_(arr, email) {
   arr.push(email);
 }
 
-/** A random, per-user temporary password that meets Google's complexity rules (mixed case + digit +
- *  symbol, 14 chars). Not derived from any personal detail, so it cannot be guessed from a name.
- *  changePasswordAtNextLogin forces the broker to set their own on first sign-in. */
-function _randomTempPw_() {
-  var upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ', lower = 'abcdefghijkmnpqrstuvwxyz';
-  var digit = '23456789', sym = '!@#$%*?';
-  var all = upper + lower + digit + sym;
-  var pick = function (set) { return set.charAt(Math.floor(Math.random() * set.length)); };
-  var out = pick(upper) + pick(lower) + pick(digit) + pick(sym);  // guarantee one of each class
-  for (var i = 0; i < 10; i++) out += pick(all);
-  return out.split('').sort(function () { return Math.random() - 0.5; }).join('');
+/** The standard Quay 1 first-login password: G + the person's first name + @002 (e.g. GNicole@002).
+ *  Accents are stripped so it stays ASCII (Shané -> GShane@002). Predictable ON PURPOSE - the account
+ *  is created with changePasswordAtNextLogin, so the broker must set their own on first sign-in. Meets
+ *  Google's complexity rules (upper G + lower name + digits + the @ symbol). */
+function _fixedTempPw_(person) {
+  var first = String((person && person.first_name) || 'User')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // strip accents: Shané -> Shane
+    .replace(/[^A-Za-z0-9]/g, '');
+  if (!first) first = 'User';
+  return 'G' + first + '@002';
 }
 
 /**
  * Create the Google Workspace user. DRY_RUN (default): log + return the payload it WOULD send.
  * Live: Users.insert first@quay1.co.za (fallback first.surname@ on 409), then Members.insert
- * per group. Random per-user temp password (see _randomTempPw_), changePasswordAtNextLogin.
+ * per group. Standard G<FirstName>@002 temp password (see _fixedTempPw_), changePasswordAtNextLogin.
  */
 function googleCreate_(person) {
   var first = String(person.first_name || 'user').toLowerCase().replace(/[^a-z0-9]/g, '');
   var last = String(person.last_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   var primary = first + '@' + CFG.DOMAIN;
   var fallback = (first + (last ? '.' + last : '')) + '@' + CFG.DOMAIN;
-  var tempPw = _randomTempPw_();  // random per user; handed over via the private Credentials tab, never guessable
+  var tempPw = _fixedTempPw_(person);  // standard G<FirstName>@002; changed at first login (see _fixedTempPw_)
   var groups = _groupsForTeam_(person.team);
 
   if (DRY_RUN_()) {
