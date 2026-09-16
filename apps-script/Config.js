@@ -32,6 +32,10 @@ var PROP = {
   TRACKER_SHEET_ID: 'TRACKER_SHEET_ID',
   // This deployment's own /exec url (used to build the candidate FICA + induction links).
   WEBAPP_URL: 'WEBAPP_URL',
+  // Shared calendars for onboarding events (auto-created + stored on first use, see Calendar.js):
+  // CAL_INDUCTIONS = induction Day 1/Day 2 events; CAL_TEAM_DATES = birthdays + work anniversaries.
+  CAL_INDUCTIONS_ID: 'CAL_INDUCTIONS_ID',
+  CAL_TEAM_DATES_ID: 'CAL_TEAM_DATES_ID',
   // External-system secrets.
   HUBSPOT_TOKEN: 'HUBSPOT_TOKEN',
   PROPDATA_API_KEY: 'PROPDATA_API_KEY',

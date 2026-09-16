@@ -304,6 +304,9 @@ function provisionReadyBatch_() {
         // before the Wed 08:00 batch, so a same-week inductee provisioned here would otherwise never get
         // a Flow handoff; the sweep remains an idempotent backstop (flow_setup_at guards double-sends).
         _sendFlowSetup_(o.folderId, o);
+        // Calendar events (induction days + birthday + anniversary). Idempotent + non-fatal.
+        try { createOnboardingCalendarEvents_(o.folderId, o); }
+        catch (ce) { logAudit_('calendar_events_failed', { folderId: o.folderId, error: String(ce) }); }
       }
       // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for
       // that week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to induction week.
@@ -402,6 +405,9 @@ function approveAndProvision_(folderId, ctx) {
       var iw = _ensureInductionWeekForProvisioning_(o);
       _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
       _sendFlowSetup_(folderId, o);   // hand off to Diego at provisioning; Tuesday sweep is the backstop
+      // Calendar events (induction days + birthday + anniversary). Idempotent + non-fatal.
+      try { createOnboardingCalendarEvents_(folderId, o); }
+      catch (ce) { logAudit_('calendar_events_failed', { folderId: folderId, error: String(ce) }); }
     }
     // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for that
     // week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to their induction week.

@@ -81,8 +81,11 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
     deletedTriggers: [],
     emailsDrafted: [],  // Gmail/Mail draft creations
     emailsSent: [],     // real sends — must stay empty (never-auto-send)
+    calendarEvents: [], // calendar events/series created (Phase 2)
+    calendarsCreated: [],
     logs: [],
   };
+  let _calSeq = 0;
   const sheets = {};
   const getSheet = (n) => (sheets[n] = sheets[n] || makeSheet(n));
   const scriptProps = Object.assign({}, props);
@@ -189,6 +192,26 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
       sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); },
     },
     MailApp: { sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); } },
+    // Calendar (Phase 2). getCalendarById returns null so the lazy create-and-remember path runs; the
+    // created calendar records every createEvent / createAllDayEventSeries into calls.calendarEvents.
+    CalendarApp: {
+      getCalendarById: () => null,
+      newRecurrence: () => ({ addYearlyRule() { return this; }, addDailyRule() { return this; }, addWeeklyRule() { return this; } }),
+      createCalendar: (name) => {
+        calls.calendarsCreated.push(name);
+        return {
+          getId: () => 'cal_' + name,
+          createEvent: (title, s, e, opts) => {
+            calls.calendarEvents.push({ cal: name, kind: 'event', title, guests: opts && opts.guests, location: opts && opts.location });
+            return { getId: () => 'evt_' + (++_calSeq) };
+          },
+          createAllDayEventSeries: (title, d, rec) => {
+            calls.calendarEvents.push({ cal: name, kind: 'series', title });
+            return { getId: () => 'ser_' + (++_calSeq) };
+          },
+        };
+      },
+    },
     // Minimal HtmlService so page builders (ficaForm_, inductionPageHtml_) can be rendered in tests:
     // createHtmlOutput returns a chainable stub whose getContent() yields the built HTML string.
     HtmlService: {
