@@ -148,8 +148,21 @@ function readQueue_(tabName) {
 }
 
 /**
+ * A non-admin broker "owns" a candidate row if they either SUBMITTED it (requester_email) OR are the
+ * referring/hiring senior broker (senior_email). The referral case - a recruiter/admin captures the
+ * candidate on the senior broker's behalf - otherwise left the senior with email CCs but an empty app.
+ * Induction/contract/decline emails already CC the senior, so surfacing their own candidates in the
+ * dashboard exposes nothing they do not already receive.
+ */
+function _ownsRow_(o, email) {
+  if (!email) return false;
+  return String(o.requester_email || '').toLowerCase() === email ||
+         String(o.senior_email || '').toLowerCase() === email;
+}
+
+/**
  * Status-screen snapshot: provisioning rows + offboarding rows. Brokers (not super/admin) are
- * scoped to their own candidates by matching the Onboarding row's requester_email.
+ * scoped to their own candidates - the ones they submitted OR referred as senior broker (_ownsRow_).
  */
 function readForUi_(ctx) {
   var pq = readQueue_(CFG.TAB.PROVISION_QUEUE);
@@ -164,7 +177,7 @@ function readForUi_(ctx) {
     // pipeline - the pipeline excludes already-provisioned rows, but their queue rows must still show.
     var mine = {};
     listOnboarding_().forEach(function (o) {
-      if (String(o.requester_email).toLowerCase() === email) mine[o.folderId] = true;
+      if (_ownsRow_(o, email)) mine[o.folderId] = true;
     });
     pq = pq.filter(function (r) { return mine[r.folderId]; });
     oq = []; // offboarding is admin-only visibility
@@ -199,7 +212,7 @@ function _bookedForResend_(isAdmin, email) {
     // provisioning, so "resend" only applies to a provisioned hire - and never to a declined one.
     if (!o.provisioned_at || o.declined_at) return;
     if (_inductionDayPassed_(o)) return;                // Option A: drop once the induction day has passed
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    if (!isAdmin && email && !_ownsRow_(o, email)) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
       induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '', status: o.status || '',
@@ -243,7 +256,7 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     // (The drop condition below already requires provisioned_at, so its behaviour is unchanged.)
     var booked = !!((o.induction_wed || o.induction_thu) && o.provisioned_at);
     if (o.provisioned_at && !s.incomplete && booked) return;
-    if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
+    if (!isAdmin && email && !_ownsRow_(o, email)) return;
     var sys = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(sys)) {
       sys = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
