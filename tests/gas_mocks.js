@@ -189,6 +189,18 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
       sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); },
     },
     MailApp: { sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); } },
+    // Minimal HtmlService so page builders (ficaForm_, inductionPageHtml_) can be rendered in tests:
+    // createHtmlOutput returns a chainable stub whose getContent() yields the built HTML string.
+    HtmlService: {
+      createHtmlOutput: (html) => {
+        const o = { getContent: () => String(html == null ? '' : html) };
+        o.setTitle = () => o; o.addMetaTag = () => o; o.setXFrameOptionsMode = () => o;
+        o.setWidth = () => o; o.setHeight = () => o; o.setFaviconUrl = () => o; o.setSandboxMode = () => o;
+        return o;
+      },
+      XFrameOptionsMode: { ALLOWALL: 'ALLOWALL', DEFAULT: 'DEFAULT' },
+      SandboxMode: { IFRAME: 'IFRAME' },
+    },
     DriveApp: {
       getFileById: () => ({ makeCopy: () => ({ getId: () => 'COPY', getUrl: () => 'url' }), setName: () => {} }),
       // A folder that supports the whole shape FICA upload needs: create files, create/find
