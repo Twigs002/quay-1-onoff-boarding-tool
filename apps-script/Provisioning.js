@@ -471,11 +471,12 @@ function _sendFlowSetup_(folderId, o) {
     var parts = full.split(/\s+/);
     var first = parts.shift() || '';
     var surname = parts.join(' ');
+    var cred = _credentialFor_(folderId);   // the created Quay 1 Google account - use its quay email
     var info = {
       name: first || full,
       surname: surname,
       team: o.team || '',
-      email: o.email || '',
+      email: (cred && cred.email) || '',    // Quay 1 email only, never the personal address
       phone: o.contact || '',
       id_number: o.id_number || '',
       tax_number: o.tax_number || '',
