@@ -1,18 +1,17 @@
 /**
- * Induction.js - Quay 1 induction booking, the per-candidate progress report, and the Tuesday
+ * Induction.js - Quay 1 induction assignment, the per-candidate progress report, and the Tuesday
  * digest. Quay 1 only (Aqua has no induction step).
  *
  * Owner: backend. induction_wed / induction_thu columns live on the Onboarding row (Tracker.js).
  *
- * bookInduction_ is TOKEN-LESS (candidate-facing, folderId-gated) per the router dispatch table
- * and the live Quay1 induction.html flow (RESEARCH 1.1). It does not require an admin role; the
- * unguessable folderId is the credential.
+ * Induction is AUTO-ASSIGNED from the FICA submission time (assignInductionWeek_, Tuesday 14:00 SAST
+ * cutoff), wired in Fica.ficaUpload_. Candidates no longer pick a week: bookInduction_ now rejects,
+ * and inductionPageHtml_ (doGet ?i=, token-less, folderId-gated) is a read-only status page.
  *
  * Public surface:
- *   bookInduction_(body)         - {ok, wed, thu}   set induction dates + email the packet.
- *   inductionLookup_(folderId)   - {ok, firstName, booked, induction}   doGet ?i= support.
- *   inductionLink_(folderId)     - String   the candidate booking link (WEBAPP_URL ?i=folderId).
- *   inductionPageHtml_(folderId) - String   the candidate booking page (branded by entity).
+ *   assignInductionWeek_(iso)    - {monday, wed, thu}   PURE cutoff function (single source of truth).
+ *   bookInduction_(body)         - {ok:false, error}    rejected: induction is auto-assigned now.
+ *   inductionPageHtml_(folderId) - String   read-only candidate induction status page (branded).
  *   progressReport_(folderId)    - {ok, html}   per-candidate onboarding progress summary.
  *   tuesdayDigest_()             - void   TIME-TRIGGER target. Auto-send permitted (scoped).
  *
@@ -20,32 +19,15 @@
  * never WhatsApp) per SPEC section 4 - surfaced by whoever composes that packet, not here.
  */
 
-/** Book the induction week. body = { folderId, weekMonday:'YYYY-MM-DD' }. Token-less. */
+/** Rejected: induction is auto-assigned from the FICA submission time now, not picked. Token-less. */
 function bookInduction_(body) {
+  // Induction is now assigned automatically from when the candidate submits FICA (Tuesday 14:00 SAST
+  // cutoff - see assignInductionWeek_). Candidates no longer pick a week: new emails never link here
+  // and the induction page is read-only. A stale/replayed link might still POST, so we reject it
+  // gracefully rather than let it override the auto-assigned week.
   var folderId = String((body && body.folderId) || '');
-  if (!folderId) return { ok: false, error: 'missing reference' };
-  var meta = readOnboardingByFolder_(folderId);
-  if (!meta) return { ok: false, error: 'not_found' };
-
-  var monday = _asDate_(body && body.weekMonday);
-  if (!monday) return { ok: false, error: 'a valid weekMonday (YYYY-MM-DD) is required' };
-
-  // Enforce the Tuesday 14:00 cut-off server-side (the page hides closed weeks, but the folderId is
-  // the only credential, so a stale/replayed week must be rejected here too). Compare by date only.
-  var earliest = _earliestBookableMonday_();
-  var pickedMon = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate());
-  if (pickedMon.getTime() < earliest.getTime()) {
-    return { ok: false, error: 'That induction week has closed. Please pick one of the available weeks.' };
-  }
-
-  var wed = _isoDate_(_addDays_(monday, 2));
-  var thu = _isoDate_(_addDays_(monday, 3));
-  setInduction_(folderId, wed, thu);
-
-  // Send the induction packet (dates + logins) to the candidate. Never throws - dates are saved above.
-  _sendInductionPacket_(folderId, meta, wed, thu);
-
-  return { ok: true, wed: wed, thu: thu };
+  logAudit_('book_induction_rejected_autoassign', { folderId: folderId });
+  return { ok: false, error: 'Induction is now assigned automatically from when you submit your FICA (before 14:00 on a Tuesday to join that week). There is nothing to book here - your induction dates are emailed to you once your FICA is received.' };
 }
 
 /**
@@ -60,7 +42,7 @@ function resendInductionPacket_(folderId, ctx) {
   if (!meta) return { ok: false, error: 'not_found' };
   var wed = String(meta.induction_wed || '').trim();
   var thu = String(meta.induction_thu || '').trim();
-  if (!wed && !thu) return { ok: false, error: 'No induction week is booked yet - the candidate must pick a week before the packet can be resent.' };
+  if (!wed && !thu) return { ok: false, error: 'No induction week is assigned yet - it is set automatically when the candidate submits FICA, so the packet can be resent once that has happened.' };
   if (!isEmail_(meta.email)) return { ok: false, error: 'No candidate email on file for this row.' };
   _sendInductionPacket_(folderId, meta, wed, thu);
   logAudit_('induction_packet_resent', { folderId: folderId, by: (ctx && ctx.email) || 'admin' });
@@ -153,13 +135,6 @@ function inductionLookup_(folderId) {
     ok: true, firstName: firstName_(meta.name), booked: booked,
     induction: { wed: meta.induction_wed || '', thu: meta.induction_thu || '' },
   };
-}
-
-/** The candidate induction-booking link. Empty string when WEBAPP_URL is not yet set (pre-deploy).
- *  Mirrors ficaLink_ exactly, but with the ?i= (induction) query in place of ?f= (FICA). */
-function inductionLink_(folderId) {
-  var base = prop_(PROP.WEBAPP_URL, false);
-  return base ? base + '?i=' + encodeURIComponent(folderId) : '';
 }
 
 /** Look up a team's HubSpot login in the 'HubSpot Logins' tab. Returns { team, username, password,
@@ -269,72 +244,37 @@ function tuesdayDigest_() {
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
 }
 
-/**
- * Tuesday noon nudge (TIME-TRIGGER target, installed by setupTriggers at ~12:00). Emails each Quay 1
- * candidate who has been INVITED (provisioned) but has NOT yet booked an induction week, telling them
- * to pick one before the 1:45 PM cutoff or roll to next week. The senior broker is CC'd when CC is on.
- * Auto-send is permitted for this scoped onboarding pipeline (same class as the induction invite).
- * Quay 1 only - Aqua has no induction step. Fully guarded: a bad row or mail failure is logged and
- * skipped, never breaking the run.
- */
-function tuesdayInductionNudge_() {
-  var company = CFG.COMPANY.quay1;
-  var sent = 0;
-  listOnboarding_(function (o) {
-    return (o.entity || 'quay1') === 'quay1' && !_isMigratedLegacy_(o) &&
-      o.provisioned_at && !o.induction_wed && !o.induction_thu && isEmail_(o.email);
-  }).forEach(function (o) {
-    try {
-      var link = inductionLink_(o.folderId);
-      var first = firstName_(o.name);
-      GmailApp.sendEmail(o.email,
-        'Action needed: book your ' + company.name + ' induction today' + (first ? ' - ' + first : ''),
-        'Hi ' + first + ',\n\nYou have not picked your induction week yet. Please book it here: ' + link +
-        '\n\nBOOK BY 1:45 PM TODAY or you will have to join induction the following week.\n\n' +
-        'Warm regards,\nThe ' + company.name + ' Team',
-        { name: company.name, htmlBody: inductionNudgeHtml_(company, first, link),
-          cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
-      sent++;
-    } catch (e) { logAudit_('induction_nudge_failed', { folderId: o.folderId, error: String(e) }); }
-  });
-  logAudit_('induction_nudge_run', { sent: sent });
-}
+// tuesdayInductionNudge_ (the Tuesday-noon "book before 1:45" nudge) was removed when induction became
+// auto-assigned from the FICA submission time. There is nothing for a candidate to book, so there is
+// nothing to nudge. Its trigger is no longer installed (see setupTriggers) and inductionNudgeHtml_ was
+// removed with it (see Email.js).
 
-// ---------------------------------------------------------------- candidate booking page
+// ---------------------------------------------------------------- candidate induction page (read-only)
 
-/** Serve the branded candidate induction-booking page (doGet ?i=<folderId>). Token-less: the
- *  unguessable folderId is the credential. Mirrors the FICA page's structure + POST pattern.
- *  Offers a pick-your-week control (the next ~4 upcoming Mondays); induction runs Wed + Thu. */
+/** Serve the branded candidate induction page (doGet ?i=<folderId>). Token-less: the unguessable
+ *  folderId is the credential. READ-ONLY since induction became auto-assigned - it shows the assigned
+ *  Wed/Thu (or the auto-assign rule if none is set yet). No picker, no POST. */
 function inductionPageHtml_(folderId) {
   var meta = readOnboardingByFolder_(folderId);
   var known = !!meta;
   var company = CFG.COMPANY[(meta && meta.entity)] || CFG.COMPANY.quay1;
   var companyName = htmlEsc_(company.name);
   var first = known ? htmlEsc_(firstName_(meta.name)) : '';
-  var endpoint = optProp_(PROP.WEBAPP_URL);
   var B = CFG.BRAND;
 
+  // Read-only: induction is assigned automatically from the FICA submission time (Tuesday 14:00 SAST
+  // cutoff - see assignInductionWeek_). This page no longer offers a picker; it just shows the status.
   var booked = known && !!(meta.induction_wed || meta.induction_thu);
-  var bookedMsg = booked ?
-    '<div class="note info show">You are currently booked for induction on ' +
-      htmlEsc_(fmtDate_(meta.induction_wed)) +
-      (meta.induction_thu ? ' and ' + htmlEsc_(fmtDate_(meta.induction_thu)) : '') +
-      '. You can pick a different week below if you need to change it.</div>' : '';
+  var statusBlock = booked
+    ? '<div class="note ok show">You are booked for induction on ' +
+        htmlEsc_(fmtDate_(meta.induction_wed)) +
+        (meta.induction_thu ? ' and ' + htmlEsc_(fmtDate_(meta.induction_thu)) : '') +
+        '. We look forward to seeing you there.</div>'
+    : '<div class="note info show">Your induction week is assigned automatically once we receive your FICA. Submit your FICA before 14:00 on a Tuesday to join that week - FICA received after 14:00 on a Tuesday joins the following week. Your dates will be emailed to you as soon as they are set.</div>';
 
   var badLink = known ? '' :
     '<div class="note err show">This link is not recognised. Please use the personal link from your ' +
     companyName + ' email, or reply to that email for help.</div>';
-
-  // Next ~4 bookable Mondays. The first is the current week until this week's Tuesday 14:00, then
-  // next week once that cut-off passes (_earliestBookableMonday_). Each option shows its Wed + Thu.
-  var options = '';
-  var start = _earliestBookableMonday_();
-  for (var i = 0; i < 4; i++) {
-    var m = _addDays_(start, i * 7);
-    var iso = _isoDate_(m);
-    var lbl = 'Wed ' + fmtDate_(_isoDate_(_addDays_(m, 2))) + ' and Thu ' + fmtDate_(_isoDate_(_addDays_(m, 3)));
-    options += '<option value="' + iso + '">' + htmlEsc_(lbl) + '</option>';
-  }
 
   var html =
 '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
@@ -368,34 +308,11 @@ function inductionPageHtml_(folderId) {
 '@media (min-width:900px){.wrap{max-width:680px}}' +
 '</style></head><body><div class="wrap">' +
 '<div class="hero"><h1>' + companyName + '</h1>' +
-'<p>' + (first ? ('Hi ' + first + '. ') : '') + 'Please book your induction week below. Induction runs on the Wednesday and Thursday of the week you choose.</p></div>' +
-badLink + bookedMsg +
-'<form id="indForm" novalidate>' +
-'<div class="card"><p class="sec">Choose your induction week</p>' +
-'<div class="row"><label for="week">Induction week</label>' +
-'<select id="week" required>' + options + '</select>' +
-'<p class="hint">Your induction takes place on the Wednesday and Thursday of the week you select.</p></div></div>' +
-'<button type="submit" class="btn" id="submitBtn">Confirm my induction booking</button>' +
-'<div id="note" class="note"></div></form>' +
+'<p>' + (first ? ('Hi ' + first + '. ') : '') + 'Here is your induction information. Induction runs on the Wednesday and Thursday of your assigned week.</p></div>' +
+badLink +
+'<div class="card"><p class="sec">Your induction</p>' + statusBlock + '</div>' +
 '<p class="foot">' + companyName + ' - we look forward to welcoming you.</p>' +
-'</div><script>' +
-'var ENDPOINT=' + jsInScript_(endpoint) + ';var FOLDER_ID=' + jsInScript_(folderId) + ';' +
-'var KNOWN=' + (known ? 'true' : 'false') + ';' +
-'var form=document.getElementById("indForm"),note=document.getElementById("note"),btn=document.getElementById("submitBtn");' +
-'if(!KNOWN&&btn){btn.disabled=true;}' +
-'function showNote(c,m){note.className="note show "+c;note.textContent=m;}' +
-'form.addEventListener("submit",function(e){e.preventDefault();if(!KNOWN)return;' +
-'if(!form.checkValidity()){form.reportValidity();return;}' +
-'var week=document.getElementById("week").value;' +
-'btn.disabled=true;showNote("info","Booking your induction, please hold on...");' +
-'fetch(ENDPOINT,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},' +
-'body:JSON.stringify({kind:"book_induction",folderId:FOLDER_ID,weekMonday:week})})' +
-'.then(function(r){return r.json();}).then(function(d){' +
-'if(d&&d.ok){form.style.display="none";showNote("ok","Thank you! Your induction is booked. Check your email for the details.");}' +
-'else{showNote("err","Something went wrong: "+((d&&d.error)||"unknown")+".");btn.disabled=false;}})' +
-'.catch(function(err){showNote("err","Booking failed: "+err+".");btn.disabled=false;});' +
-'});' +
-'<\/script></body></html>';
+'</div></body></html>';
 
   return HtmlService.createHtmlOutput(html)
     .setTitle('Quay 1 Induction')
@@ -413,6 +330,56 @@ function _isoDate_(d) {
   return d.getFullYear() + '-' + mm + '-' + dd;
 }
 
+/**
+ * ASSIGN the induction week from a FICA submission timestamp. Pure + deterministic. Every comparison
+ * is in the project timezone (Africa/Johannesburg / SAST) because Apps Script Date getters use the
+ * project timezone - never UTC. The single source of truth for the cutoff rule.
+ *
+ * Cutoff = Tuesday 14:00 SAST:
+ *   - Submitted BEFORE Tuesday 14:00:00 of a week -> that week's induction.
+ *   - Submitted AT 14:00:00 or later on Tuesday, or on Wed..Mon -> the next upcoming Tuesday 14:00
+ *     decides, so they land in the week of that Tuesday.
+ * Induction runs Wednesday (day 1) + Thursday (day 2) = that week's Monday + 2 and Monday + 3.
+ *
+ * @param {string} submittedAtIso ISO timestamp of the FICA submission (a UTC 'Z' ISO is fine - the SAST
+ *                                project timezone is applied by the Date getters). Blank/invalid -> now.
+ * @return {{monday:string, wed:string, thu:string}} SAST ISO dates (YYYY-MM-DD).
+ */
+function assignInductionWeek_(submittedAtIso) {
+  var d = submittedAtIso ? new Date(submittedAtIso) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+  var day = d.getDay();                               // 0 Sun .. 6 Sat, in the SAST project timezone
+  var diffToMon = (day === 0 ? -6 : 1 - day);
+  var monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMon);   // SAST 00:00 Monday
+  var cutoff = new Date(monday.getTime() + (24 + 14) * 60 * 60 * 1000);            // Tuesday 14:00 SAST
+  var assigned = d.getTime() < cutoff.getTime() ? monday : _addDays_(monday, 7);
+  return {
+    monday: _isoDate_(assigned),
+    wed: _isoDate_(_addDays_(assigned, 2)),
+    thu: _isoDate_(_addDays_(assigned, 3)),
+  };
+}
+
+/** True if an ISO date (YYYY-MM-DD) is a SA public holiday listed in CFG.SA_PUBLIC_HOLIDAYS. */
+function _isSaPublicHoliday_(iso) {
+  return (CFG.SA_PUBLIC_HOLIDAYS || []).indexOf(String(iso || '').slice(0, 10)) >= 0;
+}
+
+/** Public-holiday flag for an assigned induction week. '' when neither day clashes. Otherwise a human
+ *  note naming the clash - and it flags a date whose YEAR is not in the holiday table, so an un-updated
+ *  year is never silently treated as holiday-free. We FLAG, never move (an admin decides). */
+function _inductionHolidayFlag_(wed, thu) {
+  var years = (CFG.SA_PUBLIC_HOLIDAYS || []).map(function (h) { return h.slice(0, 4); });
+  var hits = [];
+  [['Wed', wed], ['Thu', thu]].forEach(function (p) {
+    var iso = String(p[1] || '').slice(0, 10);
+    if (!iso) return;
+    if (_isSaPublicHoliday_(iso)) hits.push(p[0] + ' ' + iso + ' is a SA public holiday');
+    else if (years.indexOf(iso.slice(0, 4)) < 0) hits.push(p[0] + ' ' + iso + ' year not in holiday table - verify manually');
+  });
+  return hits.join('; ');
+}
+
 function _mondayOfThisWeek_() {
   var now = new Date();
   var day = now.getDay(); // 0 Sun .. 6 Sat
@@ -421,16 +388,3 @@ function _mondayOfThisWeek_() {
   return new Date(mon.getFullYear(), mon.getMonth(), mon.getDate());
 }
 
-/**
- * The earliest induction week a candidate may book, as that week's Monday. Induction runs on the
- * Wednesday + Thursday of a week; the cut-off to join a given week is that week's Tuesday 14:00
- * (SA time - see appsscript.json). Before this week's Tuesday 14:00 the current week is still open;
- * from Tuesday 14:00 onward the current week is closed and the earliest becomes next week. This is
- * what stops a last-minute finisher joining tomorrow's induction (they roll to next week instead).
- */
-function _earliestBookableMonday_() {
-  var monday = _mondayOfThisWeek_();
-  var cutoff = new Date(monday.getTime() + (24 + 14) * 60 * 60 * 1000); // Tuesday 14:00 this week
-  var now = new Date();
-  return now.getTime() < cutoff.getTime() ? monday : _addDays_(monday, 7);
-}

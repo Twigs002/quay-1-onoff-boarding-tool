@@ -198,6 +198,16 @@ var CFG = {
   // Recipients of the Tuesday induction digest specifically. Kept separate from INTERNAL_NOTIFY (which
   // also drives offboarding alerts) so the digest audience can differ - Lieze is off the digest.
   DIGEST_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
+  // SA public holidays, used ONLY to FLAG (never move) an induction day that lands on one. Extend
+  // yearly - _inductionHolidayFlag_ warns if an induction date's year is not covered here so a missing
+  // year is never silently treated as holiday-free. Includes Good Friday / Family Day (Easter) and the
+  // Monday observed when a fixed holiday falls on a Sunday.
+  SA_PUBLIC_HOLIDAYS: [
+    '2026-01-01', '2026-03-21', '2026-04-03', '2026-04-06', '2026-04-27', '2026-05-01', '2026-06-16',
+    '2026-08-09', '2026-08-10', '2026-09-24', '2026-12-16', '2026-12-25', '2026-12-26',
+    '2027-01-01', '2027-03-21', '2027-03-22', '2027-03-26', '2027-03-29', '2027-04-27', '2027-05-01',
+    '2027-06-16', '2027-08-09', '2027-09-24', '2027-12-16', '2027-12-25', '2027-12-26', '2027-12-27',
+  ],
   SYSTEM_PROVISION_TO: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
   // CMA access costs money, so it is not auto-created. When an admin ACCEPTS a CMA-entitled candidate
   // on the Admin Check tab, an approval-request email auto-sends to these approvers (see _maybeRequestCma_).

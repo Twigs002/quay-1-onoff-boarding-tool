@@ -293,10 +293,11 @@ function provisionReadyBatch_() {
       // Promote into HR's entity "active" tab on acceptance (same single promotion point as the
       // interactive accept path; append-once, idempotent, HR_SYNC/DRY_RUN-safe).
       try { hrPromote_(o.folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: o.folderId, error: String(e) }); }
-      // Quay 1: induction invite. Aqua: Google-only welcome pack (no induction step). Same one-time
-      // sends as the interactive accept path.
+      // Quay 1: the induction week is already auto-assigned (at FICA submission), so send the induction
+      // PACKET directly with the assigned dates + logins - no "pick your week" step. Aqua: Google-only
+      // welcome pack (no induction). Same one-time sends as the interactive accept path.
       if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
-      else _sendInductionInvite_(o.folderId, o);
+      else _sendInductionPacket_(o.folderId, o, o.induction_wed, o.induction_thu);
       // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for
       // that week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to induction week.
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
@@ -386,10 +387,11 @@ function approveAndProvision_(folderId, ctx) {
     // idempotent). This is the ONLY place HR promotion happens - NOT at FICA upload - so a declined or
     // never-hired candidate never lands in HR's active tab. Non-fatal + HR_SYNC/DRY_RUN-safe.
     try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
-    // Real accounts exist now. Quay 1 candidates pick an induction week; Aqua has no induction, so an
-    // Aqua contractor instead gets the Google-only welcome pack. Both CC the senior when CC is on.
+    // Real accounts exist now. Quay 1: the induction week was already auto-assigned at FICA submission,
+    // so send the induction PACKET directly (assigned dates + logins), no "pick your week" step. Aqua
+    // has no induction, so an Aqua contractor gets the Google-only welcome pack. CC the senior when on.
     if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
-    else _sendInductionInvite_(folderId, o);
+    else _sendInductionPacket_(folderId, o, o.induction_wed, o.induction_thu);
     // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for that
     // week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to their induction week.
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
@@ -399,26 +401,10 @@ function approveAndProvision_(folderId, ctx) {
 }
 
 /**
- * Candidate "pick your induction week" invite. Sent ONCE, the moment a row first reaches the
- * provisioned state - from BOTH transition points (the interactive approveAndProvision_ and the
- * scheduled provisionReadyBatch_), each guarded by the provisioned_at check so there is no double
- * send. Fully guarded: a missing email or a mail failure logs and returns without breaking
- * provisioning. CC of the senior broker is suppressed while CC is off; the candidate send is
- * unconditional so the candidate always gets it.
+ * _sendInductionInvite_ (the candidate "pick your induction week" invite) was removed when induction
+ * became auto-assigned from the FICA submission time. Provisioning now sends the induction packet
+ * (assigned Wed/Thu + logins) directly via _sendInductionPacket_ at both transition points.
  */
-function _sendInductionInvite_(folderId, o) {
-  try {
-    if (!isEmail_(o && o.email)) { logAudit_('induction_invite_skipped_no_email', { folderId: folderId }); return; }
-    var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
-    var link = inductionLink_(folderId);
-    if (!link) logAudit_('induction_invite_no_link', { folderId: folderId });   // WEBAPP_URL unset -> dead link
-    GmailApp.sendEmail(o.email, 'Pick your ' + company.name + ' induction week' + (o.name ? ' - ' + o.name : ''),
-      'Hi ' + firstName_(o.name) + ',\n\nWelcome aboard. Please pick your ' + company.name +
-      ' induction week here: ' + link + '\n\nWarm regards,\nThe ' + company.name + ' Team',
-      { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
-        cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
-  } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
-}
 
 /**
  * Aqua Promotions welcome pack. Aqua has NO induction step, so instead of the "pick your induction

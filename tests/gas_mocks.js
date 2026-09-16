@@ -191,7 +191,17 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
     MailApp: { sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); } },
     DriveApp: {
       getFileById: () => ({ makeCopy: () => ({ getId: () => 'COPY', getUrl: () => 'url' }), setName: () => {} }),
-      getFolderById: () => ({ createFolder: () => ({ getId: () => 'F', getUrl: () => 'url' }) }),
+      // A folder that supports the whole shape FICA upload needs: create files, create/find
+      // the "FICA documents" subfolder (self-referencing so subfolders are full folders too).
+      getFolderById: () => {
+        const mk = () => ({
+          getId: () => 'F', getUrl: () => 'url',
+          createFile: () => ({ getId: () => 'FILE', getUrl: () => 'url' }),
+          createFolder: () => mk(),
+          getFoldersByName: () => ({ hasNext: () => false, next: () => mk() }),
+        });
+        return mk();
+      },
     },
   };
 
