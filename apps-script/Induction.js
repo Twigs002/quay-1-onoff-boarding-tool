@@ -62,7 +62,10 @@ function _ensureInductionWeekForProvisioning_(o) {
   var wed = String(o.induction_wed || '').trim();
   var thu = String(o.induction_thu || '').trim();
   var today = _isoDate_(new Date());
-  var stale = !!(wed && wed < today);            // assigned Wed already in the past (YYYY-MM-DD compares lexically)
+  // Stale only once BOTH induction days have passed - compare the LATER day (thu, falling back to wed).
+  // Provisioning on the induction Wednesday or Thursday must keep this week, not bump to the next.
+  var lastDay = thu || wed;
+  var stale = !!(lastDay && lastDay < today);    // YYYY-MM-DD compares lexically
   if (wed && thu && !stale) return { wed: wed, thu: thu };
   var wk = assignInductionWeek_(nowIso_());
   try {
@@ -72,8 +75,13 @@ function _ensureInductionWeekForProvisioning_(o) {
     }
     logAudit_(stale ? 'induction_reassigned_stale' : 'induction_assigned_at_provision',
       { folderId: o.folderId, was_wed: wed || '', wed: wk.wed, thu: wk.thu, dry: DRY_RUN_() });
-  } catch (e) { logAudit_('induction_provision_assign_failed', { folderId: o.folderId, error: String(e) }); }
-  return { wed: wk.wed, thu: wk.thu };
+    return { wed: wk.wed, thu: wk.thu };
+  } catch (e) {
+    // Persist failed: return whatever is actually on the row so the packet never cites a week the
+    // tracker/digest/flow have no record of. Blank dates fall through to the packet's defensive line.
+    logAudit_('induction_provision_assign_failed', { folderId: o.folderId, error: String(e) });
+    return { wed: wed, thu: thu };
+  }
 }
 
 /**
@@ -250,10 +258,11 @@ function tuesdayDigest_() {
   var buckets = { dueThisWeek: [], unbooked: [] };
   listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
-    // Due this week = a REAL upcoming inductee: assigned this week, accepted (approved_at), not declined.
-    // induction_wed is now stamped at FICA-submit (pre-approval), so without the approved/not-declined
-    // gate this would count speculative candidates who may never be hired or who were declined.
-    if (wed && wed >= weekStart && wed <= weekEnd && o.approved_at && !o.declined_at) buckets.dueThisWeek.push(o);
+    // Due this week = anyone assigned this week who has not dropped out (not declined). We deliberately
+    // do NOT require approved_at here: an imminent-but-not-yet-accepted candidate is EXACTLY who the
+    // digest must surface so an admin approves them before Wed/Thu. Their acceptance status is shown as
+    // a per-row note ("Awaiting acceptance") rather than hiding them. Holiday clashes are flagged too.
+    if (wed && wed >= weekStart && wed <= weekEnd && !o.declined_at) buckets.dueThisWeek.push(o);
     // Awaiting = anyone who has been SENT their contract (contract_emailed_at stamped) but has not yet
     // submitted FICA (so no induction week assigned). Scoping to contract-sent keeps out non-starters;
     // excluding declined keeps out rows that have dropped out.
@@ -261,11 +270,14 @@ function tuesdayDigest_() {
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.DIGEST_NOTIFY.filter(function (x) { return x; }).join(',');
+  var awaitingAccept = buckets.dueThisWeek.filter(function (o) { return !o.approved_at; }).length;
+  var holidayClashes = buckets.dueThisWeek.filter(function (o) { return o.induction_holiday_flag; }).length;
   var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
-    ' booked, ' + buckets.unbooked.length + ' awaiting)';
-  GmailApp.sendEmail(to, subject,
-    'Induction status. Booked this week: ' + buckets.dueThisWeek.length +
-    '. Awaiting booking: ' + buckets.unbooked.length + '.',
+    ' due, ' + buckets.unbooked.length + ' awaiting FICA)';
+  var body = 'Induction status. Due this week: ' + buckets.dueThisWeek.length +
+    ' (' + awaitingAccept + ' still awaiting acceptance). Awaiting FICA: ' + buckets.unbooked.length + '.' +
+    (holidayClashes ? '\n\nATTENTION: ' + holidayClashes + ' induction day this week clashes with a SA public holiday - see the Status column.' : '');
+  GmailApp.sendEmail(to, subject, body,
     { name: company.name, htmlBody: inductionDigestHtml_(company, buckets) });
 }
 

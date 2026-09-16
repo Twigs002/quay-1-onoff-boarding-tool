@@ -95,6 +95,13 @@ armed.ctx.upsertOnboardingRow_({ folderId: 'EE-3', entity: 'quay1', name: 'Val V
   induction_wed: '2099-01-07', induction_thu: '2099-01-08' });
 const iwValid = armed.ctx._ensureInductionWeekForProvisioning_(armed.ctx.readOnboardingByFolder_('EE-3'));
 check(iwValid.wed === '2099-01-07' && iwValid.thu === '2099-01-08', `valid upcoming week left untouched (${iwValid.wed})`);
+// (d) provisioned on induction DAY 2: wed=yesterday, thu=today. Staleness uses the LATER day (thu), so
+// this must NOT be treated as stale - a Thursday-day acceptance keeps their in-progress week.
+const yday = armed.ctx._isoDate_(armed.ctx._addDays_(new Date(), -1));
+armed.ctx.upsertOnboardingRow_({ folderId: 'EE-4', entity: 'quay1', name: 'Thora Thursday', email: 'thora@personal.com',
+  induction_wed: yday, induction_thu: todayIso });
+const iwThu = armed.ctx._ensureInductionWeekForProvisioning_(armed.ctx.readOnboardingByFolder_('EE-4'));
+check(iwThu.wed === yday && iwThu.thu === todayIso, `wed=yesterday but thu=today is NOT stale, week kept (${iwThu.wed} / ${iwThu.thu})`);
 
 console.log();
 if (FAIL.length) {

@@ -297,7 +297,14 @@ function provisionReadyBatch_() {
       // PACKET directly with the assigned dates + logins - no "pick your week" step. Aqua: Google-only
       // welcome pack (no induction). Same one-time sends as the interactive accept path.
       if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
-      else { var iw = _ensureInductionWeekForProvisioning_(o); _sendInductionPacket_(o.folderId, o, iw.wed, iw.thu); }
+      else {
+        var iw = _ensureInductionWeekForProvisioning_(o);
+        _sendInductionPacket_(o.folderId, o, iw.wed, iw.thu);
+        // Hand off to Diego NOW that accounts exist and the week is known. The Tuesday sweep only runs
+        // before the Wed 08:00 batch, so a same-week inductee provisioned here would otherwise never get
+        // a Flow handoff; the sweep remains an idempotent backstop (flow_setup_at guards double-sends).
+        _sendFlowSetup_(o.folderId, o);
+      }
       // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for
       // that week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to induction week.
       _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
@@ -391,7 +398,11 @@ function approveAndProvision_(folderId, ctx) {
     // so send the induction PACKET directly (assigned dates + logins), no "pick your week" step. Aqua
     // has no induction, so an Aqua contractor gets the Google-only welcome pack. CC the senior when on.
     if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
-    else { var iw = _ensureInductionWeekForProvisioning_(o); _sendInductionPacket_(folderId, o, iw.wed, iw.thu); }
+    else {
+      var iw = _ensureInductionWeekForProvisioning_(o);
+      _sendInductionPacket_(folderId, o, iw.wed, iw.thu);
+      _sendFlowSetup_(folderId, o);   // hand off to Diego at provisioning; Tuesday sweep is the backstop
+    }
     // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for that
     // week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to their induction week.
     return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };

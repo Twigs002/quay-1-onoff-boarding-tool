@@ -167,7 +167,10 @@ function ficaUpload_(body) {
     photo_file_id: photoFileId,
   });
 
-  setOnboardingStatus_(folderId, 'FICA received');
+  // Do NOT downgrade an already-provisioned hire back to 'FICA received' when they re-upload a corrected
+  // document - they are already set up, and flipping the status would make a completed hire look un-set-up
+  // in the pipeline/awaiting views. New / not-yet-provisioned candidates still return to awaiting-acceptance.
+  if (!meta.provisioned_at) setOnboardingStatus_(folderId, 'FICA received');
 
   // A successful (re)submission returns the row to a clean awaiting-acceptance state, clearing any
   // prior per-document decline record. On a first submission these cells are already empty, so this
