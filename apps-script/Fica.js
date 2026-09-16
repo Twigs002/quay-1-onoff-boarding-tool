@@ -20,6 +20,15 @@
  *  stored as files but tick no column, matching the live Quay1 mapping (RESEARCH 1.5). */
 var FICA_LABEL_KEY = { ID: 'id', POA: 'poa', BANK: 'bank', POB: 'bank', CONTRACT: 'contract' };
 
+/** Candidate-friendly name for an internal upload label, used only in error messages the candidate
+ *  sees (never show them raw codes like "POA" or "BANK"). */
+var FICA_LABEL_FRIENDLY = {
+  ID: 'your ID document', POA: 'your proof of address', BANK: 'your bank confirmation',
+  POB: 'your bank confirmation', CONTRACT: 'your signed agreement', PERMIT: 'your work permit',
+  PHOTO: 'your photo',
+};
+function _ficaFriendly_(label) { return FICA_LABEL_FRIENDLY[String(label || '').toUpperCase()] || 'your document'; }
+
 /** Server-side upload guards for the token-less FICA path (RESEARCH audit MEDIUM). The folderId
  *  is the only credential, so validate every file at the boundary before writing to Drive: accept
  *  PDFs + common phone-camera images only, cap each decoded file, and cap the count per request. */
@@ -99,14 +108,14 @@ function ficaUpload_(body) {
     var mime = String(fl.mimeType || 'application/octet-stream').toLowerCase();
     var mimeOk = !!FICA_MIME_ALLOW[mime] || mime === 'application/octet-stream' || mime === '';
     if (!FICA_EXT_ALLOW[ext] || !mimeOk) {
-      return { ok: false, error: 'unsupported file type for ' + label +
+      return { ok: false, error: 'unsupported file type for ' + _ficaFriendly_(label) +
         ' - please upload a PDF or a photo (JPG, PNG or HEIC).' };
     }
     var bytes;
     try { bytes = Utilities.base64Decode(fl.dataBase64); }
-    catch (err) { return { ok: false, error: 'could not read the ' + label + ' file - please re-upload it.' }; }
+    catch (err) { return { ok: false, error: 'could not read ' + _ficaFriendly_(label) + ' - please re-upload it.' }; }
     if (bytes.length > FICA_MAX_BYTES) {
-      return { ok: false, error: label + ' is too large (max ' +
+      return { ok: false, error: _ficaFriendly_(label) + ' is too large (max ' +
         Math.round(FICA_MAX_BYTES / (1024 * 1024)) + ' MB) - please upload a smaller file.' };
     }
     prepared.push({ label: label, ext: ext, mime: mime, bytes: bytes });
@@ -188,13 +197,16 @@ function ficaUpload_(body) {
   // PROVISIONED their packet (with the assigned dates) has already gone out, so we must NOT silently
   // move their week on a later resubmission - skip re-assignment in that case. DRY_RUN logs and writes
   // nothing. Non-fatal.
+  var assignedWeek = null;   // {wed, thu} for the confirmation email below (Quay 1 only)
   if (!isAqua && meta.provisioned_at) {
     logAudit_('induction_autoassign_skipped_provisioned', { folderId: folderId, induction_wed: meta.induction_wed || '' });
+    if (meta.induction_wed) assignedWeek = { wed: meta.induction_wed, thu: meta.induction_thu };
   } else if (!isAqua) {
     try {
       var submittedAt = nowIso_();
       var wk = assignInductionWeek_(submittedAt);
       var holidayFlag = _inductionHolidayFlag_(wk.wed, wk.thu);
+      assignedWeek = { wed: wk.wed, thu: wk.thu };
       if (DRY_RUN_()) {
         logAudit_('induction_autoassign_dryrun', { folderId: folderId, submitted_at: submittedAt, wed: wk.wed, thu: wk.thu, holiday: holidayFlag || 'none' });
       } else {
@@ -220,15 +232,19 @@ function ficaUpload_(body) {
     // Gated by ccEnabled_ like every other internal copy (matches the decline / induction senior CC).
     var seniorCc = (ccEnabled_() && (meta.entity || 'quay1') !== 'aqua' && isEmail_(meta.senior_email))
       ? meta.senior_email : undefined;
+    var weekLine = (assignedWeek && assignedWeek.wed)
+      ? ' Your induction is set for ' + fmtDate_(assignedWeek.wed) +
+        (assignedWeek.thu ? ' and ' + fmtDate_(assignedWeek.thu) : '') +
+        '; we will confirm the finer details once your documents are approved.'
+      : ' Please look out for another email shortly confirming your induction day.';
     try {
       GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,
         'Hi ' + firstName_(name) + ',\n\nThank you for submitting your documents to ' +
-        company.name + '. Our admin team is now checking them. Please look out for another ' +
-        'email shortly confirming your induction day.\n\n' +
+        company.name + '. Our admin team is now checking them.' + weekLine + '\n\n' +
         'Warm regards,\nThe ' + company.name + ' Team', {
           bcc: ccEnabled_() ? CFG.ALWAYS_CC.filter(function (x) { return x; }).join(',') : undefined,
           cc: seniorCc,
-          name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name)),
+          name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name), assignedWeek),
         });
     } catch (err) { logAudit_('fica_thankyou_failed', { folderId: folderId, error: String(err) }); }
   }
@@ -378,7 +394,8 @@ correctionBanner +
 '<input type="text" id="id_number" inputmode="text" autocomplete="off" required>' +
 '<p class="hint">South African ID: 13 digits. Passport: letters and numbers only, no spaces.</p></div>' +
 '<div class="filewrap"><label for="f_id">Certified copy of your ID or passport <span class="req">*</span></label>' +
-'<input type="file" id="f_id" accept="image/*,application/pdf"' + reqId + '></div>' +
+'<input type="file" id="f_id" accept="image/*,application/pdf"' + reqId + '>' +
+'<p class="hint">A certified copy is one stamped by a police station or commissioner of oaths (usually free). Your ID goes straight into your private, access-controlled ' + companyName + ' file, used only for FICA / POPIA compliance and never shared.</p></div>' +
 // Work permit block - revealed only when the ID entered is not a 13-digit South African ID.
 '<div id="permitBlock" style="display:none">' +
 '<div class="row" style="margin-top:14px"><label for="work_permit_expiry">Work permit expiry date <span class="req">*</span></label>' +
@@ -409,7 +426,8 @@ correctionBanner +
 '<option value="Cheque">Cheque</option><option value="Savings">Savings</option>' +
 '<option value="Transmission">Transmission</option><option value="Other">Other</option></select></div>' +
 '<div class="filewrap"><label for="f_bank">Bank confirmation letter or statement <span class="req">*</span></label>' +
-'<input type="file" id="f_bank" accept="image/*,application/pdf"' + reqBank + '></div></div>' +
+'<input type="file" id="f_bank" accept="image/*,application/pdf"' + reqBank + '>' +
+'<p class="hint">Your banking details are stored in your private, access-controlled ' + companyName + ' file and used only to set up your commission payments, never shared.</p></div></div>' +
 '<div class="card"><p class="sec">6 - Tax</p>' +
 '<div class="row"><label for="tax_number">Income tax number <span class="req">*</span></label>' +
 '<input type="text" id="tax_number" inputmode="numeric" autocomplete="off" required>' +
