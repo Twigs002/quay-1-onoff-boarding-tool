@@ -107,6 +107,10 @@ var ONB_COL = {
   // Flow set-up handoff to Diego (appended, no shift). Idempotency marker: stamped when the Flow Set
   // Up email is sent for this starter by the Tuesday induction-week sweep, so no one is ever sent twice.
   flow_setup_at: 62,
+  // Auto-assign induction (appended, no shift). fica_submitted_at = the FICA submission timestamp that
+  // drives assignInductionWeek_ (re-stamped on a resubmission). induction_holiday_flag = a note when an
+  // assigned induction day lands on a SA public holiday (flag, never move - an admin decides).
+  fica_submitted_at: 63, induction_holiday_flag: 64,
 };
 
 var ONB_HEADERS = [
@@ -124,7 +128,7 @@ var ONB_HEADERS = [
   'HR tracking at', 'HR promoted at', 'Photo file id', 'Dialfire requested at',
   'Contract emailed at', 'FICA follow-up at',
   'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
-  'Welcome email sent at', 'Flow set-up at',
+  'Welcome email sent at', 'Flow set-up at', 'FICA submitted at', 'Induction holiday flag',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

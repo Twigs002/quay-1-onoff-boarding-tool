@@ -51,7 +51,8 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' || fn === 'flowSetupInductionWeek_' ||
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' /* obsolete: removed below */ ||
+        fn === 'flowSetupInductionWeek_' ||
         fn === 'reapOffboarding_' ||
         fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
         fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
@@ -63,11 +64,9 @@ function setupTriggers() {
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(14).create();
-  // Noon nudge to candidates who have not yet booked induction: pick one before the 1:45 PM cutoff or
-  // roll to next week (senior CC'd when CC is on). atHour(12) fires within the 12:00-13:00 window
-  // (Apps Script granularity), so it lands before the 1:45 deadline. See tuesdayInductionNudge_.
-  ScriptApp.newTrigger('tuesdayInductionNudge_').timeBased()
-    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(12).create();
+  // Induction is now auto-assigned from the FICA submission time (Tuesday 14:00 SAST cutoff), so the
+  // old noon "book before 1:45 or roll to next week" nudge is obsolete and is NOT installed. The guard
+  // above still deletes any tuesdayInductionNudge_ trigger left over from a previous setup.
   // Flow Set Up handoff to Diego at ~15:00 for everyone inducting THIS week, so he can set up their
   // Flow before the Wed/Thu induction. Idempotent (flow_setup_at), Quay 1 only. See flowSetupInductionWeek_.
   ScriptApp.newTrigger('flowSetupInductionWeek_').timeBased()
@@ -86,8 +85,8 @@ function setupTriggers() {
   // ~08:00 (Africa/Johannesburg per appsscript.json timeZone). See workPermitExpirySweep_ in Hr.js.
   ScriptApp.newTrigger('workPermitExpirySweep_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
-  return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), Tuesday induction nudge ' +
-    '(~12:00), Tuesday Flow Set Up to Diego (~15:00), offboarding reaper (every 15 min), provisioning ' +
+  return 'Triggers installed: Tuesday induction digest (~07:00 and ~14:00), Tuesday Flow Set Up to ' +
+    'Diego (~15:00), offboarding reaper (every 15 min), provisioning ' +
     'batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), work-permit expiry alert (Monday ~08:00).';
 }
 

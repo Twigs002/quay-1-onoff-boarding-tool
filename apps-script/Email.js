@@ -47,10 +47,19 @@ function agreementEmailHtml_(company, first, ficaUrl) {
         '</td></tr></table>' +
       '</td></tr></table>'
     : '';
+  // Quay 1 only (Aqua contractors have no induction): a warm, unmissable Tuesday 14:00 notice near the
+  // top. Table + inline styles so it renders in Gmail desktop and mobile. No em or en dashes in copy.
+  var inductionNotice = (company === CFG.COMPANY.quay1)
+    ? '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#FFF3D6;border:2px solid ' + B.gold + ';border-radius:12px"><tr><td style="padding:18px 20px;text-align:center">' +
+        '<div style="font-size:19px;line-height:1.3;font-weight:800;color:' + B.goldInk + '">Please submit your FICA before 14:00 on a Tuesday</div>' +
+        '<div style="font-size:15px;line-height:1.55;font-weight:600;color:' + B.slate + ';margin-top:8px">to join that week\'s induction. FICA received after 14:00 on a Tuesday will be booked into the following week\'s induction. We would love to have you in as soon as possible.</div>' +
+      '</td></tr></table>'
+    : '';
   var inner =
     '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
     '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Welcome to ' + htmlEsc_(company.name) +
       '. Your ' + htmlEsc_(company.kicker) + ' is attached to this email.</p>' +
+    inductionNotice +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#FFF6D6;border:1px solid #F0DFA0;border-radius:10px"><tr>' +
       '<td width="46" valign="middle" style="padding:12px 0 12px 14px"><div style="width:26px;height:26px;border-radius:7px;background:' + B.gold + ';color:' + B.goldInk + ';text-align:center;line-height:26px;font-size:14px">&#128206;</div></td>' +
       '<td valign="middle" style="padding:12px 15px 12px 6px;font-size:13.5px;color:' + B.goldInk + ';font-weight:600">' + htmlEsc_(company.kicker) + ' (PDF attached)</td>' +
@@ -188,28 +197,9 @@ function dialfireRequestHtml_(company, name, team) {
   return accountRequestHtml_(company, 'Dialfire account request', 'Dialfire', name, team, '', '');
 }
 
-/** Tuesday noon nudge to a candidate who was invited but has NOT yet picked an induction week. Leads
- *  with an unmissable deadline: book by 1:45 PM today or roll to next week. `bookUrl` is their booking
- *  link (empty pre-deploy). Auto-send permitted for this scoped onboarding pipeline (like the invite). */
-function inductionNudgeHtml_(company, first, bookUrl) {
-  var B = CFG.BRAND;
-  var bookBtn = bookUrl
-    ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
-        '<a href="' + htmlEsc_(bookUrl) + '" style="display:inline-block;padding:14px 26px;font-size:15px;font-weight:800;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Pick my induction week</a>' +
-      '</td></tr></table>'
-    : '';
-  var inner =
-    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
-    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">You have not picked your induction week yet. Please choose it now so we can confirm your start.</p>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#FDECEC;border:2px solid ' + B.red + ';border-radius:12px"><tr><td style="padding:20px;text-align:center">' +
-      '<div style="font-size:24px;line-height:1.2;font-weight:800;color:' + B.red + '">Book by 1:45 PM today</div>' +
-      '<div style="font-size:15px;font-weight:600;color:' + B.slate + ';margin-top:8px">or you will have to join induction the following week.</div>' +
-    '</td></tr></table>' +
-    bookBtn +
-    '<p style="margin:18px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
-    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
-  return emailShell_(company, 'Book your induction', inner);
-}
+// inductionNudgeHtml_ (the "book by 1:45 PM today" nudge email) was removed when induction became
+// auto-assigned from the FICA submission time - there is no week for the candidate to pick, so there
+// is nothing to nudge. See the FICA welcome email (agreementEmailHtml_) for the Tuesday 14:00 notice.
 
 /** "Flow Set Up" handoff email. Sent to CFG.FLOW_SETUP_TO the moment a new starter is provisioned,
  *  so Diego can set up their Flow. Lists the starter's personal details plus their PropData account
@@ -341,28 +331,9 @@ function workPermitAlertHtml_(company, items) {
   return emailShell_(company, 'Work permit expiry', inner);
 }
 
-/** Documents-approved congrats + call to action to pick an induction week (gold button). */
-function inductionInviteHtml_(company, first, bookUrl) {
-  var B = CFG.BRAND;
-  var bookBtn = bookUrl
-    ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 2px"><tr><td style="border-radius:9px;background:' + B.gold + '">' +
-        '<a href="' + htmlEsc_(bookUrl) + '" style="display:inline-block;padding:12px 22px;font-size:14.5px;font-weight:700;color:' + B.goldInk + ';text-decoration:none;border-radius:9px">Pick my induction week</a>' +
-      '</td></tr></table>'
-    : '';
-  var inner =
-    '<p style="margin:0 0 12px;font-size:17px;font-weight:700;color:' + B.goldInk + '">Hi ' + htmlEsc_(first) + ',</p>' +
-    '<p style="margin:0 0 18px;font-size:15px;line-height:1.62;color:' + B.slate + '">Great news, your documents have been approved. Everything is in order and you are all set to join ' +
-      htmlEsc_(company.name) + '.</p>' +
-    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#FFF6D6;border:1px solid #F0DFA0;border-radius:10px"><tr>' +
-      '<td width="46" valign="middle" style="padding:12px 0 12px 14px"><div style="width:26px;height:26px;border-radius:7px;background:' + B.gold + ';color:' + B.goldInk + ';text-align:center;line-height:26px;font-size:15px">&#10003;</div></td>' +
-      '<td valign="middle" style="padding:12px 15px 12px 6px;font-size:13.5px;color:' + B.goldInk + ';font-weight:600">Your documents are approved</td>' +
-    '</tr></table>' +
-    '<p style="margin:0 0 16px;font-size:15px;line-height:1.62;color:' + B.slate + '">The last step is to choose the induction week that suits you best. Tap the button below to pick your week and we will take it from there.</p>' +
-    bookBtn +
-    '<p style="margin:22px 0 0;font-size:15px;color:' + B.goldInk + '">Warm regards,</p>' +
-    '<p style="margin:2px 0 4px;font-size:15px;font-weight:700;color:' + B.navyDark + '">The ' + htmlEsc_(company.name) + ' Team</p>';
-  return emailShell_(company, 'Documents approved', inner);
-}
+// inductionInviteHtml_ (the "documents approved - pick my induction week" email) was removed when
+// induction became auto-assigned from the FICA submission time. Provisioning now sends the induction
+// packet (assigned dates + logins) directly via _sendInductionPacket_ instead of an invite to pick.
 
 /** Aqua Promotions welcome pack: same welcome-pack format as Quay 1 but Google-only. Shows the
  *  contractor's Google Workspace email + temporary password and how to switch on 2FA. Deliberately

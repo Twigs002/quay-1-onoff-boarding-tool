@@ -178,6 +178,26 @@ function ficaUpload_(body) {
     setOnboardingCell_(folderId, ONB_COL.declined_by, '');
   } catch (err) { logAudit_('fica_decline_clear_failed', { folderId: folderId, error: String(err) }); }
 
+  // AUTO-ASSIGN the induction week from THIS submission time (Quay 1 only - Aqua has no induction).
+  // Replaces the old candidate pick: the Tuesday 14:00 SAST cutoff (assignInductionWeek_) decides the
+  // week, Wed + Thu of it. A resubmission after a decline re-runs here, so a later submission can move
+  // the person to a later week. DRY_RUN logs the assignment and writes nothing. Non-fatal.
+  if (!isAqua) {
+    try {
+      var submittedAt = nowIso_();
+      var wk = assignInductionWeek_(submittedAt);
+      var holidayFlag = _inductionHolidayFlag_(wk.wed, wk.thu);
+      if (DRY_RUN_()) {
+        logAudit_('induction_autoassign_dryrun', { folderId: folderId, submitted_at: submittedAt, wed: wk.wed, thu: wk.thu, holiday: holidayFlag || 'none' });
+      } else {
+        setOnboardingCell_(folderId, ONB_COL.fica_submitted_at, submittedAt);
+        setInduction_(folderId, wk.wed, wk.thu);
+        setOnboardingCell_(folderId, ONB_COL.induction_holiday_flag, holidayFlag);
+        logAudit_('induction_autoassigned', { folderId: folderId, submitted_at: submittedAt, wed: wk.wed, thu: wk.thu, holiday: holidayFlag || 'none' });
+      }
+    } catch (err) { logAudit_('induction_autoassign_failed', { folderId: folderId, error: String(err) }); }
+  }
+
   // Mirror to HR: refresh the STAGING tracking row so HR can watch the starter fill in. Promotion into
   // HR's entity "active" tab is deliberately NOT done here - it happens only once an admin ACCEPTS the
   // starter (approveAndProvision_ / provisionReadyBatch_), so a declined or never-hired candidate never
