@@ -51,7 +51,7 @@ function setupHub() {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' /* obsolete: removed below */ ||
+    if (fn === 'tuesdayDigest_' || fn === 'tuesdayInductionNudge_' /* keep: reaps any leftover nudge trigger; not re-installed below */ ||
         fn === 'flowSetupInductionWeek_' ||
         fn === 'reapOffboarding_' ||
         fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||

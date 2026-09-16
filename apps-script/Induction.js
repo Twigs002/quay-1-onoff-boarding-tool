@@ -50,9 +50,38 @@ function resendInductionPacket_(folderId, ctx) {
 }
 
 /**
+ * The induction week to use when the packet is sent at provisioning. Induction is normally assigned at
+ * FICA submit, but the packet only goes out later (on acceptance/provisioning). If the row has NO week
+ * (auto-assign was skipped, failed and was swallowed, or is a pre-feature/legacy row) or the assigned
+ * week has ALREADY PASSED (acceptance lagged past the induction date), re-assign from now so the packet,
+ * the tracker and the digest all reflect a real, upcoming week instead of blank or past dates. Persists
+ * the (re)assignment + holiday flag. Quay 1 only; DRY_RUN writes nothing. Returns { wed, thu }.
+ */
+function _ensureInductionWeekForProvisioning_(o) {
+  o = o || {};
+  var wed = String(o.induction_wed || '').trim();
+  var thu = String(o.induction_thu || '').trim();
+  var today = _isoDate_(new Date());
+  var stale = !!(wed && wed < today);            // assigned Wed already in the past (YYYY-MM-DD compares lexically)
+  if (wed && thu && !stale) return { wed: wed, thu: thu };
+  var wk = assignInductionWeek_(nowIso_());
+  try {
+    if (!DRY_RUN_()) {
+      setInduction_(o.folderId, wk.wed, wk.thu);
+      setOnboardingCell_(o.folderId, ONB_COL.induction_holiday_flag, _inductionHolidayFlag_(wk.wed, wk.thu));
+    }
+    logAudit_(stale ? 'induction_reassigned_stale' : 'induction_assigned_at_provision',
+      { folderId: o.folderId, was_wed: wed || '', wed: wk.wed, thu: wk.thu, dry: DRY_RUN_() });
+  } catch (e) { logAudit_('induction_provision_assign_failed', { folderId: o.folderId, error: String(e) }); }
+  return { wed: wk.wed, thu: wk.thu };
+}
+
+/**
  * Build + send the induction packet (booked dates + Google/HubSpot logins) to the candidate, CC the
- * senior broker, and alert the team when no HubSpot login is on record. Shared by bookInduction_ (first
- * send) and resendInductionPacket_. Wrapped so a send failure never propagates to the caller.
+ * senior broker, and alert the team when no HubSpot login is on record. Called at provisioning (via
+ * _ensureInductionWeekForProvisioning_, which guarantees real upcoming dates) and by
+ * resendInductionPacket_ (which refuses when no week is set). Wrapped so a send failure never
+ * propagates to the caller.
  */
 function _sendInductionPacket_(folderId, o, wed, thu) {
   o = o || {};
@@ -79,8 +108,11 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
       var linksText = '\n\nUseful links:\nQuay 1 Shared Drive: https://drive.google.com/drive/folders/' +
         '0B8WThNzNuhU_LUVBb3BwMzFvN3M?resourcekey=0-RyLU_9UCYYV8yz2PUTLLkg&usp=sharing' +
         '\nFlow (Broker App): https://flow.quay1.co.za/';
-      var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name +
-        ' induction is booked for ' + fmtDate_(wed) + ' and ' + fmtDate_(thu) + '.' +
+      // Defensive: callers guarantee real dates, but never emit "booked for  and ." if they are blank.
+      var bookedLine = (wed || thu)
+        ? ' induction is booked for ' + fmtDate_(wed) + ' and ' + fmtDate_(thu) + '.'
+        : ' induction week will be confirmed with you shortly.';
+      var plain = 'Hi ' + firstName_(o.name) + ',\n\nYour ' + company.name + bookedLine +
         loginText + hubText + propdataText + linksText + '\n\nWarm regards,\nThe ' + company.name + ' Team';
       GmailApp.sendEmail(o.email,
         'Your ' + company.name + ' Induction Packet' + (o.name ? ' - ' + o.name : ''),
@@ -124,17 +156,6 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
   } catch (err) {
     logAudit_('induction_packet_failed', { folderId: folderId, error: String(err) });
   }
-}
-
-/** Candidate-page lookup for the induction booking status (doGet ?i=<folderId>). */
-function inductionLookup_(folderId) {
-  var meta = readOnboardingByFolder_(folderId);
-  if (!meta) return { ok: false, error: 'not_found' };
-  var booked = !!(meta.induction_wed || meta.induction_thu);
-  return {
-    ok: true, firstName: firstName_(meta.name), booked: booked,
-    induction: { wed: meta.induction_wed || '', thu: meta.induction_thu || '' },
-  };
 }
 
 /** Look up a team's HubSpot login in the 'HubSpot Logins' tab. Returns { team, username, password,
@@ -229,10 +250,14 @@ function tuesdayDigest_() {
   var buckets = { dueThisWeek: [], unbooked: [] };
   listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
-    if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
+    // Due this week = a REAL upcoming inductee: assigned this week, accepted (approved_at), not declined.
+    // induction_wed is now stamped at FICA-submit (pre-approval), so without the approved/not-declined
+    // gate this would count speculative candidates who may never be hired or who were declined.
+    if (wed && wed >= weekStart && wed <= weekEnd && o.approved_at && !o.declined_at) buckets.dueThisWeek.push(o);
     // Awaiting = anyone who has been SENT their contract (contract_emailed_at stamped) but has not yet
-    // booked an induction week. Scoping to contract-sent keeps out rows that are not yet live starters.
-    else if (!o.induction_wed && !o.induction_thu && o.contract_emailed_at) buckets.unbooked.push(o);
+    // submitted FICA (so no induction week assigned). Scoping to contract-sent keeps out non-starters;
+    // excluding declined keeps out rows that have dropped out.
+    else if (!o.induction_wed && !o.induction_thu && o.contract_emailed_at && !o.declined_at) buckets.unbooked.push(o);
   });
   var company = CFG.COMPANY.quay1;
   var to = CFG.DIGEST_NOTIFY.filter(function (x) { return x; }).join(',');
@@ -291,20 +316,13 @@ function inductionPageHtml_(folderId) {
 '.hero p{margin:0;font-size:14.5px;color:#D9E4F5}' +
 '.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px}' +
 '.sec{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--navy);margin:0 0 12px}' +
-'label{display:block;font-size:13px;font-weight:600;color:var(--slate);margin:0 0 5px}' +
-'select,input[type=week]{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--card2);' +
-'border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;outline:none}' +
-'select:focus,input:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(61,91,166,.22);background:#fff}' +
-'.hint{font-size:12px;color:var(--muted);margin-top:5px}' +
-'.btn{width:100%;font-family:inherit;font-size:15px;font-weight:700;color:var(--gold-ink);background:var(--gold);' +
-'border:0;border-radius:var(--r-sm);padding:14px 18px;cursor:pointer}.btn:disabled{opacity:.6;cursor:not-allowed}' +
 '.note{margin-top:14px;font-size:14px;padding:12px 14px;border-radius:var(--r-sm);display:none}' +
 '.note.show{display:block}.note.ok{background:var(--green-t);color:var(--green);border:1px solid var(--green-b)}' +
 '.note.err{background:var(--red-t);color:var(--red);border:1px solid #F5C6C0}' +
 '.note.info{background:var(--amber-t);color:var(--amber);border:1px solid #F5E3B3}' +
 '.foot{text-align:center;font-size:12px;color:var(--muted);margin-top:24px}' +
 '@media (max-width:520px){.wrap{padding:16px 12px 44px}.hero{padding:20px 17px}.hero h1{font-size:18px}' +
-'.card{padding:16px 15px}.btn{padding:15px 18px}select,input[type=week]{font-size:16px}}' +
+'.card{padding:16px 15px}}' +
 '@media (min-width:900px){.wrap{max-width:680px}}' +
 '</style></head><body><div class="wrap">' +
 '<div class="hero"><h1>' + companyName + '</h1>' +
