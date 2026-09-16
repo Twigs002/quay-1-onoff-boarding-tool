@@ -19,6 +19,22 @@
 // Keep in sync with the induction packet "Where" card (Email.js inductionPacketHtml_).
 var INDUCTION_ADDRESS = 'Ground Floor, 200 On Main, 200 Main Rd, Claremont';
 
+/**
+ * ONE-TIME setup: authorize the Calendar scope AND create the two shared onboarding calendars.
+ * Run this once in the editor after deploying the calendar feature - it is the FIRST call that touches
+ * CalendarApp, so it triggers the Calendar consent screen; approve it, and it pre-creates + remembers
+ * "Quay 1 Inductions" and "Quay 1 Team Dates" (idempotent). No trailing underscore so it shows in the
+ * Apps Script Run picker alongside setupHub / setupTriggers. Share the two calendars with your team.
+ */
+function setupCalendars() {
+  var ind = _onbCalendar_(PROP.CAL_INDUCTIONS_ID, 'Quay 1 Inductions');
+  var team = _onbCalendar_(PROP.CAL_TEAM_DATES_ID, 'Quay 1 Team Dates');
+  var msg = 'Calendars ready. "Quay 1 Inductions" = ' + ind.getId() + ' ; "Quay 1 Team Dates" = ' + team.getId() +
+    '. Now share both with whoever should see them.';
+  Logger.log(msg);
+  return msg;
+}
+
 /** Get (or lazily create + remember by Script Property) a shared onboarding calendar. */
 function _onbCalendar_(propKey, name) {
   var id = optProp_(propKey);
