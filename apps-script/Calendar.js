@@ -91,9 +91,13 @@ function rescheduleInductionCalendar_(folderId, o) {
 /**
  * Create the four onboarding calendar events for a Quay 1 starter, idempotently.
  * Returns { created:[keys], skipped:[keys], failed:[keys] }. Non-fatal + DRY_RUN-safe.
+ * opts.teamDatesOnly: create ONLY the birthday + work-anniversary (Team Dates) events, never the
+ *   induction Day 1/Day 2. Used by the backfill (backfillTeamDates) so an already-provisioned starter
+ *   whose induction is in the past does not get induction invites re-sent for a past event.
  */
-function createOnboardingCalendarEvents_(folderId, o) {
+function createOnboardingCalendarEvents_(folderId, o, opts) {
   o = o || {};
+  opts = opts || {};
   var result = { created: [], skipped: [], failed: [] };
   if ((o.entity || 'quay1') === 'aqua') return result;   // Quay 1 only (Aqua has no induction)
 
@@ -143,6 +147,8 @@ function createOnboardingCalendarEvents_(folderId, o) {
       } },
   ];
 
+  if (opts.teamDatesOnly) tasks = tasks.filter(function (t) { return t.key === 'birthday' || t.key === 'anniversary'; });
+
   tasks.forEach(function (t) {
     if (have[t.key]) { result.skipped.push(t.key); return; }   // already created - idempotent
     try {
@@ -167,4 +173,37 @@ function createOnboardingCalendarEvents_(folderId, o) {
     skipped: result.skipped.join(',') || 'none', failed: result.failed.join(',') || 'none',
   });
   return result;
+}
+
+/**
+ * ONE-TIME BACKFILL (run-picker; no trailing underscore so it shows in the editor Run menu). Creates
+ * the birthday + work-anniversary events on "Quay 1 Team Dates" for every already-provisioned Quay 1
+ * starter who is missing them. The normal path only creates these at provisioning, so anyone set up
+ * before the calendar feature went live never got them and there is no auto-backfill.
+ *
+ * teamDatesOnly: it deliberately does NOT create the induction Day 1/Day 2 events - those invite the
+ * candidate, and for a past induction that would fire invites for an event already gone. The live
+ * per-starter flow still creates induction days for future starters. Idempotent (skips anyone whose
+ * calendar_events_json already has both), Quay 1 only, DRY_RUN-safe. Safe to run more than once.
+ */
+function backfillTeamDates() {
+  var out = { added: [], events: 0, skipped: 0, no_data: [], errors: [] };
+  listOnboarding_().forEach(function (o) {
+    try {
+      if ((o.entity || 'quay1') !== 'quay1') return;   // Quay 1 only
+      if (!o.provisioned_at) return;                    // only people actually set up
+      var have = {};
+      try { have = JSON.parse(o.calendar_events_json || '{}') || {}; } catch (e) { have = {}; }
+      var needBirthday = !have.birthday && !!o.birthday;
+      var needAnniv = !have.anniversary && !!o.start_date;
+      if (!needBirthday && !needAnniv) { out.skipped++; return; }   // already has them, or no dates to use
+      var r = createOnboardingCalendarEvents_(o.folderId, o, { teamDatesOnly: true });
+      var made = r.created.filter(function (k) { return k === 'birthday' || k === 'anniversary'; });
+      if (made.length) { out.added.push({ folderId: o.folderId, name: o.name, created: made }); out.events += made.length; }
+      else out.no_data.push(o.folderId);
+    } catch (err) { out.errors.push({ folderId: o.folderId, error: String(err) }); }
+  });
+  logAudit_('team_dates_backfill_run', { people: out.added.length, events: out.events, skipped: out.skipped, errors: out.errors.length, dry: DRY_RUN_() });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
