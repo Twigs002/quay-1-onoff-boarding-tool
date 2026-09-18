@@ -90,6 +90,7 @@ function dispatch_(kind, body, ctx) {
     case 'decline_fica': return _declineDispatch_(body, ctx);
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
+    case 'set_induction_week': return _setInductionWeekDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
@@ -165,6 +166,15 @@ function _resendPacketDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return resendInductionPacket_(folderId, ctx);
+}
+
+/** Admin override of a candidate's induction week (Progress report "Change week"). Admin-only: it moves
+ *  calendar invites and re-emails the candidate, so it rides the same requireAdmin_ gate as approve. */
+function _setInductionWeekDispatch_(body, ctx) {
+  requireAdmin_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return setInductionWeekManual_(folderId, String(body.date || ''), ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded

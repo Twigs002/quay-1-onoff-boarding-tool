@@ -26,6 +26,7 @@
     approve: 'approve',
     remind: 'remind',
     resendPacket: 'resend_packet',
+    setInductionWeek: 'set_induction_week',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
@@ -652,7 +653,7 @@
     const pipeline = (r.onboarding || []).slice();       // candidates not yet set up
     statusCache = rows;
     renderPipeline(pipe, meta, pipeline, wrap);
-    renderBooked($('#bookedBody', wrap), (r.booked || []));
+    renderBooked($('#bookedBody', wrap), (r.booked || []), wrap);
     renderStatus(body, null, rows);
   }
 
@@ -710,13 +711,27 @@
     });
   }
 
-  // Candidates who have booked an induction week: a compact list with a "Resend induction packet" button.
-  function renderBooked(host, items) {
+  // Candidates who have booked an induction week: a compact list with "Resend induction packet" and,
+  // for admins, "Change week" (an inline date picker that moves them to another week when they cannot
+  // make the auto-assigned one - the candidate's calendar invite + induction email update to match).
+  function renderBooked(host, items, wrap) {
     if (!host) return;
     if (!items || !items.length) { host.innerHTML = ''; return; }
+    const canChange = canAdminCheck();   // admin/super only; the backend re-checks with requireAdmin_ regardless
+    const today = new Date().toISOString().slice(0, 10);
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
       const when = [o.induction_wed, o.induction_thu].filter(Boolean).map((d) => fmtNiceDate(d)).join(' & ');
+      const fid = esc(o.folderId);
+      const changeBtn = canChange
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-changeweek="${fid}">Change week</button>` : '';
+      const editor = canChange
+        ? `<div class="week-editor" data-editor="${fid}" hidden>
+             <input type="date" class="week-input" data-weekinput="${fid}" value="${esc(o.induction_wed || '')}" min="${today}" aria-label="New induction week">
+             <button type="button" class="btn btn-gold btn-sm" data-saveweek="${fid}" data-name="${esc(o.name || '')}">Save</button>
+             <button type="button" class="btn btn-ghost btn-sm" data-cancelweek="${fid}">Cancel</button>
+             <div class="week-hint muted">Pick any day in the target week - induction runs the Wed &amp; Thu of that week.</div>
+           </div>` : '';
       return `<div class="pipe-row">
         <div class="pipe-main">
           <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
@@ -724,21 +739,57 @@
         </div>
         <div class="pipe-side">
           <span class="pill s-done">Induction booked</span>
-          <div class="pipe-actions"><button type="button" class="btn btn-ghost btn-sm" data-resend="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Resend induction packet</button></div>
+          <div class="pipe-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-resend="${fid}" data-name="${esc(o.name || '')}">Resend induction packet</button>
+            ${changeBtn}
+          </div>
+          ${editor}
         </div>
       </div>`;
     }).join('');
     host.innerHTML = `<div class="pipe-subhead">Induction booked</div><div class="pipe-list">${cards}</div>`;
+
     host.querySelectorAll('[data-resend]').forEach((b) => {
       b.addEventListener('click', async () => {
         const name = b.dataset.name || 'this person';
         b.classList.add('loading'); b.disabled = true;
         try {
-          const r = await api(KINDS.resendPacket, { folderId: b.dataset.resend });
+          await api(KINDS.resendPacket, { folderId: b.dataset.resend });
           toast('Induction packet resent', `The induction packet was resent to ${esc(name)}.`, 'ok');
-          b.classList.remove('loading'); b.disabled = false;
         } catch (err) {
           toast('Could not resend packet', err.message, 'err');
+        }
+        b.classList.remove('loading'); b.disabled = false;
+      });
+    });
+
+    // "Change week" reveals the inline date editor for that row (and hides any other open one).
+    const editorFor = (fid) => host.querySelector(`[data-editor="${window.CSS && CSS.escape ? CSS.escape(fid) : fid}"]`);
+    host.querySelectorAll('[data-changeweek]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const ed = editorFor(b.dataset.changeweek);
+        host.querySelectorAll('.week-editor').forEach((e) => { if (e !== ed) e.hidden = true; });
+        if (ed) { ed.hidden = !ed.hidden; if (!ed.hidden) { const i = ed.querySelector('input'); if (i) i.focus(); } }
+      });
+    });
+    host.querySelectorAll('[data-cancelweek]').forEach((b) => {
+      b.addEventListener('click', () => { const ed = editorFor(b.dataset.cancelweek); if (ed) ed.hidden = true; });
+    });
+    host.querySelectorAll('[data-saveweek]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const fid = b.dataset.saveweek;
+        const input = host.querySelector(`[data-weekinput="${window.CSS && CSS.escape ? CSS.escape(fid) : fid}"]`);
+        const date = input && input.value;
+        if (!date) { toast('Pick a date', 'Choose a day in the week you want to move this induction to.', 'err'); return; }
+        const name = b.dataset.name || 'this person';
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          const r = await api(KINDS.setInductionWeek, { folderId: fid, date });
+          if (r && r.unchanged) toast('No change', `${esc(name)} is already in that week.`, 'ok');
+          else toast('Induction week changed', `${esc(name)} moved to ${fmtNiceDate(r.wed)} & ${fmtNiceDate(r.thu)}. Their calendar invite and induction email were updated.`, 'ok');
+          loadStatus(wrap || host.closest('.stack'), true);   // refresh the list with the new dates
+        } catch (err) {
+          toast('Could not change the week', err.message, 'err');
           b.classList.remove('loading'); b.disabled = false;
         }
       });

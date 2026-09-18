@@ -56,6 +56,39 @@ function _dateAt_(iso, hour) {
 }
 
 /**
+ * Move a candidate's two induction calendar invites (Day 1 / Day 2) to the row's CURRENT induction
+ * dates. Deletes the stored day1/day2 events off the "Quay 1 Inductions" calendar, drops those keys
+ * from calendar_events_json, then recreates them on the new dates via createOnboardingCalendarEvents_
+ * (which only makes the MISSING ones - the birthday + anniversary series are untouched). Called by
+ * setInductionWeekManual_ after the new week is persisted; `o` must already carry the new
+ * induction_wed/thu. Idempotent, Quay 1 only, non-fatal, DRY_RUN-safe.
+ */
+function rescheduleInductionCalendar_(folderId, o) {
+  o = o || {};
+  if ((o.entity || 'quay1') !== 'quay1') return;
+  if (DRY_RUN_()) { logAudit_('induction_calendar_move_dryrun', { folderId: folderId }); return; }
+  var have = {};
+  try { have = JSON.parse(o.calendar_events_json || '{}') || {}; } catch (e) { have = {}; }
+  var cal = null;
+  try { cal = _onbCalendar_(PROP.CAL_INDUCTIONS_ID, 'Quay 1 Inductions'); } catch (e) { cal = null; }
+  ['day1', 'day2'].forEach(function (key) {
+    var id = have[key];
+    if (id && cal) {
+      try { var ev = cal.getEventById(id); if (ev) ev.deleteEvent(); }
+      catch (e) { logAudit_('induction_calendar_delete_failed', { folderId: folderId, key: key, error: String(e) }); }
+    }
+    delete have[key];   // dropped so createOnboardingCalendarEvents_ recreates it on the new date
+  });
+  // Persist the stripped set AND reflect it on the in-memory row, so the recreate below (which reads
+  // o.calendar_events_json) sees day1/day2 as missing rather than skipping them as already-created.
+  var stripped = JSON.stringify(have);
+  o.calendar_events_json = stripped;
+  try { setOnboardingCell_(folderId, ONB_COL.calendar_events_json, stripped); }
+  catch (e) { logAudit_('induction_calendar_move_save_failed', { folderId: folderId, error: String(e) }); }
+  createOnboardingCalendarEvents_(folderId, o);   // recreates day1/day2 on the new induction dates
+}
+
+/**
  * Create the four onboarding calendar events for a Quay 1 starter, idempotently.
  * Returns { created:[keys], skipped:[keys], failed:[keys] }. Non-fatal + DRY_RUN-safe.
  */

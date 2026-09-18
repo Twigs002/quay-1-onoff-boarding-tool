@@ -82,6 +82,8 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
     emailsDrafted: [],  // Gmail/Mail draft creations
     emailsSent: [],     // real sends — must stay empty (never-auto-send)
     calendarEvents: [], // calendar events/series created (Phase 2)
+    calendarEventsById: {}, // id -> event record (for getEventById / delete on reschedule)
+    calendarDeleted: [], // event ids deleted (induction-week move)
     calendarsCreated: [],
     logs: [],
   };
@@ -192,26 +194,42 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
       sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); },
     },
     MailApp: { sendEmail: (to, subj, body, o) => { calls.emailsSent.push({ to, subj, body, o }); } },
-    // Calendar (Phase 2). getCalendarById returns null so the lazy create-and-remember path runs; the
-    // created calendar records every createEvent / createAllDayEventSeries into calls.calendarEvents.
-    CalendarApp: {
-      getCalendarById: () => null,
-      newRecurrence: () => ({ addYearlyRule() { return this; }, addDailyRule() { return this; }, addWeeklyRule() { return this; } }),
-      createCalendar: (name) => {
-        calls.calendarsCreated.push(name);
-        return {
-          getId: () => 'cal_' + name,
-          createEvent: (title, s, e, opts) => {
-            calls.calendarEvents.push({ cal: name, kind: 'event', title, guests: opts && opts.guests, location: opts && opts.location });
-            return { getId: () => 'evt_' + (++_calSeq) };
+    // Calendar (Phase 2). Calendars are remembered by id (getCalendarById returns the same instance a
+    // prior createCalendar made), so a reschedule can look up + delete the day1/day2 events it created.
+    // Every createEvent / createAllDayEventSeries records into calls.calendarEvents and .calendarEventsById.
+    CalendarApp: (function () {
+      var calendarsById = {};
+      function makeCal(name) {
+        var id = 'cal_' + name;
+        var cal = {
+          getId: function () { return id; },
+          createEvent: function (title, s, e, opts) {
+            var eid = 'evt_' + (++_calSeq);
+            var rec = { id: eid, cal: name, kind: 'event', title: title, guests: opts && opts.guests, location: opts && opts.location, start: s, end: e, deleted: false };
+            calls.calendarEvents.push(rec); calls.calendarEventsById[eid] = rec;
+            return { getId: function () { return eid; } };
           },
-          createAllDayEventSeries: (title, d, rec) => {
-            calls.calendarEvents.push({ cal: name, kind: 'series', title });
-            return { getId: () => 'ser_' + (++_calSeq) };
+          createAllDayEventSeries: function (title, d, recur) {
+            var sid = 'ser_' + (++_calSeq);
+            var rec = { id: sid, cal: name, kind: 'series', title: title, deleted: false };
+            calls.calendarEvents.push(rec); calls.calendarEventsById[sid] = rec;
+            return { getId: function () { return sid; } };
+          },
+          getEventById: function (eid) {
+            var rec = calls.calendarEventsById[eid];
+            if (!rec || rec.deleted) return null;
+            return { getId: function () { return eid; }, deleteEvent: function () { rec.deleted = true; calls.calendarDeleted.push(eid); } };
           },
         };
-      },
-    },
+        calendarsById[id] = cal;
+        return cal;
+      }
+      return {
+        getCalendarById: function (id) { return calendarsById[id] || null; },
+        newRecurrence: function () { return { addYearlyRule() { return this; }, addDailyRule() { return this; }, addWeeklyRule() { return this; } }; },
+        createCalendar: function (name) { calls.calendarsCreated.push(name); return makeCal(name); },
+      };
+    })(),
     // Minimal HtmlService so page builders (ficaForm_, inductionPageHtml_) can be rendered in tests:
     // createHtmlOutput returns a chainable stub whose getContent() yields the built HTML string.
     HtmlService: {

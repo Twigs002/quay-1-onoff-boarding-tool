@@ -50,6 +50,75 @@ function resendInductionPacket_(folderId, ctx) {
 }
 
 /**
+ * The Wednesday + Thursday of the week CONTAINING a given date (project timezone). Unlike
+ * assignInductionWeek_ - which applies the Tuesday-14:00 cutoff to a FICA submission time - this snaps
+ * a MANUALLY chosen date straight to that week's induction days, so an admin can drop a candidate into
+ * any week by picking any day within it. Returns { monday, wed, thu } or null on an unparseable date.
+ */
+function _weekOfDate_(iso) {
+  var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  var d = new Date(+m[1], +m[2] - 1, +m[3]);
+  if (isNaN(d.getTime())) return null;
+  var day = d.getDay();                                 // 0 Sun .. 6 Sat, in the SAST project timezone
+  var diffToMon = (day === 0 ? -6 : 1 - day);
+  var monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMon);
+  return { monday: _isoDate_(monday), wed: _isoDate_(_addDays_(monday, 2)), thu: _isoDate_(_addDays_(monday, 3)) };
+}
+
+/**
+ * MANUAL induction-week override (admin action from the Progress report "Change week" button, when a
+ * candidate cannot make their auto-assigned week). Snaps the chosen date to that week's Wednesday +
+ * Thursday, persists the new week + recomputed holiday flag, MOVES the candidate's two induction
+ * calendar invites to the new dates, and re-sends the induction packet with a "rescheduled" note - so
+ * the candidate's email and calendar both match the new week. Quay 1 only (Aqua has no induction).
+ * A no-op (no writes, no email, no calendar churn) when the chosen week equals the current one.
+ * DRY_RUN writes/sends nothing. Returns { ok, wed, thu, ... } or { ok:false, error }.
+ */
+function setInductionWeekManual_(folderId, dateIso, ctx) {
+  folderId = String(folderId || '');
+  if (!folderId) return { ok: false, error: 'missing reference' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'not_found' };
+  if ((o.entity || 'quay1') !== 'quay1') return { ok: false, error: 'Induction applies to Quay 1 starters only.' };
+  var wk = _weekOfDate_(dateIso);
+  if (!wk) return { ok: false, error: 'Please choose a valid date for the induction week.' };
+  // Refuse to move someone into a week whose induction days have already passed.
+  var today = _isoDate_(new Date());
+  if (wk.thu < today) return { ok: false, error: 'That week has already passed - please pick the current or a future week.' };
+
+  var prevWed = String(o.induction_wed || '').trim();
+  var prevThu = String(o.induction_thu || '').trim();
+  if (prevWed === wk.wed && prevThu === wk.thu) {
+    return { ok: true, wed: wk.wed, thu: wk.thu, unchanged: true, message: 'That is already this candidate\'s induction week.' };
+  }
+
+  if (DRY_RUN_()) {
+    logAudit_('induction_week_manual_dryrun', { folderId: folderId, from_wed: prevWed, wed: wk.wed, thu: wk.thu, by: (ctx && ctx.email) || 'admin' });
+    return { ok: true, wed: wk.wed, thu: wk.thu, dryRun: true };
+  }
+
+  setInduction_(folderId, wk.wed, wk.thu);
+  try { setOnboardingCell_(folderId, ONB_COL.induction_holiday_flag, _inductionHolidayFlag_(wk.wed, wk.thu)); }
+  catch (e) { logAudit_('induction_week_manual_flag_failed', { folderId: folderId, error: String(e) }); }
+
+  // Re-read so the calendar move + packet reflect the freshly-written week.
+  var updated = readOnboardingByFolder_(folderId) || o;
+  updated.induction_wed = wk.wed; updated.induction_thu = wk.thu;
+
+  // Move the two induction calendar invites to the new dates (Quay 1 only, non-fatal, DRY_RUN-safe).
+  try { rescheduleInductionCalendar_(folderId, updated); }
+  catch (e) { logAudit_('induction_calendar_move_failed', { folderId: folderId, error: String(e) }); }
+
+  // Re-send the induction packet with a gentle "rescheduled" note so the candidate's email matches.
+  try { _sendInductionPacket_(folderId, updated, wk.wed, wk.thu, true); }
+  catch (e) { logAudit_('induction_week_manual_packet_failed', { folderId: folderId, error: String(e) }); }
+
+  logAudit_('induction_week_manual_set', { folderId: folderId, from_wed: prevWed, wed: wk.wed, thu: wk.thu, by: (ctx && ctx.email) || 'admin' });
+  return { ok: true, wed: wk.wed, thu: wk.thu, rescheduled: true };
+}
+
+/**
  * The induction week to use when the packet is sent at provisioning. Induction is normally assigned at
  * FICA submit, but the packet only goes out later (on acceptance/provisioning). If the row has NO week
  * (auto-assign was skipped, failed and was swallowed, or is a pre-feature/legacy row) or the assigned
