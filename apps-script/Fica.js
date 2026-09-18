@@ -43,6 +43,13 @@ function ficaUpload_(body) {
   var meta = readOnboardingByFolder_(folderId);
   if (!meta) return { ok: false, error: 'link not recognised' };
 
+  // Repeat-POST guard for this token-less path: the folderId is the only credential and it is
+  // re-usable, so a second submission (accidental double-submit, or a guessed-folderId replay)
+  // must not silently clobber the stored PII or re-send the candidate email. `ficaAlreadyIn` is
+  // true once a prior submission completed the FICA doc set; it freezes PII (append-once, below)
+  // and suppresses the thank-you re-mail. A genuine correction is an admin edit on the sheet.
+  var ficaAlreadyIn = _docsReady_(meta);
+
   var folder;
   try { folder = DriveApp.getFolderById(folderId); }
   catch (err) { return { ok: false, error: 'link not recognised' }; }
@@ -143,21 +150,30 @@ function ficaUpload_(body) {
   var pick = function (key, label) { return String((body && body[key]) || d[label] || '').trim(); };
   var birthday = pick('birthday', 'Birthday') || saIdBirthday_(effectiveId);
 
+  // Append-once freeze: once a PII field is stored, a later POST on the same folderId does NOT
+  // overwrite it (returns the existing value); a still-empty field accepts a first value, so a
+  // candidate completing missing info is unaffected. Guards the bank/tax/next-of-kin/address PII
+  // called out in the review against silent replay on this token-less endpoint.
+  var freeze = function (key, next) {
+    var existing = String(meta[key] || '').trim();
+    return existing ? existing : next;
+  };
+
   // Persist FFC status/number, the derived PropData profile type, and the HR fields onto the row.
   upsertOnboardingRow_({
     folderId: folderId, ffc_status: ffcStatus, ffc_number: ffcNumber, propdata_profile_type: profileType,
-    birthday: birthday,
-    bank_name: pick('bank_name', 'Bank'),
-    account_number: pick('account_number', 'Account number'),
-    account_type: pick('account_type', 'Account type'),
-    tax_number: pick('tax_number', 'Income tax number'),
-    residential_address: pick('home_address', 'Residential address'),
+    birthday: freeze('birthday', birthday),
+    bank_name: freeze('bank_name', pick('bank_name', 'Bank')),
+    account_number: freeze('account_number', pick('account_number', 'Account number')),
+    account_type: freeze('account_type', pick('account_type', 'Account type')),
+    tax_number: freeze('tax_number', pick('tax_number', 'Income tax number')),
+    residential_address: freeze('residential_address', pick('home_address', 'Residential address')),
     work_permit_expiry: pick('work_permit_expiry', 'Work permit expiry'),
     work_permit_received: hasPermit ? ('Received ' + nowIso_()) : '',
-    nok_name: pick('nok_name', 'Next of kin name'),
-    nok_contact: pick('nok_contact', 'Next of kin contact'),
-    nok_relationship: pick('nok_relationship', 'Next of kin relationship'),
-    nok_email: pick('nok_email', 'Next of kin email'),
+    nok_name: freeze('nok_name', pick('nok_name', 'Next of kin name')),
+    nok_contact: freeze('nok_contact', pick('nok_contact', 'Next of kin contact')),
+    nok_relationship: freeze('nok_relationship', pick('nok_relationship', 'Next of kin relationship')),
+    nok_email: freeze('nok_email', pick('nok_email', 'Next of kin email')),
     photo_file_id: photoFileId,
   });
 
@@ -168,7 +184,7 @@ function ficaUpload_(body) {
   try { hrTrackingUpsert_(folderId); hrPromote_(folderId); }
   catch (err) { logAudit_('hr_sync_failed', { folderId: folderId, error: String(err) }); }
 
-  if (isEmail_(meta.email)) {
+  if (!ficaAlreadyIn && isEmail_(meta.email)) {   // send the thank-you once; a repeat POST does not re-mail
     var company = CFG.COMPANY[meta.entity] || CFG.COMPANY.quay1;
     try {
       GmailApp.sendEmail(meta.email, company.name + ' - documents received, we are checking them - ' + name,

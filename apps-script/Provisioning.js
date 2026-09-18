@@ -165,9 +165,6 @@ function provisionGoogleLiveFor_(folderId) {
   Logger.log(JSON.stringify(r, null, 2));
   return r;
 }
-function provisionJohnSmithGoogleLive() {
-  return provisionGoogleLiveFor_('1ix1BEEuQ9VMu2_zfWGxDvhcZ194L38FR');  // "John Smith Test"
-}
 
 /** ONE-OFF cleanup: delete the "John Smith Test" live Google Workspace account. The tracker rows
  *  (onboarding / credentials / queue) are removed separately; the PDMS agent is removed by hand. */
@@ -177,45 +174,6 @@ function removeJohnSmithTestGoogle() {
   try { AdminDirectory.Users.remove(email); out.google = 'deleted ' + email; }
   catch (e) { out.google = 'error (may already be gone): ' + String(e); }
   Logger.log(JSON.stringify(out));
-  return out;
-}
-
-/** ONE-OFF cleanup after the 2026-08-10 end-to-end test run: delete the leftover test Google
- *  Workspace accounts (john@ from the earlier go-live, zztest@ from the full-flow test) and trash
- *  the two test candidate Drive folders (Zztest + Zzdecline, with their contract/FICA files). The
- *  tracker rows were already removed via gspread. Idempotent - re-running is safe (already-gone
- *  items just report an error string). Run once from the editor. */
-function cleanupTestArtifacts() {
-  var out = { users: {}, folders: {} };
-  ['john@quay1.co.za', 'zztest@quay1.co.za'].forEach(function (email) {
-    try { AdminDirectory.Users.remove(email); out.users[email] = 'deleted'; }
-    catch (e) { out.users[email] = 'error (may already be gone): ' + String(e); }
-  });
-  // Zztest Candidate + Zzdecline Testcase folders (contract PDF + FICA uploads live inside).
-  ['1vq4sMRxGLI0q58X3UYGJzBXj-FDlQJUF', '1BVqp_f3gWrTSKkinUQPqFZNYUDxjfl74'].forEach(function (fid) {
-    try { DriveApp.getFolderById(fid).setTrashed(true); out.folders[fid] = 'trashed'; }
-    catch (e) { out.folders[fid] = 'error (may already be gone): ' + String(e); }
-  });
-  Logger.log(JSON.stringify(out));
-  return out;
-}
-
-/**
- * ONE-SHOT GO-LIVE: arm the live flags atomically, then run the ready-batch so every ready candidate
- * (currently just "John Smith Test") is provisioned for real. setProperties(..., false) only ADDS/
- * updates these four keys - it never touches the other Script Properties (Supabase keys, template
- * IDs, folders), so there is no corruption risk. Google is created inline here; PropData is enqueued
- * for the Python worker (run poll.py after). Run once from the editor. Returns the batch summary.
- */
-function goLiveAndProvisionAll() {
-  PropertiesService.getScriptProperties().setProperties({
-    DRY_RUN: '0',
-    PROPDATA_LIVE: '1',
-    HR_SYNC_ENABLED: '1',
-    WORKER_SA_EMAIL: 'va-sheets-bot@va-automation-497708.iam.gserviceaccount.com',
-  }, false);
-  var out = provisionReadyBatch_();
-  Logger.log('ARMED (DRY_RUN=0, PROPDATA_LIVE=1, HR_SYNC_ENABLED=1) + batch: ' + JSON.stringify(out, null, 2));
   return out;
 }
 
@@ -539,10 +497,24 @@ function _randomTempPw_() {
   var upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ', lower = 'abcdefghijkmnpqrstuvwxyz';
   var digit = '23456789', sym = '!@#$%*?';
   var all = upper + lower + digit + sym;
-  var pick = function (set) { return set.charAt(Math.floor(Math.random() * set.length)); };
-  var out = pick(upper) + pick(lower) + pick(digit) + pick(sym);  // guarantee one of each class
-  for (var i = 0; i < 10; i++) out += pick(all);
-  return out.split('').sort(function () { return Math.random() - 0.5; }).join('');
+  // Apps Script V8 has no crypto.getRandomValues; Utilities.getUuid() is a cryptographically
+  // strong (RFC 4122 v4) source. Concatenate several UUIDs' hex into a byte stream and consume
+  // one byte per character pick and per Fisher-Yates swap, so neither the password nor the
+  // shuffle depends on the non-cryptographic Math.random().
+  var hex = '';
+  while (hex.length < 96) hex += Utilities.getUuid().replace(/-/g, '');
+  var bytes = [];
+  for (var h = 0; h < hex.length; h += 2) bytes.push(parseInt(hex.substr(h, 2), 16));
+  var bi = 0;
+  var next = function () { return bytes[bi++ % bytes.length]; };
+  var pick = function (set) { return set.charAt(next() % set.length); };
+  var out = [pick(upper), pick(lower), pick(digit), pick(sym)];  // guarantee one of each class
+  for (var i = 0; i < 10; i++) out.push(pick(all));
+  for (var j = out.length - 1; j > 0; j--) {   // Fisher-Yates over the same UUID byte stream
+    var k = next() % (j + 1);
+    var tmp = out[j]; out[j] = out[k]; out[k] = tmp;
+  }
+  return out.join('');
 }
 
 /**
