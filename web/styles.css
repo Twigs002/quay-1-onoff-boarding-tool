@@ -519,6 +519,10 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .doc-off { background: var(--card-2); color: var(--muted); }
 .pipe-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .pipe-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.week-editor { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px; padding: 10px 12px; background: var(--card2, #F4F7FC); border: 1px solid var(--line); border-radius: 10px; }
+.week-editor[hidden] { display: none; }
+.week-input { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink, #1F2A44); }
+.week-hint { flex-basis: 100%; text-align: right; font-size: 11px; }
 .pill.s-ready { background: #FBF3DA; color: #8A6D0B; }
 @media (max-width: 560px) { .pipe-side { align-items: stretch; width: 100%; } }
 .pipe-reminded { font-size: 11px; color: var(--muted); margin-top: 2px; }
