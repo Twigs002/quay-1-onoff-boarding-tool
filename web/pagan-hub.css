@@ -133,7 +133,9 @@ button { font-family: var(--font); cursor: pointer; }
 .bar-row { display: grid; grid-template-columns: 136px 1fr 96px; align-items: center; gap: 14px; }
 .bar-name { font-size: 12.5px; font-weight: 700; color: var(--q-blue-900); }
 .bar-track { height: 14px; border-radius: var(--r-pill); background: var(--q-track); overflow: hidden; }
-.bar-fill { display: block; height: 100%; border-radius: var(--r-pill); width: 0; transition: width .7s cubic-bezier(.22, 1, .36, 1); }
+/* GPU-only fill: animate transform:scaleX (compositor) instead of width
+   (layout+paint every frame). JS sets scaleX(fraction); see app.vadashboard.js. */
+.bar-fill { display: block; height: 100%; width: 100%; border-radius: var(--r-pill); transform: scaleX(0); transform-origin: left; transition: transform .7s cubic-bezier(.22, 1, .36, 1); }
 .bar-fill.changed { background: var(--q-gold); }
 .bar-fill.good    { background: var(--q-gold-700); }
 .bar-fill.bad     { background: var(--q-red); }
@@ -202,7 +204,7 @@ button { font-family: var(--font); cursor: pointer; }
 .ph-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .ph-tile { display: block; background: var(--q-card); border: 1px solid transparent; border-radius: var(--r-md); padding: 16px 18px; text-decoration: none; color: inherit; transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
 a.ph-tile { cursor: pointer; }
-a.ph-tile:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); border-color: var(--q-line); transform: translateY(-1px); }
+a.ph-tile:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); border-color: var(--q-line); }
 .ph-tile-label { font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--q-faint); }
 .ph-tile-num { font-size: 30px; font-weight: 800; color: var(--q-blue-900); margin-top: 8px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .ph-tile-num.bad { color: var(--q-red); }
@@ -221,7 +223,11 @@ a.ph-tile:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); border-co
 .ov-row { display: flex; align-items: center; gap: 18px; background: var(--q-card); border: 1px solid var(--q-line);
   border-radius: var(--r-md); padding: 16px 20px; text-decoration: none; color: inherit;
   transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; cursor: pointer; }
-.ov-row:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); transform: translateY(-1px); border-color: var(--q-sky); }
+.ov-row:hover { box-shadow: 0 10px 22px -14px rgba(26, 42, 85, .35); border-color: var(--q-sky); }
+/* Lift only on true hover devices — touch taps fire a sticky false hover. */
+@media (hover: hover) and (pointer: fine) {
+  a.ph-tile:hover, .ov-row:hover { transform: translateY(-1px); }
+}
 .ov-k { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--q-faint); width: 130px; flex: none; }
 .ov-v { font-size: 15px; font-weight: 700; color: var(--q-blue-900); flex: 1; font-variant-numeric: tabular-nums; }
 .ov-go { color: var(--q-faint); font-weight: 800; font-size: 16px; }

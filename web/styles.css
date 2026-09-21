@@ -74,7 +74,14 @@ a { color: var(--blue-800); }
 :focus-visible { outline: 2px solid var(--blue-800); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
+  /* Reduced motion = gentler, not zero. Drop movement (transform-based
+     motion) but keep opacity/colour/shadow fades that aid comprehension,
+     and collapse looping/entry animations to a single instant frame. */
+  *, *::before, *::after {
+    transition-property: opacity, color, background-color, border-color, box-shadow !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /* ─── Topbar ────────────────────────────────────────────────── */
@@ -130,16 +137,12 @@ a { color: var(--blue-800); }
 .card {
   background: var(--card); border: 1px solid var(--line);
   /* Subtle uplift: slightly larger radius + a softer, layered resting
-     shadow, and a gentle hover lift so cards feel tactile without moving
-     far. Transform is suppressed under prefers-reduced-motion (see top). */
+     shadow. No hover transform — a large content card lifting because the
+     cursor merely passed over it is decorative motion on a constantly-seen
+     element; the resting shadow carries the tactility instead. */
   border-radius: 14px;
   box-shadow: 0 1px 2px rgba(30,46,89,.05), 0 6px 16px -10px rgba(30,46,89,.18);
   overflow: hidden;
-  transition: transform .2s ease, box-shadow .25s ease;
-}
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 10px rgba(30,46,89,.08), 0 16px 30px -14px rgba(30,46,89,.25);
 }
 .card-pad { padding: 22px 24px; }
 .section-head { margin: 0 0 4px; }
@@ -223,9 +226,16 @@ legend { font-size: 12.5px; font-weight: 700; color: var(--slate); padding: 0; m
 /* Subtle uplift: primary buttons carry a soft brand-tinted shadow and lift
    a hair on hover, so the main action reads as pressable. */
 .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 2px 6px -1px rgba(61,91,166,.4); }
-.btn-primary:hover:not(:disabled) { background: var(--accent-deep); transform: translateY(-1px); box-shadow: 0 6px 14px -2px rgba(61,91,166,.5); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-deep); box-shadow: 0 6px 14px -2px rgba(61,91,166,.5); }
 .btn-ghost { background: #fff; border-color: var(--line); color: var(--ink); }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--sky-tint); }
+/* Press feedback — the half that matters most; mirrors the login keypad. */
+.btn:active:not(:disabled) { transform: scale(.98); }
+/* Hover lift only on real hover devices — a tap on touch fires a false,
+   sticky hover otherwise. */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+}
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover:not(:disabled) { background: #A80802; }
 .btn:disabled { opacity: .55; cursor: default; }
@@ -306,12 +316,18 @@ legend { font-size: 12.5px; font-weight: 700; color: var(--slate); padding: 0; m
   background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--blue-800);
   border-radius: var(--r-sm); box-shadow: var(--shadow);
   padding: 13px 16px; font-size: 13.5px; color: var(--ink); line-height: 1.45;
-  animation: toast-in .2s ease;
+  /* Interruptible entry: a transition (not a keyframe) so stacked toasts
+     added in quick succession retarget from their current state rather
+     than restarting from zero. @starting-style supplies the from-state. */
+  opacity: 1; transform: translateY(0);
+  transition: opacity .2s ease, transform .2s ease;
+}
+@starting-style {
+  .toast { opacity: 0; transform: translateY(8px); }
 }
 .toast.ok  { border-left-color: var(--green); }
 .toast.err { border-left-color: var(--red); }
 .toast strong { display: block; margin-bottom: 2px; }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 /* ─── Auth: login gate + sign-out ───────────────────────────── */
 body.pre-auth { overflow: hidden; }

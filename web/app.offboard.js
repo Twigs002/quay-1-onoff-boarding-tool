@@ -156,7 +156,10 @@
       </div>
     </div>`);
     host.appendChild(panel);
-    panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    panel.scrollIntoView({
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'center',
+    });
     $('#ofGo', panel).focus();
     $('#ofCancel', panel).addEventListener('click', () => { host.innerHTML = ''; });
     $('#ofGo', panel).addEventListener('click', () => submitOffboard(panel, who));
