@@ -91,6 +91,7 @@ function dispatch_(kind, body, ctx) {
     case 'remind': return _remindDispatch_(body, ctx);
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
     case 'set_induction_week': return _setInductionWeekDispatch_(body, ctx);
+    case 'candidate_detail': return _candidateDetailDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
@@ -175,6 +176,15 @@ function _setInductionWeekDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return setInductionWeekManual_(folderId, String(body.date || ''), ctx);
+}
+
+/** Structured per-candidate detail for the Progress report click-through page. Onboarder+ (a broker
+ *  sees only their own candidates; candidateDetail_ enforces the per-row ownership scope). Read-only. */
+function _candidateDetailDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  return candidateDetail_(folderId, ctx);
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded
