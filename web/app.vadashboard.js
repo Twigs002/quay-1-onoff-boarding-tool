@@ -54,7 +54,7 @@
     return rows.map((r) => {
       const p = Math.round((r.v / max) * 100);
       return `<div class="bar-row"><span class="bar-name">${H.esc(r.name)}</span>
-        <span class="bar-track"><span class="bar-fill ${r.cls}" style="width:${p}%"></span></span>
+        <span class="bar-track"><span class="bar-fill ${r.cls}" style="transform:scaleX(${p / 100})"></span></span>
         <span class="bar-meta"><b>${fmt(r.v)}</b> · ${p}%</span></div>`;
     }).join('');
   }
