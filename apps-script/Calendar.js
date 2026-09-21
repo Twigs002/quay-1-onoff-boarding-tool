@@ -48,11 +48,33 @@ function _onbCalendar_(propKey, name) {
   return cal;
 }
 
-/** Parse 'YYYY-MM-DD' to a Date at the given local hour (project timezone). null on a bad string. */
-function _dateAt_(iso, hour) {
-  var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return null;
-  return new Date(+m[1], +m[2] - 1, +m[3], hour || 0, 0, 0);
+// Month names -> 0-based index, for the human date format fmtDate_ produces ("16 September 2026").
+var _MONTH_INDEX = {
+  january: 0, february: 1, march: 2, april: 3, may: 4, june: 5, july: 6,
+  august: 7, september: 8, october: 9, november: 10, december: 11,
+};
+
+/**
+ * Parse a stored date to a Date at the given local hour (project timezone). Accepts BOTH the ISO form
+ * (YYYY-MM-DD, e.g. induction_wed / birthday) AND the human form fmtDate_ writes to the tracker
+ * ("16 September 2026", how start_date is persisted by the onboard) - otherwise work-anniversary
+ * events silently never create because the start date is not ISO. Returns null on an unparseable value.
+ */
+function _dateAt_(val, hour) {
+  var s = String(val == null ? '' : val).trim();
+  if (!s) return null;
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(+iso[1], +iso[2] - 1, +iso[3], hour || 0, 0, 0);
+  // fmtDate_ human format: "16 September 2026".
+  var hm = s.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (hm) {
+    var mi = _MONTH_INDEX[hm[2].toLowerCase()];
+    if (mi != null) return new Date(+hm[3], mi, +hm[1], hour || 0, 0, 0);
+  }
+  // Last resort: let the engine try (e.g. "September 16, 2026"); normalise to local midnight + hour.
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour || 0, 0, 0);
+  return null;
 }
 
 /**
@@ -142,7 +164,9 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
       } },
     { key: 'anniversary', make: function () {
         var d = _dateAt_(o.start_date, 0); if (!d) return null;
-        return teamDates().createAllDayEventSeries('Work anniversary - ' + name + ' (joined ' + String(o.start_date).slice(0, 4) + ')', d,
+        // Year from the PARSED date, not a slice of the raw string - start_date is stored human-
+        // formatted ("16 September 2026"), so slicing the first 4 chars would give "16 S", not the year.
+        return teamDates().createAllDayEventSeries('Work anniversary - ' + name + ' (joined ' + d.getFullYear() + ')', d,
           CalendarApp.newRecurrence().addYearlyRule()).getId();
       } },
   ];
