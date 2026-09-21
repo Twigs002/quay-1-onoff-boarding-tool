@@ -595,3 +595,57 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
      targets so they are easy to hit. */
   .pipe-actions .btn { flex: 1 1 auto; }
 }
+
+/* ============================================================
+   Candidate detail (click-through) view - app.detail.js.
+   Reuses the tool's card/pill/doc/btn/fs-title components; the
+   journey stepper + a few detail-row rules are the only new bits.
+   ============================================================ */
+.cd-open { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; transition: background .12s; }
+.cd-open:hover { background: var(--card-2); }
+.cd-open:focus-visible { outline: 2px solid var(--blue-800); outline-offset: 2px; }
+.cd-chev { color: var(--muted); font-weight: 800; }
+.back { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--blue-800);
+  background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; box-shadow: var(--shadow-sm); }
+.back:hover { border-color: var(--blue-800); }
+
+.chead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.chead h2 { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -.01em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.chead h2::after { content: ""; display: block; flex-basis: 100%; height: 3px; width: 44px; border-radius: 2px; background: var(--yellow); margin-top: 2px; }
+.chead .sub { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+
+.steps { padding: 24px 26px 20px; }
+.steps .track { display: flex; align-items: flex-start; justify-content: space-between; }
+.step { flex: 1; text-align: center; position: relative; }
+.step .line { position: absolute; top: 18px; left: -50%; width: 100%; height: 3px; background: var(--line); z-index: 0; }
+.step:first-child .line { display: none; }
+.step.done .line, .step.current .line { background: var(--blue-800); }
+.step .node { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13.5px;
+  background: #fff; border: 2px solid var(--line); color: var(--empty); }
+.step.done .node { background: var(--blue-800); border-color: var(--blue-800); color: #fff; }
+.step.current .node { border-color: var(--blue-800); color: var(--blue-800); box-shadow: 0 0 0 4px var(--sky-tint); }
+.step .lbl { font-size: 12px; font-weight: 700; color: var(--ink); line-height: 1.25; padding: 0 3px; }
+.step.upcoming .lbl { color: var(--muted); font-weight: 600; }
+.step.current .lbl { color: var(--blue-800); }
+.step .date { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.cd-host .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 40px; }
+.cd-host .f-lbl { font-size: 12px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin: 0 0 3px; }
+.cd-host .f-val { font-size: 14.5px; font-weight: 600; color: var(--ink); margin: 0; }
+.cd-host .block + .block { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line-2); }
+.cd-host .docrow { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line-2); }
+.cd-host .docrow:last-child { border-bottom: 0; }
+.cd-host .docrow .name { font-size: 13.5px; font-weight: 600; }
+.cd-host .stage-now { font-size: 16px; font-weight: 800; margin: 2px 0 14px; }
+.cd-host .btns { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.doc-req { background: #FBF3DA; color: #8A6D0B; }
+.cd-week { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cd-week[hidden] { display: none; }
+
+@media (max-width: 640px) {
+  .steps { overflow-x: auto; }
+  .steps .track { min-width: 560px; }
+  .cd-host .grid { grid-template-columns: 1fr; gap: 14px; }
+  .chead h2 { font-size: 21px; }
+}

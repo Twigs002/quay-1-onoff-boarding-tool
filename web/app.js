@@ -27,6 +27,7 @@
     remind: 'remind',
     resendPacket: 'resend_packet',
     setInductionWeek: 'set_induction_week',
+    candidateDetail: 'candidate_detail',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
@@ -733,8 +734,8 @@
              <div class="week-hint muted">Pick any day in the target week - induction runs the Wed &amp; Thu of that week.</div>
            </div>` : '';
       return `<div class="pipe-row">
-        <div class="pipe-main">
-          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
+        <div class="pipe-main cd-open" data-open="${fid}" role="button" tabindex="0" title="View candidate detail">
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag} <span class="cd-chev">›</span></div>
           <div class="pipe-team muted">${esc(o.team || '')}${when ? ` · induction ${esc(when)}` : ''}</div>
         </div>
         <div class="pipe-side">
@@ -748,6 +749,7 @@
       </div>`;
     }).join('');
     host.innerHTML = `<div class="pipe-subhead">Induction booked</div><div class="pipe-list">${cards}</div>`;
+    wireOpenDetail(host, wrap);
 
     host.querySelectorAll('[data-resend]').forEach((b) => {
       b.addEventListener('click', async () => {
@@ -845,8 +847,8 @@
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
       const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
       return `<div class="pipe-row">
-        <div class="pipe-main">
-          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
+        <div class="pipe-main cd-open" data-open="${esc(o.folderId)}" role="button" tabindex="0" title="View candidate detail">
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag} <span class="cd-chev">›</span></div>
           <div class="pipe-team muted">${esc(o.team || '')}</div>
           ${docs}
         </div>
@@ -858,7 +860,18 @@
       </div>`;
     }).join('');
     host.innerHTML = `<div class="pipe-list">${cards}</div>`;
+    wireOpenDetail(host, wrap);
     wirePipeline(host, wrap);
+  }
+
+  // Click (or Enter/Space) on a candidate's main cell opens the click-through detail page in `wrap`.
+  // Defined in app.detail.js via HUB; guarded so the list still works if that module is absent.
+  function wireOpenDetail(host, wrap) {
+    const open = (fid) => { if (window.HUB && window.HUB.openCandidateDetail) window.HUB.openCandidateDetail(fid, wrap); };
+    host.querySelectorAll('[data-open]').forEach((cell) => {
+      cell.addEventListener('click', () => open(cell.dataset.open));
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(cell.dataset.open); } });
+    });
   }
 
   function wirePipeline(host, wrap) {
