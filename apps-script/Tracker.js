@@ -255,6 +255,15 @@ function _isMigratedLegacy_(o) {
   return String(o && o.status || '').trim().toLowerCase() === 'migrated (legacy)';
 }
 
+/** True for a candidate an admin has REMOVED from the pipeline (someone who did not complete
+ *  onboarding). Keyed off the status column exactly like _isMigratedLegacy_ (set via
+ *  setOnboardingStatus_(folderId, 'Removed')), so the row is preserved in the sheet for audit but
+ *  drops off the Progress report, the induction digest and the FICA reminder sweeps. Reversible by
+ *  editing the status cell back. Match is trimmed + case-insensitive. */
+function _isRemoved_(o) {
+  return String(o && o.status || '').trim().toLowerCase() === 'removed';
+}
+
 // ---------------------------------------------------------------- ID data-quality repair
 // Historical rows can carry a mangled id_number - most often a post-2000 SA ID (starts with 0)
 // whose leading zero was dropped when the cell held it as a number (13 -> 12 digits), or a value

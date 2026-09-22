@@ -368,6 +368,7 @@ function _sendInductionInvite_(folderId, o) {
       ' induction week here: ' + link + '\n\nWarm regards,\nThe ' + company.name + ' Team',
       { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    logComms_(folderId, 'induction_invite', o.email, 'Pick-your-induction-week invite', o.name);
   } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
 }
 
@@ -403,6 +404,7 @@ function declineFica_(folderId, reason, ctx) {
       '\n\nWarm regards,\nThe ' + company.name + ' Team',
       { name: company.name, htmlBody: ficaDeclineHtml_(company, firstName_(o.name), why, ficaUrl),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    logComms_(folderId, 'fica_declined', o.email, 'FICA declined' + (why ? ': ' + why : '') + (ctx && ctx.email ? ' (by ' + ctx.email + ')' : ''), o.name);
   } catch (e) { logAudit_('fica_decline_email_failed', { folderId: folderId, error: String(e) }); }
   logAudit_('fica_declined', { folderId: folderId, reason: why, by: (ctx && ctx.email) || '' });
   return { ok: true, declined: true };

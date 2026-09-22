@@ -50,7 +50,7 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
     if (fn === 'tuesdayDigest_' || fn === 'reapOffboarding_' || fn === 'provisionReadyBatch_' ||
-        fn === 'ficaFollowUpSweep_') ScriptApp.deleteTrigger(t);
+        fn === 'ficaFollowUpSweep_' || fn === 'ficaWeeklyReminderSweep_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('tuesdayDigest_').timeBased()
     .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(7).create();
@@ -64,8 +64,14 @@ function setupTriggers() {
   // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
   ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
     .everyHours(1).create();
+  // Weekly FICA reminder: every Tuesday ~09:00 (Africa/Johannesburg per appsscript.json), re-chase
+  // everyone whose FICA is still outstanding so they can get it in the same morning. Recurs weekly
+  // until they submit. See ficaWeeklyReminderSweep_.
+  ScriptApp.newTrigger('ficaWeeklyReminderSweep_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(9).create();
   return 'Triggers installed: Tuesday induction digest (~07:00), offboarding reaper (every 15 min), ' +
-    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime).';
+    'provisioning batch (Wednesday ~08:00), FICA follow-up sweep (hourly, daytime), ' +
+    'weekly FICA reminder (Tuesday ~09:00).';
 }
 
 /** Seed the SAFE flag defaults only when a flag is unset (never clobber an armed value). */

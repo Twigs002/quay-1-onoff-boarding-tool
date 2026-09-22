@@ -27,6 +27,8 @@
     remind: 'remind',
     resendPacket: 'resend_packet',
     status: 'status',
+    candidateDetail: 'candidate_detail',
+    remove: 'remove',
     programs: 'programs',
     retry: 'retry',
     offboard: 'offboard',
@@ -197,7 +199,12 @@
   };
 
   // Admin Check (accept FICA -> release provisioning + email CMA approvers) is super/admin only.
-  const canAdminCheck = () => !!(USER && (USER.isAdmin || USER.isSuper));
+  // Admin Check is visible to supers + admins, PLUS one explicitly allowlisted individual (Kat) who
+  // is not a full admin. Mirror on the backend: apps-script/Auth.js requireAdminCheck_ / ADMIN_CHECK_ALLOW_
+  // (matched there by work email). USER.username is the staff id and is always present.
+  const ADMIN_CHECK_ALLOW_USERS = ['kat'];
+  const canAdminCheck = () => !!(USER && (USER.isAdmin || USER.isSuper ||
+    ADMIN_CHECK_ALLOW_USERS.indexOf(String(USER.username || '').toLowerCase()) !== -1));
 
   function route(tab) {
     // Brokers cannot open Offboard or Admin Check; bounce them to Onboard.
@@ -721,8 +728,9 @@
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
       const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
       return `<div class="pipe-row">
-        <div class="pipe-main">
-          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}</div>
+        <div class="pipe-main pipe-open" data-open="${esc(o.folderId)}" data-name="${esc(o.name || '')}"
+             role="button" tabindex="0" aria-label="Open ${esc(o.name || 'candidate')} details">
+          <div class="pipe-name">${esc(o.name || '(no name)')} ${entTag}<span class="pipe-cue" aria-hidden="true">Details ›</span></div>
           <div class="pipe-team muted">${esc(o.team || '')}</div>
           ${docs}
         </div>
@@ -738,6 +746,14 @@
   }
 
   function wirePipeline(host, wrap) {
+    // Click (or Enter/Space) on a candidate's main area opens the detail panel.
+    host.querySelectorAll('[data-open]').forEach((m) => {
+      const open = () => openCandidate(m.dataset.open, m.dataset.name || '', wrap);
+      m.addEventListener('click', open);
+      m.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      });
+    });
     host.querySelectorAll('[data-remind]').forEach((b) => {
       b.addEventListener('click', async () => {
         const name = b.dataset.name || 'this person';
@@ -754,6 +770,105 @@
           b.classList.remove('loading'); b.disabled = false;
         }
       });
+    });
+  }
+
+  // ── Candidate detail panel (Progress report click-in) ──────────────────────
+  // Clicking a candidate opens a breakdown: identity, documents, induction, the FULL communications
+  // log (everything ever sent to them, from the candidate_detail kind), plus Send reminder + Remove.
+  // Remove (admin/super only) soft-deletes via the remove kind so the person drops off the list.
+  let _cxEsc = null;
+  function closeCandidate() {
+    const ov = $('#cxOverlay'); if (ov) ov.remove();
+    if (_cxEsc) { document.removeEventListener('keydown', _cxEsc); _cxEsc = null; }
+  }
+  function openCandidate(folderId, name, wrap) {
+    closeCandidate();
+    const overlay = el(`<div class="cx-overlay" id="cxOverlay">
+      <div class="cx-modal" role="dialog" aria-modal="true" aria-label="Candidate details">
+        <div class="cx-head">
+          <div class="cx-title">${esc(name || 'Candidate')}</div>
+          <button type="button" class="cx-x" aria-label="Close">&times;</button>
+        </div>
+        <div class="cx-body" id="cxBody"><div class="skeleton"></div><div class="skeleton"></div></div>
+      </div>
+    </div>`);
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeCandidate(); });
+    overlay.querySelector('.cx-x').addEventListener('click', closeCandidate);
+    _cxEsc = (e) => { if (e.key === 'Escape') closeCandidate(); };
+    document.addEventListener('keydown', _cxEsc);
+    loadCandidate(folderId, wrap);
+  }
+  async function loadCandidate(folderId, wrap) {
+    const body = $('#cxBody'); if (!body) return;
+    try {
+      const r = await api(KINDS.candidateDetail, { folderId });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'Could not load this candidate.');
+      renderCandidate(body, r.candidate, r.comms || [], wrap);
+    } catch (err) {
+      body.innerHTML = `<div class="state"><div class="state-title">Could not load candidate</div><div>${esc(err.message)}</div></div>`;
+    }
+  }
+  function renderCandidate(body, c, comms, wrap) {
+    const HUBd = window.HUB || {};
+    const entTag = HUBd.entTag ? HUBd.entTag(c.entity) : '';
+    const docPill = HUBd.docPill || ((v, l) => `<span class="doc-pill ${v ? 'is-on' : ''}">${esc(l)}</span>`);
+    const statePill = c.provisioned ? 's-done' : c.approved ? 's-inprogress' : c.docs_ready ? 's-ready' : 's-pending';
+    const fact = (label, val) => val ? `<div class="cx-fact"><span class="cx-k">${esc(label)}</span><span class="cx-v">${esc(val)}</span></div>` : '';
+    const induction = [c.induction_wed, c.induction_thu].filter(Boolean).map((d) => fmtNiceDate(d)).join(' & ');
+    const commsRows = comms.length
+      ? comms.map((m) => `<div class="cx-log-row">
+          <div class="cx-log-main"><div class="cx-log-label">${esc(m.label || m.type || 'Message')}</div>
+            ${m.detail ? `<div class="cx-log-detail muted">${esc(m.detail)}</div>` : ''}
+            ${m.to ? `<div class="cx-log-to muted">to ${esc(m.to)}</div>` : ''}</div>
+          <div class="cx-log-when muted" title="${esc(m.at || '')}">${esc(timeAgo(m.at))}</div>
+        </div>`).join('')
+      : `<div class="cx-log-empty muted">No messages have been sent to this candidate yet.</div>`;
+    const canRemove = USER && (USER.isAdmin || USER.isSuper) && !c.provisioned;
+    const canRemind = !c.approved && !c.provisioned;
+    body.innerHTML = `
+      <div class="cx-row cx-top">${entTag}<span class="pill ${statePill}">${esc(c.status || '')}</span></div>
+      <div class="cx-facts">
+        ${fact('Team', c.team)}${fact('Designation', c.designation)}${fact('Reporting senior', c.senior_name)}
+        ${fact('Start date', c.start_date ? fmtNiceDate(c.start_date) : '')}
+        ${fact('Email', c.email)}${fact('Cell', c.contact)}
+        ${induction ? fact('Induction', induction) : ''}
+      </div>
+      <div class="cx-block"><span class="cx-sec">Documents</span>
+        <div class="docs">${docPill(c.docs && c.docs.contract, 'Contract')}${docPill(c.docs && c.docs.id, 'ID')}${docPill(c.docs && c.docs.poa, 'Address')}${docPill(c.docs && c.docs.bank, 'Bank')}</div>
+      </div>
+      <div class="cx-block"><span class="cx-sec">Communications sent</span><div class="cx-log">${commsRows}</div></div>
+      <div class="cx-actions">
+        ${canRemind ? `<button type="button" class="btn btn-ghost btn-sm" id="cxRemind">Send reminder</button>` : ''}
+        ${canRemove ? `<button type="button" class="btn btn-danger btn-sm" id="cxRemove">Remove candidate</button>` : ''}
+      </div>`;
+    const remindBtn = $('#cxRemind', body);
+    if (remindBtn) remindBtn.addEventListener('click', async () => {
+      remindBtn.classList.add('loading'); remindBtn.disabled = true;
+      try {
+        const r = await api(KINDS.remind, { folderId: c.folderId });
+        toast('Reminder sent', `A follow-up with the contract was sent to ${esc(r.to || c.name || 'the candidate')}.`, 'ok');
+        loadCandidate(c.folderId, wrap);            // refresh so the new comms entry shows
+        if (wrap) loadStatus(wrap, true);
+      } catch (err) {
+        toast('Could not send reminder', err.message, 'err');
+        remindBtn.classList.remove('loading'); remindBtn.disabled = false;
+      }
+    });
+    const removeBtn = $('#cxRemove', body);
+    if (removeBtn) removeBtn.addEventListener('click', async () => {
+      if (!confirm(`Remove ${c.name || 'this candidate'} from the Progress report? They drop off the list (the record is kept for audit and can be restored). Use this for someone who did not complete onboarding.`)) return;
+      removeBtn.classList.add('loading'); removeBtn.disabled = true;
+      try {
+        await api(KINDS.remove, { folderId: c.folderId });
+        toast('Candidate removed', `${c.name || 'The candidate'} has been removed from the Progress report.`, 'ok');
+        closeCandidate();
+        if (wrap) loadStatus(wrap, true);
+      } catch (err) {
+        toast('Could not remove', err.message, 'err');
+        removeBtn.classList.remove('loading'); removeBtn.disabled = false;
+      }
     });
   }
 

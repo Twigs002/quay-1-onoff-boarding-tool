@@ -107,6 +107,8 @@ function _sendInductionPacket_(folderId, o, wed, thu) {
           htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu }, cred, teamLogin),
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
+      logComms_(folderId, 'induction_packet', o.email,
+        'Induction packet (' + fmtDate_(wed) + (thu ? ' & ' + fmtDate_(thu) : '') + ')', o.name);
     }
     // Team HubSpot login NOT on record -> alert the team (CC Sheldon + Marthinus) so the new hire
     // gets access and no one has to chase it. Suppressed when internal mail is off (ccEnabled_).
@@ -230,7 +232,7 @@ function tuesdayDigest_() {
   var weekStart = _mondayOfThisWeek_();
   var weekEnd = _addDays_(weekStart, 6);
   var buckets = { dueThisWeek: [], unbooked: [] };
-  listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o); }).forEach(function (o) {
+  listOnboarding_(function (o) { return o.entity === 'quay1' && !_isMigratedLegacy_(o) && !_isRemoved_(o); }).forEach(function (o) {
     var wed = _asDate_(o.induction_wed);
     if (wed && wed >= weekStart && wed <= weekEnd) buckets.dueThisWeek.push(o);
     else if (!o.induction_wed && !o.induction_thu) buckets.unbooked.push(o);

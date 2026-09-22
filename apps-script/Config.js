@@ -117,6 +117,10 @@ var CFG = {
     // PRIVATE tracker (only admins/superusers can open it), so sheet sharing IS the access control.
     // Written by recordCredential_ on a live googleCreate_; upsert by quay_email (no duplicates).
     CREDENTIALS: 'Google Credentials',
+    // Append-only per-candidate communications log (Comms.js): one row per message actually sent to a
+    // candidate (contract, FICA nudges/reminders, induction invite + packet, FICA decline). Read back
+    // by the Progress report candidate breakdown. Created on demand, so no setupHub re-run is needed.
+    COMMS_LOG: 'Comms Log',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',

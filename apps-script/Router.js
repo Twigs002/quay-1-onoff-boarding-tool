@@ -13,14 +13,16 @@
  *   book_induction                 -> Induction.bookInduction_(body)  [token-less]
  *   onboard_quay1                  -> Onboarding_Quay1.onboardQuay1_(body, ctx)   [onboarder: super/admin/broker]
  *   onboard_aqua                   -> Onboarding_Aqua.onboardAqua_(body, ctx)     [onboarder: super/admin/broker]
- *   approve                        -> approveAndProvision_(folderId, ctx)         [admin]
- *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [admin]
+ *   approve                        -> approveAndProvision_(folderId, ctx)         [adminCheck: super/admin/Kat]
+ *   decline_fica                   -> declineFica_(folderId, reason, ctx)         [adminCheck: super/admin/Kat]
  *   remind                         -> _remindContract_(folderId, ctx)             [onboarder]
  *   resend_packet                  -> resendInductionPacket_(folderId, ctx)       [onboarder]
  *   provision                      -> Provisioning.provisionAll_(folderId, systems, ctx) [admin]
  *   offboard                       -> Offboarding.offboardRequest_(body, ctx)     [admin]
  *   offboard_notify                -> requestOffboardNotify_(body, ctx)           [onboarder]
  *   status                         -> Queue.readForUi_(ctx)           [authed, role-scoped]
+ *   candidate_detail               -> Queue.candidateDetail_(folderId, ctx)  [onboarder, row-scoped]
+ *   remove                         -> _removeDispatch_(body, ctx)     [admin]  soft-delete a candidate
  *   programs                       -> Programs.programsData_(ctx)     [authed, role-scoped]
  *   retry                          -> Queue.retryRow_(queue_id, ctx)  [super]
  *
@@ -92,6 +94,8 @@ function dispatch_(kind, body, ctx) {
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
     case 'status': return readForUi_(ctx);
+    case 'candidate_detail': return candidateDetail_(String(body.folderId || ''), ctx);
+    case 'remove': return _removeDispatch_(body, ctx);
     case 'programs': return programsData_(ctx);
     case 'retry': return retryRow_(String(body.queue_id || ''), ctx);
     default: return { ok: false, error: 'unknown action: ' + kind };
@@ -99,18 +103,35 @@ function dispatch_(kind, body, ctx) {
 }
 
 /** Approve & set up (kind:'approve'). The ONLY path that turns a reviewed candidate into real accounts,
- *  on a deliberate admin click. Asserts admin here; the ready/idempotency checks live in the handler. */
+ *  on a deliberate click. Admin Check is open to super/admin AND the allowlisted individual (Kat) via
+ *  requireAdminCheck_; the ready/idempotency checks live in the handler. */
 function _approveDispatch_(body, ctx) {
-  requireAdmin_(ctx);
+  requireAdminCheck_(ctx);
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return approveAndProvision_(folderId, ctx);
 }
 
+/** Remove a candidate from the pipeline (kind:'remove'). A reversible soft-delete for someone who did
+ *  not complete onboarding: sets the status to 'Removed' so the row drops off the Progress report,
+ *  digest and reminder sweeps but is preserved in the sheet for audit. Admin-only (super/admin) - this
+ *  is NOT part of Kat's Admin Check grant. Provisioned rows are refused (offboard them instead). */
+function _removeDispatch_(body, ctx) {
+  requireAdmin_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  if (o.provisioned_at) return { ok: false, error: 'this candidate is already set up - use Offboard to remove their access, not Remove' };
+  setOnboardingStatus_(folderId, 'Removed');
+  logAudit_('candidate_removed', { folderId: folderId, by: (ctx && ctx.email) || 'admin', name: o.name || '' });
+  return { ok: true, removed: true };
+}
+
 /** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records the
  *  reason and notifies the candidate to re-submit. Never provisions. */
 function _declineDispatch_(body, ctx) {
-  requireAdmin_(ctx);
+  requireAdminCheck_(ctx);
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return declineFica_(folderId, String(body.reason || ''), ctx);

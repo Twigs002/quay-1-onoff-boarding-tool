@@ -183,6 +183,7 @@ function _bookedForResend_(isAdmin, email) {
   var out = [];
   listOnboarding_().forEach(function (o) {
     if (!o.induction_wed && !o.induction_thu) return;   // only once a week is booked
+    if (_isRemoved_(o)) return;                          // admin-removed candidates drop off
     if (!isAdmin && email && String(o.requester_email).toLowerCase() !== email) return;
     out.push({
       folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
@@ -190,6 +191,40 @@ function _bookedForResend_(isAdmin, email) {
     });
   });
   return out;
+}
+
+/**
+ * Per-candidate breakdown for the Progress report click-in panel (kind:'candidate_detail'). Returns
+ * the row summary (identity, documents, approval + provisioning state, induction) PLUS the full
+ * communications log (readComms_) so the UI can show everything ever sent to this person. Row-scoped:
+ * a non-admin (broker) may only open a candidate they onboarded; supers/admins may open anyone.
+ */
+function candidateDetail_(folderId, ctx) {
+  requireOnboarder_(ctx);
+  var key = String(folderId || '');
+  if (!key) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(key);
+  if (!o) return { ok: false, error: 'onboarding row not found' };
+  var isAdmin = ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin);
+  var email = ctx && ctx.email ? String(ctx.email).toLowerCase() : '';
+  if (!isAdmin && email && String(o.requester_email || '').toLowerCase() !== email) {
+    return { ok: false, error: 'forbidden' };
+  }
+  return {
+    ok: true,
+    candidate: {
+      folderId: o.folderId, name: o.name, team: o.team, entity: o.entity || 'quay1',
+      status: o.status || '', email: o.email || '', contact: o.contact || '',
+      start_date: o.start_date || '', designation: o.designation || '', senior_name: o.senior_name || '',
+      docs: { contract: !!o.fica_contract, id: !!o.fica_id, poa: !!o.fica_poa, bank: !!o.fica_bank },
+      docs_ready: _docsReady_(o),
+      approved: !!o.approved_at, approved_at: o.approved_at || '', approved_by: o.approved_by || '',
+      provisioned: !!o.provisioned_at, reminded_at: o.reminded_at || '',
+      induction_wed: o.induction_wed || '', induction_thu: o.induction_thu || '',
+      contract_emailed_at: o.contract_emailed_at || '',
+    },
+    comms: readComms_(key),
+  };
 }
 
 /**
@@ -218,6 +253,9 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     // Existing staff imported from the old tracker are already onboarded; keep them out of the
     // active pipeline so they never appear in the tracker or surface as "ready to approve".
     if (_isMigratedLegacy_(o)) return;
+    // Admin-removed candidates (did not complete onboarding) drop off the pipeline; the row stays
+    // in the sheet for audit.
+    if (_isRemoved_(o)) return;
     var s = setup[o.folderId] || { incomplete: false, error: false };
     // Drop only when fully set up: provisioned AND no create row is still pending or errored.
     if (o.provisioned_at && !s.incomplete) return;
