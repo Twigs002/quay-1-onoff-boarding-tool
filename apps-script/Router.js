@@ -107,7 +107,7 @@ function dispatch_(kind, body, ctx) {
 /** Approve & set up (kind:'approve'). The ONLY path that turns a reviewed candidate into real accounts,
  *  on a deliberate admin click. Asserts admin here; the ready/idempotency checks live in the handler. */
 function _approveDispatch_(body, ctx) {
-  requireAdmin_(ctx);
+  requireAdminCheck_(ctx);   // super/admin OR the allowlisted Admin Check individual (Kat)
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return approveAndProvision_(folderId, ctx);
@@ -133,7 +133,7 @@ function _removeOnboardingDispatch_(body, ctx) {
  *    body = { folderId, declines:{ id?, poa?, bank? -> reason }, contract_incorrect: reason|'',
  *             reason?: legacy single string (back-compat) }  */
 function _declineDispatch_(body, ctx) {
-  requireAdmin_(ctx);
+  requireAdminCheck_(ctx);   // super/admin OR the allowlisted Admin Check individual (Kat)
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return declineFica_(folderId, {

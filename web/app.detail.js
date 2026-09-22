@@ -117,6 +117,12 @@
           <p class="fs-title">Account setup</p>
           ${accounts}
         </div>
+        <div class="block">
+          <p class="fs-title">Communications sent</p>
+          ${(d.comms && d.comms.length)
+            ? d.comms.map((m) => `<div class="cd-comm"><span class="cd-comm-label">${esc(m.label || m.type || 'Message')}</span><span class="cd-comm-when muted">${m.at ? esc(fmtDay(m.at)) : ''}</span></div>`).join('')
+            : `<p class="f-val muted" style="font-weight:500">No messages have been sent to this candidate yet.</p>`}
+        </div>
         ${stageActions ? `<div class="block">
           <p class="fs-title">Stage</p>
           <div class="stage-now">${esc(current ? current.label : 'Complete')}</div>

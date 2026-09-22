@@ -296,7 +296,7 @@ function provisionReadyBatch_() {
       // Quay 1: the induction week is already auto-assigned (at FICA submission), so send the induction
       // PACKET directly with the assigned dates + logins - no "pick your week" step. Aqua: Google-only
       // welcome pack (no induction). Same one-time sends as the interactive accept path.
-      if ((o.entity || '') === 'aqua') _sendAquaWelcome_(o.folderId, o);
+      if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(o.folderId, o); _maybeAquaInduction_(o.folderId, o); }
       else {
         var iw = _ensureInductionWeekForProvisioning_(o);
         _sendInductionPacket_(o.folderId, o, iw.wed, iw.thu, iw.rescheduled);
@@ -400,7 +400,7 @@ function approveAndProvision_(folderId, ctx) {
     // Real accounts exist now. Quay 1: the induction week was already auto-assigned at FICA submission,
     // so send the induction PACKET directly (assigned dates + logins), no "pick your week" step. Aqua
     // has no induction, so an Aqua contractor gets the Google-only welcome pack. CC the senior when on.
-    if ((o.entity || '') === 'aqua') _sendAquaWelcome_(folderId, o);
+    if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(folderId, o); _maybeAquaInduction_(folderId, o); }
     else {
       var iw = _ensureInductionWeekForProvisioning_(o);
       _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
@@ -448,10 +448,48 @@ function _sendAquaWelcome_(folderId, o) {
     GmailApp.sendEmail(o.email, 'Welcome to ' + company.name + (o.name ? ' - ' + o.name : ''), plain,
       { name: company.name, htmlBody: aquaWelcomeHtml_(company, first, cred),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    logComms_(folderId, 'aqua_welcome', o.email, 'Aqua welcome pack (Google login)', o.name);
     // Record that the Aqua welcome pack went out and reflect it on the HR row (promoted moments ago).
     setOnboardingCell_(folderId, ONB_COL.welcome_email_at, nowIso_());
     hrMarkWelcomeSent_(folderId);
   } catch (e) { logAudit_('aqua_welcome_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * Aqua designations whose holders ALSO attend induction (on top of their welcome pack): Broker
+ * Assistant + Lead Nurturer. Fancy Caller + Relationship Manager do not. Case-insensitive exact
+ * match on the stored designation (Onboarding row). Set on the Aqua onboard form (internal-only).
+ */
+function _aquaInductionEligible_(designation) {
+  var d = String(designation == null ? '' : designation).trim().toLowerCase();
+  return d === 'broker assistant' || d === 'lead nurturer';
+}
+
+/**
+ * For an Aqua contractor whose designation attends induction, assign an induction week and send a
+ * clean, Aqua-appropriate induction notice (dates + venue) IN ADDITION to the welcome pack. No-op for
+ * ineligible designations and for Quay 1. The notice is login-free (Google details ride the welcome
+ * pack), so it never leaks Quay 1 PropData / Flow / HubSpot content. DRY_RUN-safe + non-fatal.
+ */
+function _maybeAquaInduction_(folderId, o) {
+  if (!o || (o.entity || '') !== 'aqua') return;
+  if (!_aquaInductionEligible_(o.designation)) return;
+  var iw = _ensureInductionWeekForProvisioning_(o);   // assigns induction_wed/thu on the row (DRY_RUN-safe)
+  if (DRY_RUN_()) { logAudit_('aqua_induction_dryrun', { folderId: folderId, wed: iw.wed, thu: iw.thu }); return; }
+  try {
+    if (!isEmail_(o.email)) return;
+    var company = CFG.COMPANY.aqua || CFG.COMPANY.quay1;
+    var first = firstName_(o.name);
+    var when = fmtDate_(iw.wed) + (iw.thu ? ' and ' + fmtDate_(iw.thu) : '');
+    var subject = company.name + ' induction' + (o.name ? ' - ' + o.name : '');
+    var plain = 'Hi ' + first + ',\n\nWelcome to ' + company.name + '. As part of your role you will ' +
+      'attend our induction on ' + when + ', 09:00 to 12:00, at ' + INDUCTION_ADDRESS + '.\n\n' +
+      'Please arrive a few minutes early. Your Google account details are in a separate welcome email.\n\n' +
+      'Warm regards,\nThe ' + company.name + ' Team';
+    GmailApp.sendEmail(o.email, subject, plain,
+      { name: company.name, cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    logComms_(folderId, 'aqua_induction', o.email, 'Aqua induction notice (' + when + ')', o.name);
+  } catch (e) { logAudit_('aqua_induction_notice_failed', { folderId: folderId, error: String(e) }); }
 }
 
 /**
@@ -604,6 +642,7 @@ function declineFica_(folderId, payload, ctx) {
       _ficaDeclinePlain_(company, firstName_(o.name), record, ficaUrl, labels),
       { name: company.name, htmlBody: ficaDeclineHtml_(company, firstName_(o.name), record, ficaUrl),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
+    logComms_(folderId, 'fica_declined', o.email, 'FICA declined - re-submit requested' + (by ? ' (by ' + by + ')' : ''), o.name);
   } catch (e) { logAudit_('fica_decline_email_failed', { folderId: folderId, error: String(e) }); }
 
   logAudit_('fica_declined', {

@@ -87,6 +87,26 @@ function requireAdmin_(ctx) {
 }
 
 /**
+ * Individuals (by staff work email) allowed to use the Admin Check accept/decline actions WITHOUT
+ * being a full admin. A tiny, explicit allowlist per the product decision to give Kat - and only Kat
+ * - Admin Check access without granting her the rest of the admin surface (offboard/provision/retry/
+ * remove stay requireAdmin_/requireSuper_). Mirror on the frontend: web/app.js canAdminCheck (username 'kat').
+ */
+var ADMIN_CHECK_ALLOW_ = ['kat@quay1.co.za'];
+
+/**
+ * Assert the caller may use the Admin Check tab's accept/decline actions: a super/admin, OR an
+ * explicitly allowlisted individual (Kat). Everything else about the admin surface stays gated by
+ * requireAdmin_ - this relaxes ONLY the accept/decline path.
+ */
+function requireAdminCheck_(ctx) {
+  if (ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin)) return;
+  var email = ctx && ctx.email ? String(ctx.email).trim().toLowerCase() : '';
+  if (email && ADMIN_CHECK_ALLOW_.indexOf(email) !== -1) return;
+  throw new Error('forbidden: admin role required');
+}
+
+/**
  * Assert the caller may submit an ONBOARDING request: super, admin, or broker.
  * A broker requests only for their own hire - requester_email/name are force-set from
  * ctx in the onboard handlers, so a broker can never spoof another requester. Offboarding

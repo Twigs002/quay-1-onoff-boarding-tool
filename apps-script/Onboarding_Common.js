@@ -73,6 +73,7 @@ function _emailContract_(entity, toEmail, name, folderId, pdfFile, extraCc) {
     // off. Non-fatal: a stamp failure must never fail the (already sent) contract email.
     try { setOnboardingCell_(folderId, ONB_COL.contract_emailed_at, nowIso_()); }
     catch (e) { logAudit_('contract_emailed_stamp_failed', { folderId: folderId, error: String(e) }); }
+    logComms_(folderId, 'contract', toEmail, 'Contract + FICA link' + (pdfFile ? ' (agreement PDF attached)' : ''), name);
     return true;
   } catch (err) {
     logAudit_('email_contract_failed', { entity: entity, to: toEmail, error: String(err) });
@@ -143,6 +144,7 @@ function _remindContract_(folderId, ctx) {
     GmailApp.sendEmail(o.email, subject, plain, opts);
     setOnboardingCell_(folderId, ONB_COL.reminded_at, nowIso_());
     logAudit_('contract_reminder_sent', { folderId: folderId, to: o.email, by: (ctx && ctx.email) || '' });
+    logComms_(folderId, 'contract_reminder', o.email, 'Manual reminder' + (ctx && ctx.email ? ' by ' + ctx.email : ''), o.name);
     return { ok: true, sent: true, to: o.email, reminded_at: nowIso_() };
   } catch (err) {
     logAudit_('contract_reminder_failed', { folderId: folderId, error: String(err) });
@@ -219,6 +221,7 @@ function _sendFicaFollowUp_(o) {
   setOnboardingCell_(o.folderId, ONB_COL.fica_followup_at, nowIso_());
   GmailApp.sendEmail(o.email, subject, plain, opts);
   logAudit_('fica_followup_sent', { folderId: o.folderId, to: o.email });
+  logComms_(o.folderId, 'fica_nudge', o.email, 'Automatic 12h FICA link nudge', o.name);
 }
 
 /**
@@ -235,4 +238,61 @@ function ficaFollowUpSweep_() {
     catch (e) { logAudit_('fica_followup_failed', { folderId: o.folderId, error: String(e) }); }
   });
   if (due.length) logAudit_('fica_followup_sweep', { sent: due.length });
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Weekly FICA reminder (Tuesday 09:00)
+ *
+ * The 12-hour nudge above fires ONCE. This is a recurring weekly chase: every Tuesday 09:00 (SA), it
+ * reminds every candidate whose FICA is STILL outstanding, so they have the morning to get it in.
+ * Unlike the 12h nudge it carries no once-only marker - it recurs until the person submits (or is
+ * approved / provisioned). Removed candidates are deleted rows (removeOnboarding_), so they never
+ * appear here. Scheduled via setupTriggers(). Each send is recorded on the communications log.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Whether a row is due the recurring weekly FICA reminder: contract sent, FICA not yet submitted,
+ *  not approved / provisioned, and a real (non-test) email. No time/once-only gate - the weekly
+ *  trigger itself is the cadence. */
+function _ficaWeeklyDue_(o) {
+  if (!o.contract_emailed_at) return false;
+  if (o.provisioned_at || o.approved_at) return false;
+  if (_ficaSubmitted_(o)) return false;
+  if (_isTestRecipient_(o.email)) return false;
+  return isEmail_(o.email);
+}
+
+/** Send the recurring weekly "your FICA is still outstanding" reminder for one row. Reuses the FICA
+ *  follow-up HTML (same secure-link call to action); records the send on the comms log. */
+function _sendFicaWeeklyReminder_(o) {
+  var entity = o.entity || 'quay1';
+  var company = CFG.COMPANY[entity] || CFG.COMPANY.quay1;
+  var first = firstName_(o.name);
+  var ficaUrl = ficaLink_(o.folderId);
+  var subject = 'Reminder: your ' + company.name + ' FICA documents are still outstanding' +
+    (o.name ? ' - ' + o.name : '');
+  var plain =
+    'Hi ' + first + ',\n\n' +
+    'A friendly reminder that we are still waiting on your FICA documents to complete your ' +
+    company.name + ' setup. Please upload them through your personal, secure link:\n\n' +
+    ficaUrl + '\n\n' +
+    'Uploading through the link is the only way your documents reach our system. If you have already ' +
+    'uploaded, thank you and please ignore this note.\n\nIf you need a hand, simply reply and we will ' +
+    'gladly help.\n\nWarm regards,\nThe ' + company.name + ' Team';
+  GmailApp.sendEmail(o.email, subject, plain,
+    { name: company.name, htmlBody: ficaFollowUpHtml_(company, first, ficaUrl) });
+  logAudit_('fica_weekly_reminder_sent', { folderId: o.folderId, to: o.email });
+  logComms_(o.folderId, 'fica_reminder', o.email, 'Weekly FICA reminder', o.name);
+}
+
+/**
+ * Time-driven weekly sweep (installed for Tuesday 09:00 by setupTriggers): chase every candidate whose
+ * FICA is still outstanding. Recurs each week until they submit. Non-fatal per row.
+ */
+function ficaWeeklyReminderSweep_() {
+  var due = listOnboarding_(function (o) { return _ficaWeeklyDue_(o); });
+  due.forEach(function (o) {
+    try { _sendFicaWeeklyReminder_(o); }
+    catch (e) { logAudit_('fica_weekly_reminder_failed', { folderId: o.folderId, error: String(e) }); }
+  });
+  if (due.length) logAudit_('fica_weekly_reminder_sweep', { sent: due.length });
 }

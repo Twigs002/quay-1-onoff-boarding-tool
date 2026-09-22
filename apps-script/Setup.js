@@ -55,6 +55,7 @@ function setupTriggers() {
         fn === 'flowSetupInductionWeek_' ||
         fn === 'reapOffboarding_' ||
         fn === 'provisionReadyBatch_' || fn === 'ficaFollowUpSweep_' ||
+        fn === 'ficaWeeklyReminderSweep_' ||
         fn === 'workPermitExpirySweep_') ScriptApp.deleteTrigger(t);
   });
   // Induction digest goes out TWICE on Tuesday: a morning pass (~07:00) and a final pass (~14:00) so
@@ -81,6 +82,10 @@ function setupTriggers() {
   // yet uploaded via their secure link (self-limits to daytime hours). See ficaFollowUpSweep_.
   ScriptApp.newTrigger('ficaFollowUpSweep_').timeBased()
     .everyHours(1).create();
+  // Weekly FICA reminder: every Tuesday ~09:00 (Africa/Johannesburg), re-chase everyone whose FICA is
+  // still outstanding so they can get it in the same morning. Recurs weekly. See ficaWeeklyReminderSweep_.
+  ScriptApp.newTrigger('ficaWeeklyReminderSweep_').timeBased()
+    .onWeekDay(ScriptApp.WeekDay.TUESDAY).atHour(9).create();
   // Work-permit expiry alert: weekly HR digest of permits expiring soon or already lapsed. Monday
   // ~08:00 (Africa/Johannesburg per appsscript.json timeZone). See workPermitExpirySweep_ in Hr.js.
   ScriptApp.newTrigger('workPermitExpirySweep_').timeBased()

@@ -117,6 +117,14 @@ function rescheduleInductionCalendar_(folderId, o) {
  *   induction Day 1/Day 2. Used by the backfill (backfillTeamDates) so an already-provisioned starter
  *   whose induction is in the past does not get induction invites re-sent for a past event.
  */
+/** Standing guests (CFG.TEAM_DATES_GUESTS, e.g. Kat) invited to every birthday + work-anniversary
+ *  series so they see/are-reminded of the whole team's dates. Returns a createAllDayEventSeries
+ *  options object {guests, sendInvites}, or {} when none are configured. */
+function _teamDatesGuestOpts_() {
+  var list = (CFG.TEAM_DATES_GUESTS || []).filter(function (e) { return isEmail_(e); });
+  return list.length ? { guests: list.join(','), sendInvites: true } : {};
+}
+
 function createOnboardingCalendarEvents_(folderId, o, opts) {
   o = o || {};
   opts = opts || {};
@@ -160,14 +168,14 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
     { key: 'birthday', make: function () {
         var d = _dateAt_(o.birthday, 0); if (!d) return null;
         return teamDates().createAllDayEventSeries('Birthday - ' + name, d,
-          CalendarApp.newRecurrence().addYearlyRule()).getId();
+          CalendarApp.newRecurrence().addYearlyRule(), _teamDatesGuestOpts_()).getId();
       } },
     { key: 'anniversary', make: function () {
         var d = _dateAt_(o.start_date, 0); if (!d) return null;
         // Year from the PARSED date, not a slice of the raw string - start_date is stored human-
         // formatted ("16 September 2026"), so slicing the first 4 chars would give "16 S", not the year.
         return teamDates().createAllDayEventSeries('Work anniversary - ' + name + ' (joined ' + d.getFullYear() + ')', d,
-          CalendarApp.newRecurrence().addYearlyRule()).getId();
+          CalendarApp.newRecurrence().addYearlyRule(), _teamDatesGuestOpts_()).getId();
       } },
   ];
 

@@ -125,6 +125,10 @@ var CFG = {
     // swallowed failure (FICA file, auto-assign, HR sync, packet, provisioning) is actually SEEN. The
     // Tuesday digest reports a count. Written lazily by _appendAlert_; headers ensured by setupHub.
     ALERTS: 'Alerts',
+    // Append-only per-candidate communications log (Comms.js): one row per message actually sent to a
+    // candidate (contract, FICA nudges/reminders, induction packet, Aqua welcome, FICA decline). Read
+    // back by the candidate detail page. Created on demand, so no setupHub re-run is needed.
+    COMMS_LOG: 'Comms Log',
   },
   // Public divisions directory (the dashboards' data file), fetched to seed the Team Directory tab.
   DIVISIONS_URL: 'https://twigs002.github.io/quay-1-onoff-boarding-tool/data/divisions.json',
@@ -206,6 +210,9 @@ var CFG = {
   // Recipients of the Tuesday induction digest specifically. Kept separate from INTERNAL_NOTIFY (which
   // also drives offboarding alerts) so the digest audience can differ - Lieze is off the digest.
   DIGEST_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za'],
+  // Standing guests invited to EVERY birthday + work-anniversary event on "Quay 1 Team Dates" (Calendar.js),
+  // so they see/are-reminded of the whole team's dates. Added as event guests; extend as needed.
+  TEAM_DATES_GUESTS: ['kat@quay1.co.za'],
   // SA public holidays, used ONLY to FLAG (never move) an induction day that lands on one. Extend
   // yearly - _inductionHolidayFlag_ warns if an induction date's year is not covered here so a missing
   // year is never silently treated as holiday-free. Includes Good Friday / Family Day (Easter) and the

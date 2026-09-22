@@ -204,6 +204,8 @@ function _sendInductionPacket_(folderId, o, wed, thu, rescheduled) {
           htmlBody: inductionPacketHtml_(company, o, { wed: wed, thu: thu, rescheduled: rescheduled }, cred, teamLogin),
           cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined,
         });
+      logComms_(folderId, 'induction_packet', o.email,
+        'Induction packet (' + fmtDate_(wed) + (thu ? ' & ' + fmtDate_(thu) : '') + ')', o.name);
       // The induction packet IS the Quay 1 welcome pack: record that it went out and reflect it on the
       // HR row (which was promoted earlier, on acceptance). Non-fatal.
       try {

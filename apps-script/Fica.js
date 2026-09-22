@@ -262,6 +262,7 @@ function ficaUpload_(body) {
           cc: seniorCc,
           name: company.name, htmlBody: ficaThankYouHtml_(company, firstName_(name), assignedWeek),
         });
+      logComms_(folderId, 'fica_received_ack', meta.email, 'FICA received - acknowledgement', name);
     } catch (err) { logAudit_('fica_thankyou_failed', { folderId: folderId, error: String(err) }); }
   }
 

@@ -676,6 +676,10 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .cd-host .docrow .name { font-size: 13.5px; font-weight: 600; }
 .cd-host .stage-now { font-size: 16px; font-weight: 800; margin: 2px 0 14px; }
 .cd-host .btns { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.cd-host .cd-comm { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line-2); }
+.cd-host .cd-comm:last-child { border-bottom: 0; }
+.cd-host .cd-comm-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.cd-host .cd-comm-when { font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .doc-req { background: #FBF3DA; color: #8A6D0B; }
 .cd-week { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cd-week[hidden] { display: none; }

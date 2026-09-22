@@ -107,5 +107,7 @@ function candidateDetail_(folderId, ctx) {
     accounts: accounts,
     steps: steps,
     declined_at: o.declined_at || '',
+    // Per-candidate communications history (every email actually sent to them), newest-first.
+    comms: readComms_(folderId),
   };
 }
