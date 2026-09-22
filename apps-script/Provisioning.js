@@ -353,6 +353,13 @@ function approveAndProvision_(folderId, ctx) {
 function _sendInductionInvite_(folderId, o) {
   try {
     if (!isEmail_(o && o.email)) { logAudit_('induction_invite_skipped_no_email', { folderId: folderId }); return; }
+    // Aqua Promotions: only certain designations attend induction (Broker Assistant + Lead Nurturer);
+    // Fancy Callers and Relationship Managers do not, so they receive no induction invite. Quay 1 is
+    // unaffected - every Quay 1 starter is invited. See _aquaInductionEligible_.
+    if (String((o && o.entity) || '') === 'aqua' && !_aquaInductionEligible_(o && o.designation)) {
+      logAudit_('induction_invite_skipped_designation', { folderId: folderId, designation: (o && o.designation) || '' });
+      return;
+    }
     var company = CFG.COMPANY[o.entity || 'quay1'] || CFG.COMPANY.quay1;
     var link = inductionLink_(folderId);
     if (!link) logAudit_('induction_invite_no_link', { folderId: folderId });   // WEBAPP_URL unset -> dead link
@@ -362,6 +369,16 @@ function _sendInductionInvite_(folderId, o) {
       { name: company.name, htmlBody: inductionInviteHtml_(company, firstName_(o.name), link),
         cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
   } catch (e) { logAudit_('induction_invite_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * Aqua designations whose holders attend induction. Case-insensitive exact match on the stored
+ * designation text (Onboarding row col K). Broker Assistants and Lead Nurturers attend; Fancy
+ * Callers and Relationship Managers do not. Quay 1 rows never reach this - they are always invited.
+ */
+function _aquaInductionEligible_(designation) {
+  var d = String(designation == null ? '' : designation).trim().toLowerCase();
+  return d === 'broker assistant' || d === 'lead nurturer';
 }
 
 /**
