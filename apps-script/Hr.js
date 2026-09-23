@@ -108,7 +108,16 @@ function hrPromote_(folderId) {
   }
 
   var ss = SpreadsheetApp.openById(hrSheetId_());
-  var dest = _hrEnsureTab_(ss, destName, true);
+  // Do NOT create the destination tab if missing: it is HR's own human-maintained tab. Silently
+  // creating a same-named duplicate would strand the starter on a phantom tab (the exact cause of a
+  // "moved but not on the sheet" report). _hrEnsureTab_ already reuses a spacing/case-drifted tab; a
+  // genuinely missing destination is an ops problem, so alert loudly and leave the person on the
+  // staging (tracking) list - visible - rather than promote into a tab no one is looking at.
+  var dest = _hrEnsureTab_(ss, destName, false);
+  if (!dest) {
+    logAudit_('hr_promote_dest_tab_missing_failed', { folderId: folderId, name: o.name, entity: entity, dest: destName });
+    return { ok: false, error: 'HR destination tab "' + destName + '" not found - not promoting (left on the staging list). Check the exact tab name in the HR sheet.' };
+  }
   var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
   // Idempotent against the LIVE sheet, not just the hr_promoted_at marker: if a prior run appended
   // this person but its marker write failed, re-running must NOT duplicate the destination row.
@@ -226,6 +235,14 @@ function _hrBuildRow_(o) {
 function _hrEnsureTab_(ss, name, createIfMissing) {
   var sh = ss.getSheetByName(name);
   if (sh) return sh;
+  // Tolerant match FIRST (trimmed + case-insensitive): a tab whose name drifted by spacing or case -
+  // e.g. a hand-renamed "New Brokers (Automated) " with a trailing space - is REUSED, never forked
+  // into a silent duplicate. This is the guard against stranding a promoted starter on a phantom tab.
+  var want = String(name || '').trim().toLowerCase();
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i].getName() || '').trim().toLowerCase() === want) return all[i];
+  }
   if (!createIfMissing) return null;
   sh = ss.insertSheet(name);
   var headers = HR_HEADERS.slice();
