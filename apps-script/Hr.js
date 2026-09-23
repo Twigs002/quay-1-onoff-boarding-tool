@@ -100,7 +100,6 @@ function hrPromote_(folderId) {
 
   var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
   var destName = HR_TAB[entity];
-  var row = _hrBuildRow_(o);
 
   if (!hrSyncEnabled_()) {
     logAudit_('hr_promote_dryrun', { folderId: folderId, name: o.name, entity: entity, dest: destName });
@@ -118,12 +117,34 @@ function hrPromote_(folderId) {
     logAudit_('hr_promote_dest_tab_missing_failed', { folderId: folderId, name: o.name, entity: entity, dest: destName });
     return { ok: false, error: 'HR destination tab "' + destName + '" not found - not promoting (left on the staging list). Check the exact tab name in the HR sheet.' };
   }
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+  // Header-driven write: place each value the tool OWNS under its matching column in the destination
+  // tab's ACTUAL header row (trim + case-insensitive), in that tab's REAL positions. This makes
+  // promotion immune to column drift/reorder between the code and HR's sheet (the cause of FFC / team
+  // landing in the wrong columns) and never touches columns the tool does not own (manual/formula).
+  var destHeaders = _hrReadHeaders_(dest);
+  var keyCol = _hrHeaderIndex_(destHeaders, 'Identification Number') + 1;   // absent -> -1 + 1 = 0
+  if (keyCol < 1) {
+    logAudit_('hr_promote_no_key_col_failed', { folderId: folderId, name: o.name, dest: destName });
+    return { ok: false, error: 'HR destination tab "' + destName + '" has no "Identification Number" column - not promoting.' };
+  }
   // Idempotent against the LIVE sheet, not just the hr_promoted_at marker: if a prior run appended
   // this person but its marker write failed, re-running must NOT duplicate the destination row.
   var existing = _hrFindRowByKey_(dest, keyCol, o.id_number);
   var target = existing || Math.max(dest.getLastRow() + 1, 2);
-  dest.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  var fieldMap = _hrFieldMap_(o);
+  var normMap = {};
+  Object.keys(fieldMap).forEach(function (k) { normMap[_hrNormHeader_(k)] = fieldMap[k]; });
+  for (var ci = 0; ci < destHeaders.length; ci++) {
+    var nk = _hrNormHeader_(destHeaders[ci]);
+    if (nk && Object.prototype.hasOwnProperty.call(normMap, nk)) {
+      var sval = normMap[nk] == null ? '' : String(normMap[nk]);
+      // Skip EMPTY tool values so a re-run (idempotent update of an existing row) never blanks a
+      // column HR filled by hand - the tool owns e.g. "Ryan Greeff Signed" / the cal-checks as blanks,
+      // and an unset FICA tick is '' until received. Only non-empty values are written.
+      if (sval === '') continue;
+      dest.getRange(target, ci + 1).setNumberFormat('@').setValue(sval);
+    }
+  }
 
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
   try {
@@ -183,7 +204,19 @@ function hrMarkWelcomeSent_(folderId) {
  *  boarding tracker are non-empty strings ("Received <iso>") when a doc is in, so a truthy check =
  *  received. "Welcome Email Sent" is auto-stamped from welcome_email_at; the remaining formula/manual
  *  HR columns (cal-checks, Ryan Greeff) are left blank for HR to fill or for the sheet's own formulas. */
-function _hrBuildRow_(o) {
+/** Drive document-folder URL for a stored folder id (the tool creates this folder at onboard and
+ *  stores its id on the row), or '' when absent. */
+function _hrFolderUrl_(folderId) {
+  var id = String(folderId || '').trim();
+  return id ? 'https://drive.google.com/drive/folders/' + id : '';
+}
+
+/** The value-by-header map: HR column NAME -> value. The single source of truth for what the tool
+ *  writes into HR. Consumed by _hrBuildRow_ (the tool-owned tracking tab, HR_HEADERS order) AND by the
+ *  header-driven destination write in hrPromote_, which places each value under the matching column in
+ *  HR's ACTUAL header row. Columns the tool does not own (cal-checks, Ryan Greeff) are left blank for
+ *  HR / the sheet's own formulas; a header with no matching key here is never touched. */
+function _hrFieldMap_(o) {
   var received = function (v) { return String(v || '').trim() ? 'TRUE' : ''; };
   var sa = isSaId_(o.id_number);
   var nationality = String(o.nationality || '').trim() || (sa ? 'South African' : '');
@@ -191,7 +224,7 @@ function _hrBuildRow_(o) {
   // A South African needs no work permit; show N/A to match the sheet's existing convention.
   var permit = String(o.work_permit_expiry || '').trim() || (sa ? 'N/A' : '');
 
-  var map = {
+  return {
     'Name & Surname': o.name,
     'Start Date': o.start_date,
     'End/Current Date': 'Current',
@@ -223,8 +256,19 @@ function _hrBuildRow_(o) {
     'Next of Kin Relationship': o.nok_relationship,
     'Next of Kin Email': o.nok_email,
     'FFC CERTIFICATE NUMBER': o.ffc_number,
+    'FFC Status': o.ffc_status,
     'Team working': o.team,
+    // The candidate's Drive document folder. The tool CREATES this folder at onboard and stores its
+    // id on the row, so the link is always available. Populated into a "Folder link" column in HR
+    // when one exists (header-driven destination write); harmless no-op when the column is absent.
+    'Folder link': _hrFolderUrl_(o.folderId),
   };
+}
+
+/** Build the HR_HEADERS-ordered values array for the tool-owned "New Starters (Tracking)" tab (whose
+ *  layout the tool controls). Human destination tabs are written header-driven (see hrPromote_). */
+function _hrBuildRow_(o) {
+  var map = _hrFieldMap_(o);
   return HR_HEADERS.map(function (h) { var v = map[h]; return v == null ? '' : String(v); });
 }
 
@@ -253,6 +297,23 @@ function _hrEnsureTab_(ss, name, createIfMissing) {
 }
 
 /** Row number whose `keyCol` equals `key` (as text), or 0. Skips the header row. */
+/** Normalise a header cell for tolerant matching: trimmed + lower-cased. */
+function _hrNormHeader_(h) { return String(h == null ? '' : h).trim().toLowerCase(); }
+
+/** The destination tab's actual header row (row 1), as an array of strings. [] if the tab is empty. */
+function _hrReadHeaders_(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return [];
+  return sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (v) { return String(v == null ? '' : v); });
+}
+
+/** Index (0-based) of the first header matching `name` (trim + case-insensitive), or -1 if none. */
+function _hrHeaderIndex_(headers, name) {
+  var want = _hrNormHeader_(name);
+  for (var i = 0; i < headers.length; i++) { if (_hrNormHeader_(headers[i]) === want) return i; }
+  return -1;
+}
+
 function _hrFindRowByKey_(sh, keyCol, key) {
   var k = String(key || '').trim();
   if (!k) return 0;
