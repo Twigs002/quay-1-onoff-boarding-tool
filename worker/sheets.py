@@ -56,6 +56,9 @@ OFFB_COLS = {
     "google_result": 9,         # I
     "worker_result_json": 10,   # J
     "trigger_id": 11,           # K
+    "senior_email": 12,         # L  departing person's senior broker (offboard-completed notice)
+    "senior_name": 13,          # M
+    "completed_at": 14,         # N  stamped on the 'done' transition
 }
 
 # Systems this worker owns (browser-driven). google is done inline (API) by Apps

@@ -43,12 +43,17 @@ function requestOffboardNotify_(body, ctx) {
   if (!name) return { ok: false, error: 'a name is required' };
   var team = String(f.team || '').trim();
   var reason = String(f.reason || '').trim();
+  // Property specialist nominated by the senior broker to take over the departing person's PropData
+  // listings (the tool cannot move listings itself - PDMS is manual - so this is captured + relayed).
+  var successor = String(f.successor_name || '').trim();
   var by = (ctx && (ctx.name || ctx.email)) || 'a team member';
   var to = (CFG.OFFBOARD_NOTIFY || []).filter(function (x) { return x; });
   var subject = 'Offboarding requested: ' + name + (team ? ' (' + team + ')' : '');
   var plain = 'Hi team,\n\n' + by + ' has requested that ' + name +
     (team ? ' from the ' + team + ' team' : '') + ' be offboarded.' +
     (reason ? '\n\nReason: ' + reason : '') +
+    (successor ? '\n\nPropData listings should be taken over by: ' + successor +
+      ' (please reassign their listings to this specialist in PDMS).' : '') +
     '\n\nPlease action the offboarding when you have a moment.\n\nThanks,\nThe Quay 1 On/Offboarding Tool';
   try {
     GmailApp.sendEmail(to.join(','), subject, plain, { name: 'Quay 1' });
@@ -66,12 +71,17 @@ function offboardRequest_(body, ctx) {
   var email = String(f.quay_email || '').trim();
   if (!email) return { ok: false, error: 'quay_email is required (the Google account to suspend)' };
   var systems = Array.isArray(f.systems) && f.systems.length ? f.systems : CFG.SYSTEMS;
+  // The departing person's senior broker, threaded from the offboard tree, so the "offboard completed"
+  // notice can go back to them when the teardown finishes.
+  var seniorEmail = String(f.senior_email || '').trim();
+  var seniorName = String(f.senior_name || '').trim();
 
   var requestedAt = nowIso_();
   var fireAt = plusMinutesIso_(requestedAt, CFG.OFFBOARD_DELAY_MIN);
   var offbId = writeOffboard_({
     full_name: f.full_name || '', quay_email: email, requested_by: (ctx && ctx.email) || '',
     requested_at: requestedAt, fire_at: fireAt, systems: systems,
+    senior_email: seniorEmail, senior_name: seniorName,
   });
 
   var trigger = ScriptApp.newTrigger('fireOffboarding_').timeBased()
@@ -131,6 +141,41 @@ function _claimOffboardFiring_(offbId, expected) {
 }
 
 /** Tear down one offboarding row. Guarded, best-effort, records partial results on error. */
+/**
+ * Post-'done' completion side-effects, fired ONCE from _fireOne_ when a teardown succeeds: (1) email the
+ * departing person's senior broker (CC Diego) that the offboarding is complete, and (2) mark the person
+ * TERMINATED on the HR sheet (End/Current Date -> the offboard date). Both non-fatal + guarded. Skipped
+ * entirely in dry-run / un-armed runs (nothing was actually torn down, so no "complete" notice), and the
+ * email is skipped cleanly when no senior broker email was captured.
+ */
+function _onOffboardComplete_(r, googleResult) {
+  if (DRY_RUN_() || !offboardArmed_()) {
+    logAudit_('offboard_complete_dryrun', { offb_id: r.offb_id, name: r.full_name });
+    return;
+  }
+  // (2) HR: flip End/Current Date from 'Current' to the offboard date. HR_SYNC-gated inside.
+  try { hrMarkTerminated_(r.full_name, r.quay_email, fmtDate_(nowIso_())); }
+  catch (e) { logAudit_('offboard_hr_terminate_failed', { offb_id: r.offb_id, error: String(e) }); }
+
+  // (1) "Offboard completed" email to the senior broker, CC Diego.
+  try {
+    var seniorEmail = String(r.senior_email || '').trim();
+    if (!isEmail_(seniorEmail)) { logAudit_('offboard_complete_no_senior', { offb_id: r.offb_id, name: r.full_name }); return; }
+    var suspended = !!(googleResult && googleResult.google && googleResult.google.suspended);
+    var name = r.full_name || r.quay_email;
+    var cc = (CFG.OFFBOARD_COMPLETE_CC || []).filter(function (x) { return x && isEmail_(x); }).join(',');
+    var subject = 'Offboarding complete - ' + name;
+    var plain = 'Hi ' + firstName_(r.senior_name || seniorEmail) + ',\n\n' +
+      name + ' has now been offboarded. Their Google account has been ' +
+      (suspended ? 'suspended' : 'deactivated') + ' and their system access has been released.\n\n' +
+      'Please note: their PropData profile still needs to be set to Inactive in PDMS by hand, and any ' +
+      'listings should be reassigned to the property specialist nominated when the offboarding was ' +
+      'requested.\n\nWarm regards,\nThe Quay 1 On/Offboarding Tool';
+    GmailApp.sendEmail(seniorEmail, subject, plain, { name: 'Quay 1', cc: cc || undefined });
+    logAudit_('offboard_complete_sent', { offb_id: r.offb_id, to: seniorEmail });
+  } catch (e) { logAudit_('offboard_complete_email_failed', { offb_id: r.offb_id, error: String(e) }); }
+}
+
 function _fireOne_(r) {
   if (!_claimOffboardFiring_(r.offb_id, r.status)) return;   // lost the claim to another handler
   // Stamp when THIS firing attempt began, so reapOffboarding_ measures the stale window from the real
@@ -155,7 +200,12 @@ function _fireOne_(r) {
     });
     googleResult.enqueued = enqueued;
     setOffboardStatus_(r.offb_id, 'done', googleResult);
+    setOffboardCompleted_(r.offb_id, nowIso_());
     logAudit_('offboard_done', { offb_id: r.offb_id, email: r.quay_email });
+    // Completion side-effects (senior-broker notice + HR termination). Wrapped so a failure here NEVER
+    // flips a successful teardown to 'error' - the account is already suspended.
+    try { _onOffboardComplete_(r, googleResult); }
+    catch (e) { logAudit_('offboard_complete_failed', { offb_id: r.offb_id, error: String(e) }); }
   } catch (err) {
     googleResult.error = String(err);
     setOffboardStatus_(r.offb_id, 'error', googleResult);

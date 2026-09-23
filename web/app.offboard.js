@@ -30,18 +30,35 @@
           <input id="ob_name" type="text" placeholder="Full name" autocomplete="off"></div>
         <div class="field"><label for="ob_team">Team</label>
           <input id="ob_team" type="text" placeholder="e.g. Vipers" autocomplete="off"></div>
+        <div class="field"><label for="ob_successor">Who takes over their PropData listings?</label>
+          <select id="ob_successor"><option value="">- none / no PropData listings -</option></select>
+          <span class="hint">The property specialist their listings should be reassigned to in PropData.</span></div>
         <div class="field"><label for="ob_reason">Reason or notes</label>
           <textarea id="ob_reason" placeholder="Anything the team should know (optional)"></textarea></div>
         <div class="form-actions"><button type="button" class="btn btn-primary" id="ob_submit">Request offboarding</button></div>
       </div>
     </div>`);
     root.appendChild(wrap);
+    // Populate the successor dropdown with the PropData specialists in the requester's team(s), from the
+    // same Programs data the offboard tree uses. Best-effort: on failure the field stays a plain "none".
+    (async () => {
+      try {
+        const r = await api(KINDS.programs, {});
+        const seen = {}, names = [];
+        ((r && r.sections) || []).forEach((s) => (s.teams || []).forEach((t) => (t.people || []).forEach((p) => {
+          if (p.pd && p.pd.active && p.name && !seen[p.name.toLowerCase()]) { seen[p.name.toLowerCase()] = 1; names.push(p.name); }
+        })));
+        names.sort();
+        const sel = $('#ob_successor', wrap);
+        if (sel && names.length) sel.insertAdjacentHTML('beforeend', names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join(''));
+      } catch (e) { /* leave the plain "none" option */ }
+    })();
     $('#ob_submit', wrap).addEventListener('click', async () => {
       const name = $('#ob_name', wrap).value.trim();
       if (!name) { toast('Name needed', 'Please enter who is leaving.', 'err'); return; }
       const btn = $('#ob_submit', wrap); btn.disabled = true; btn.classList.add('loading');
       try {
-        await api(KINDS.offboardNotify, { name, team: $('#ob_team', wrap).value.trim(), reason: $('#ob_reason', wrap).value.trim() });
+        await api(KINDS.offboardNotify, { name, team: $('#ob_team', wrap).value.trim(), reason: $('#ob_reason', wrap).value.trim(), successor_name: $('#ob_successor', wrap).value.trim() });
         wrap.innerHTML = `<div class="card card-pad"><div class="state"><div class="state-title">Offboarding requested</div><div>Thanks, the offboarding team has been notified about ${esc(name)}. They will take it from here.</div></div></div>`;
       } catch (err) {
         toast('Could not send request', err.message, 'err');
@@ -118,18 +135,28 @@
     const teamCount = sections.reduce((n, s) => n + (s.teams ? s.teams.length : 0), 0);
     meta.textContent = teamCount ? `${teamCount} team(s)` : '';
     if (!teamCount) { body.innerHTML = `<div class="state"><div class="state-title">No teams to show</div></div>`; return; }
-    const rowHtml = (p) => `<div class="offb-tr${p.senior ? ' sr' : ''}">
+    const rowHtml = (p, srName, srEmail) => `<div class="offb-tr${p.senior ? ' sr' : ''}">
         <span class="offb-nm">${p.senior ? '<span class="prog-star">★</span>' : '<span class="prog-star dim">·</span>'}${esc(p.name)}${p.senior ? ' <em>SENIOR</em>' : ''}</span>
         <span class="offb-acc">${accChip(p)}</span>
-        <button type="button" class="btn btn-danger btn-sm offb-go" data-name="${esc(p.name)}" data-email="${esc(p.email || '')}"${p.email ? '' : ' disabled title="No email on file"'}>Offboard</button>
+        <button type="button" class="btn btn-danger btn-sm offb-go" data-name="${esc(p.name)}" data-email="${esc(p.email || '')}" data-senior-name="${esc(srName || '')}" data-senior-email="${esc(srEmail || '')}"${p.email ? '' : ' disabled title="No email on file"'}>Offboard</button>
       </div>`;
-    const teamHtml = (t) => `<div class="prog-card">
+    const teamHtml = (t) => {
+      // The team's senior broker (the completion email goes back to them). Prefer the flagged senior
+      // person's own email; fall back to the team's senior name.
+      const sr = (t.people || []).find((p) => p.senior) || {};
+      const srName = sr.name || t.senior || '';
+      const srEmail = sr.email || '';
+      return `<div class="prog-card">
         <div class="prog-teamh"><div class="prog-tname">${esc(t.name)}${t.senior ? `<span class="prog-tsr">Senior: ${esc(t.senior)}</span>` : ''}</div></div>
-        <div class="prog-tbl">${t.people.map(rowHtml).join('')}</div></div>`;
+        <div class="prog-tbl">${t.people.map((p) => rowHtml(p, srName, srEmail)).join('')}</div></div>`;
+    };
     body.innerHTML = sections.map((s) =>
       `<div class="prog-sech">${esc(s.name)}</div>${s.teams.map(teamHtml).join('')}`).join('');
     body.querySelectorAll('.offb-go').forEach((b) => {
-      b.addEventListener('click', () => confirmOffboard(wrap, { name: b.dataset.name, email: b.dataset.email }));
+      b.addEventListener('click', () => confirmOffboard(wrap, {
+        name: b.dataset.name, email: b.dataset.email,
+        senior_name: b.dataset.seniorName, senior_email: b.dataset.seniorEmail,
+      }));
     });
   }
 
@@ -172,6 +199,7 @@
     try {
       const r = await api(KINDS.offboard, {
         full_name: who.name, quay_email: who.email,
+        senior_name: who.senior_name || '', senior_email: who.senior_email || '',
         requested_by: user ? user.email : '', requested_by_name: user ? user.name : '',
       });
       const at = r && r.fire_at ? new Date(r.fire_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

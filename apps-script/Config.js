@@ -251,6 +251,9 @@ var CFG = {
   // Broker-initiated offboarding (phase 1): clicking "Request offboarding" just sends a simple
   // notification to these people; the full destructive offboarding stays super/admin. Extend later.
   OFFBOARD_NOTIFY: ['pagan@quay1.co.za', 'kat@quay1.co.za', 'lieze@quay1.co.za', 'sheldon@quay1.co.za', 'diego@quay1.co.za'],
+  // CC on the "offboarding complete" email that goes to the departing person's senior broker (sent once
+  // the teardown reaches 'done'). Diego is copied so PropData listing reassignment can be actioned.
+  OFFBOARD_COMPLETE_CC: ['diego@quay1.co.za'],
 
   // Work-permit expiry alerts: HR recipient list for the weekly permit-expiry digest (see
   // workPermitExpirySweep_ in Hr.js). CONFIRM these addresses with HR before arming. Internal

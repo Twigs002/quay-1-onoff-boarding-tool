@@ -8,7 +8,8 @@
   "offboarding_queue_columns": [
     "offb_id", "full_name", "quay_email", "requested_by", "requested_at",
     "fire_at", "systems_json", "status", "google_result",
-    "worker_result_json", "trigger_id"
+    "worker_result_json", "trigger_id",
+    "senior_email", "senior_name", "completed_at"
   ],
 
   "provisioning_status": ["pending", "in_progress", "done", "error", "skipped"],

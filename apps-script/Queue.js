@@ -37,9 +37,13 @@ var PQ_HEADERS = ['queue_id', 'folderId', 'full_name', 'first_name', 'id_number'
 var OQ_COL = {
   offb_id: 0, full_name: 1, quay_email: 2, requested_by: 3, requested_at: 4, fire_at: 5,
   systems_json: 6, status: 7, google_result: 8, worker_result_json: 9, trigger_id: 10,
+  // Appended (no existing index shifts): the departing person's senior broker (so the "offboard
+  // completed" email can go back to them) and the completion timestamp stamped on the 'done' transition.
+  senior_email: 11, senior_name: 12, completed_at: 13,
 };
 var OQ_HEADERS = ['offb_id', 'full_name', 'quay_email', 'requested_by', 'requested_at',
-  'fire_at', 'systems_json', 'status', 'google_result', 'worker_result_json', 'trigger_id'];
+  'fire_at', 'systems_json', 'status', 'google_result', 'worker_result_json', 'trigger_id',
+  'senior_email', 'senior_name', 'completed_at'];
 
 /** Ensure both queue tabs exist with a header row. Called by setupHub. */
 function ensureQueueTabs_(sh) {
@@ -352,6 +356,9 @@ function writeOffboard_(oq) {
     rowArr[OQ_COL.google_result] = '';
     rowArr[OQ_COL.worker_result_json] = '';
     rowArr[OQ_COL.trigger_id] = '';
+    rowArr[OQ_COL.senior_email] = oq.senior_email || '';
+    rowArr[OQ_COL.senior_name] = oq.senior_name || '';
+    rowArr[OQ_COL.completed_at] = '';
     _appendTextRow_(t, rowArr);
     return offbId;
   } finally {
@@ -399,6 +406,13 @@ function setOffboardTrigger_(offbId, triggerId) {
   var t = _oqTab_();
   var row = _findOffbRow_(t, offbId);
   if (row) t.getRange(row, OQ_COL.trigger_id + 1).setNumberFormat('@').setValue(triggerId || '');
+}
+
+/** Stamp the completion timestamp (col N) when an offboarding reaches 'done'. */
+function setOffboardCompleted_(offbId, iso) {
+  var t = _oqTab_();
+  var row = _findOffbRow_(t, offbId);
+  if (row) t.getRange(row, OQ_COL.completed_at + 1).setNumberFormat('@').setValue(iso || nowIso_());
 }
 
 /** All Offboarding Queue rows as objects. */

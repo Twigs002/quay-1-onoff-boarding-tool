@@ -198,6 +198,39 @@ function hrMarkWelcomeSent_(folderId) {
   return { ok: true, skipped: 'no HR row yet - reflected on promotion' };
 }
 
+/**
+ * Mark a departing person TERMINATED on the HR sheet: flip their "End/Current Date" from 'Current' to
+ * the offboard date, on whichever HR tab holds their row (matched by name). Header-driven + tolerant, so
+ * it lands in the real column regardless of layout drift. Non-fatal, HR_SYNC-gated like every HR write;
+ * a no-op when the row or the column isn't found. Called from _fireOne_ when an offboarding completes.
+ */
+function hrMarkTerminated_(fullName, quayEmail, endDate) {
+  var name = String(fullName || '').trim();
+  var end = String(endDate || '').trim() || fmtDate_(nowIso_());
+  if (!name) return { ok: false, error: 'a name is required to mark terminated' };
+  if (!hrSyncEnabled_()) {
+    logAudit_('hr_terminate_dryrun', { name: name, endDate: end });
+    return { ok: true, dryRun: true, would: 'mark ' + name + ' terminated (' + end + ')' };
+  }
+  var ss = SpreadsheetApp.openById(hrSheetId_());
+  var tabs = [HR_TAB.quay1, HR_TAB.aqua, HR_TAB.tracking];
+  var rows = 0;
+  for (var i = 0; i < tabs.length; i++) {
+    var sh = _hrEnsureTab_(ss, tabs[i], false);
+    if (!sh) continue;
+    var headers = _hrReadHeaders_(sh);
+    var endIdx = _hrHeaderIndex_(headers, 'End/Current Date');
+    var nameIdx = _hrHeaderIndex_(headers, 'Name & Surname');
+    if (endIdx < 0 || nameIdx < 0) continue;
+    var row = _hrFindRowByKey_(sh, nameIdx + 1, name);
+    if (!row) continue;
+    sh.getRange(row, endIdx + 1).setNumberFormat('@').setValue(end);
+    rows++;
+  }
+  logAudit_('hr_terminated', { name: name, endDate: end, rows: rows });
+  return { ok: true, rows: rows, endDate: end };
+}
+
 // ---------------------------------------------------------------- row builder
 
 /** Build the HR_HEADERS-ordered values array from an onboarding field object. Doc ticks in the

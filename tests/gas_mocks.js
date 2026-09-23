@@ -95,6 +95,7 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
   const spreadsheet = {
     getSheetByName: (n) => sheets[n] || null,
     insertSheet: (n) => getSheet(n),
+    getSheets: () => Object.keys(sheets).map((n) => sheets[n]),
     getId: () => 'MOCK_SHEET_ID',
   };
 
