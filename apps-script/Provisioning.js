@@ -330,7 +330,8 @@ function provisionReadyBatch_() {
  * it happens on that deliberate click - not on onboard, not on a timer. Idempotent: a row already
  * provisioned is a no-op success. requireAdmin_ is asserted at the call site (Router._approveDispatch_).
  */
-function approveAndProvision_(folderId, ctx) {
+function approveAndProvision_(folderId, ctx, opts) {
+  opts = opts || {};
   // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
   // The lock also makes the read-check-provision-stamp one critical section.
   var lock = _acquireLock_();
@@ -348,6 +349,21 @@ function approveAndProvision_(folderId, ctx) {
     // decline (so the row stays visible), which is exactly why _docsReady_ alone is not enough here.
     if (String(o.declined_at || '').trim()) {
       return { ok: false, error: 'declined: this candidate was declined and has not re-submitted yet - they must re-submit the declined documents before they can be accepted' };
+    }
+    // HARD contract-verification gate. The fica_contract tick only proves a file was uploaded; before
+    // any accounts are minted a human must open the signed contract and confirm it is correctly signed.
+    // The admin does this by ticking the "verified" box, which sends contract_verified:true (opts.contractVerified).
+    // Enforced server-side so a direct API call cannot bypass the UI. Idempotent: once the durable marker
+    // is set, a later retry (e.g. the batch, or a re-accept after a setup error) no longer needs the flag.
+    var alreadyVerified = String(o.contract_verified_at || '').trim();
+    if (!alreadyVerified && opts.contractVerified !== true) {
+      return { ok: false, error: 'not verified: open the returned signed contract and confirm it is correctly signed (tick "I have verified the signed contract") before this candidate can be set up' };
+    }
+    if (!alreadyVerified) {
+      var verifiedBy = (ctx && ctx.email) || 'admin';
+      setOnboardingCell_(folderId, ONB_COL.contract_verified_at, nowIso_());
+      setOnboardingCell_(folderId, ONB_COL.contract_verified_by, verifiedBy);
+      logAudit_('contract_verified', { folderId: folderId, by: verifiedBy });
     }
     // Stamp the approval FIRST - a human approved, and that fact holds even if provisioning fails or
     // is deferred (test mode). It satisfies the gate for any later retry by the batch.

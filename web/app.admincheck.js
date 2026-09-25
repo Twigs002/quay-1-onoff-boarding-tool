@@ -42,7 +42,7 @@
     const wrap = el(`<div class="stack">
       <div class="section-head">
         <h2>Admin Check</h2>
-        <p>Review each new starter's signed contract and FICA documents, then accept them to set up their accounts. Accepting is the only thing that releases provisioning. If a starter is entitled to CMA, accepting also emails a CMA approval request (a paid seat) to Sheldon and Marthinus.</p>
+        <p>Review each new starter's signed contract and FICA documents, tick to confirm the signed contract is correct, then accept them to set up their accounts. Accepting is the only thing that releases provisioning, and it is blocked until you confirm the contract. If a starter is entitled to CMA, accepting also emails a CMA approval request (a paid seat) to Sheldon and Marthinus.</p>
       </div>
       <div class="card card-pad">
         ${canCheck ? '' : '<div class="notice warn">Only a super or admin can accept starters.</div>'}
@@ -137,6 +137,7 @@
           <div class="pipe-team muted">${esc(o.team || '')}</div>
           ${docs}
           <div class="ac-links"><a href="${DRIVE_FOLDER(o.folderId)}" target="_blank" rel="noopener">Review documents in Drive</a></div>
+          ${o.declined ? '' : `<label class="check ac-verify"><input type="checkbox" data-verify="${esc(o.folderId)}"><span class="ck-label">I have opened the returned signed contract and confirmed it is correctly signed</span></label>`}
           ${declinedLine}
           ${cmaNote}
         </div>
@@ -145,7 +146,7 @@
           <div class="pipe-actions">
             ${o.declined
               ? '<button type="button" class="btn btn-primary btn-sm" disabled title="This candidate was declined. They must re-submit the declined documents before they can be accepted.">Accept &amp; set up</button>'
-              : `<button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}">Accept &amp; set up</button>`}
+              : `<button type="button" class="btn btn-primary btn-sm" data-accept="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-cma="${o.cma_entitled && !o.cma_requested ? '1' : ''}" disabled title="Tick 'I have verified the signed contract' first.">Accept &amp; set up</button>`}
             <button type="button" class="btn btn-ghost btn-sm btn-danger" data-decline="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Decline</button>
           </div>
         </div>
@@ -155,6 +156,18 @@
     body.innerHTML = `<div class="pipe-list">${cards}</div>`;
     body.querySelectorAll('[data-accept]').forEach((b) => {
       b.addEventListener('click', () => acceptOne(wrap, b));
+    });
+    // The verify tick unlocks that row's Accept button. Its state also travels to the backend
+    // (contract_verified) which enforces the same gate server-side, so this is a UX aid, not the guard.
+    body.querySelectorAll('[data-verify]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const item = cb.closest('.ac-item');
+        const accept = item && item.querySelector('[data-accept]');
+        if (accept) {
+          accept.disabled = !cb.checked;
+          accept.title = cb.checked ? '' : "Tick 'I have verified the signed contract' first.";
+        }
+      });
     });
     body.querySelectorAll('[data-decline]').forEach((b) => {
       b.addEventListener('click', () => openDecline(wrap, b.closest('.ac-item'), b.dataset.decline, b.dataset.name));
@@ -194,13 +207,21 @@
 
   async function acceptOne(wrap, b) {
     const name = b.dataset.name || 'this person';
+    // Belt-and-suspenders: the button is disabled until the verify box is ticked, but re-read it here
+    // so a stale/forced click can never approve without the confirmation. The backend enforces it too.
+    const item = b.closest('.ac-item');
+    const verify = item && item.querySelector('[data-verify]');
+    if (!verify || !verify.checked) {
+      toast('Verify the contract first', 'Open the returned signed contract and tick the confirmation before accepting.', 'err');
+      return;
+    }
     const cmaLine = b.dataset.cma
       ? ` A CMA approval request (a paid seat) will also be emailed to Sheldon and Marthinus.`
       : '';
     if (!confirm(`Accept ${name} and set up their accounts now? This creates their logins across all systems.${cmaLine}`)) return;
     b.classList.add('loading'); b.disabled = true;
     try {
-      const r = await api(KINDS.approve, { folderId: b.dataset.accept });
+      const r = await api(KINDS.approve, { folderId: b.dataset.accept, contract_verified: true });
       toast('Accepted', (r && r.message) ? r.message : `${name}'s accounts are being set up now.`, 'ok');
       H.setStatusCache([]);           // force the Progress report to refetch next open
       loadAdminCheck(wrap, true);     // drop the accepted person off this queue

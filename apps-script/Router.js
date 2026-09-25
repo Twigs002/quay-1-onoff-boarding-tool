@@ -110,7 +110,9 @@ function _approveDispatch_(body, ctx) {
   requireAdminCheck_(ctx);   // super/admin OR the allowlisted Admin Check individual (Kat)
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
-  return approveAndProvision_(folderId, ctx);
+  // contract_verified is the admin's explicit "I opened the signed contract and it is correctly signed"
+  // confirmation from the Admin Check tick. approveAndProvision_ enforces it as a hard gate + audits it.
+  return approveAndProvision_(folderId, ctx, { contractVerified: body.contract_verified === true });
 }
 
 /** List completed onboardings (kind:'list_completed'). Admin-only. Powers the "Completed onboardings"

@@ -35,6 +35,7 @@ set('CD-1', C.requester_email, 'marthinus@quay1.co.za');
 ['contract', 'id', 'poa', 'bank'].forEach((k) => ctx.tickFica_('CD-1', k));
 set('CD-1', C.contract_emailed_at, '2026-09-14T09:00:00Z');
 set('CD-1', C.fica_submitted_at, '2026-09-15T08:00:00Z');
+set('CD-1', C.contract_verified_at, '2026-09-15T09:30:00Z');
 set('CD-1', C.approved_at, '2026-09-15T10:00:00Z');
 set('CD-1', C.provisioned_at, '2026-09-15T10:05:00Z');
 ctx.setInduction_('CD-1', isoPlusDays(30), isoPlusDays(31));   // upcoming induction
@@ -51,10 +52,10 @@ check(!!d.induction && d.induction.venue.indexOf('200 On Main') >= 0, 'induction
 check(d.accounts.length === 2 && d.accounts.some((a) => a.system === 'google' && a.status === 'done'), 'account rows from the provisioning queue');
 
 const byKey = {}; d.steps.forEach((s) => { byKey[s.key] = s; });
-check(byKey.contract.state === 'done' && byKey.fica.state === 'done' && byKey.approved.state === 'done' && byKey.accounts.state === 'done', 'first four steps done');
+check(byKey.contract.state === 'done' && byKey.fica.state === 'done' && byKey.verified.state === 'done' && byKey.approved.state === 'done' && byKey.accounts.state === 'done', 'first five steps done (incl. contract verified)');
 check(byKey.induction.state === 'current', 'Induction is the current step (upcoming date)');
 check(byKey.complete.state === 'upcoming', 'Complete is upcoming');
-check(d.steps.length === 6, 'six steps for Quay 1');
+check(d.steps.length === 7, 'seven steps for Quay 1');
 
 console.log('B. Ownership scope for a non-admin');
 const owner = ctx.candidateDetail_('CD-1', { email: 'marthinus@quay1.co.za', role: {} });
@@ -67,6 +68,7 @@ console.log('C. Aqua drops the Induction step');
 ctx.upsertOnboardingRow_({ folderId: 'CD-2', entity: 'aqua', name: 'Ada Aqua', email: 'ada@personal.com', status: 'Provisioned' });
 ['contract', 'id', 'poa', 'bank'].forEach((k) => ctx.tickFica_('CD-2', k));
 set('CD-2', C.contract_emailed_at, '2026-09-14T09:00:00Z');
+set('CD-2', C.contract_verified_at, '2026-09-15T09:30:00Z');
 set('CD-2', C.approved_at, '2026-09-15T10:00:00Z');
 set('CD-2', C.provisioned_at, '2026-09-15T10:05:00Z');
 set('CD-2', C.welcome_email_at, '2026-09-15T10:06:00Z');
