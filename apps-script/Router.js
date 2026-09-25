@@ -43,10 +43,45 @@ function doGet(e) {
     // never carry markup into the page (defence-in-depth alongside jsInScript_ at the injection site).
     if (p.f) return ficaForm_(_safeFolderId_(p.f));          // candidate FICA upload page (HTML)
     if (p.i) return inductionPageHtml_(_safeFolderId_(p.i)); // candidate induction booking page (HTML)
+    if (p.diag) return jsonOut_(_diag_());                    // ops diagnostic (non-secret flags + HR tab rows)
     return textOut_('ok'); // health ping
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   }
+}
+
+/**
+ * Unauthenticated read-only ops diagnostic (?diag=1). Returns ONLY non-secret operational metadata so an
+ * operator can confirm at a glance which safety flags are armed and that HR mirroring is live: the feature
+ * flags (all booleans), the HR destination tab names, and each HR tab's current last row (the next append
+ * lands at lastRow+1). Deliberately carries NO secrets, NO sheet ids, and NO candidate/PII - nothing here
+ * is sensitive beyond "is this feature turned on", so it needs no auth. HR-sheet reads are wrapped so a
+ * missing tab or access issue degrades to a note instead of throwing.
+ */
+function _diag_() {
+  var out = {
+    ok: true,
+    flags: {
+      dryRun: DRY_RUN_(),
+      hrSyncEnabled: hrSyncEnabled_(),
+      propdataLive: propdataLive_(),
+      offboardArmed: offboardArmed_(),
+      hubspotSeatEnabled: hubspotSeatEnabled_(),
+      ccEnabled: ccEnabled_(),
+    },
+    hrTabs: HR_TAB,
+  };
+  try {
+    var ss = SpreadsheetApp.openById(hrSheetId_());
+    out.hrTabLastRow = {};
+    Object.keys(HR_TAB).forEach(function (k) {
+      var sh = ss.getSheetByName(HR_TAB[k]);
+      out.hrTabLastRow[HR_TAB[k]] = sh ? sh.getLastRow() : null;   // null = tab not found under that name
+    });
+  } catch (e) {
+    out.hrTabLastRowError = String(e);
+  }
+  return out;
 }
 
 function doPost(e) {
