@@ -38,10 +38,13 @@ function hrSheetId_() {
  *  Quay 1 brokers promote into "IGSICA EMPLOYEES (Automated)" - the consolidated live broker tab (IGSICA
  *  is the Quay 1 broker legal entity) that HR backfilled with the historical IGSICA EMPLOYEES roster, so
  *  new automated hires land alongside history in one place (repointed 2026-09-25 from the old
- *  "New Brokers (Automated)" tab, whose prior rows HR migrated across by hand). */
+ *  "New Brokers (Automated)" tab, whose prior rows HR migrated across by hand). Aqua contractors promote
+ *  into "AQUA EMPLOYEES (Automated)" (repointed 2026-09-25 from "New Aqua (Automated)"); that tab uses a
+ *  "Part Time / Full Time" column instead of "Senior Broker" (left for HR) and "Personal Email" for the
+ *  email (see the alias in _hrFieldMap_) - the header-driven write handles the differing layout. */
 var HR_TAB = {
   quay1: 'IGSICA EMPLOYEES (Automated)',
-  aqua: 'New Aqua (Automated)',
+  aqua: 'AQUA EMPLOYEES (Automated)',
   tracking: 'New Starters (Tracking)',
 };
 
@@ -268,6 +271,11 @@ function _hrFieldMap_(o) {
     'Identification Number': o.id_number,
     'Nationality': nationality,
     'Email Address': o.email,
+    // Aqua's "AQUA EMPLOYEES (Automated)" tab labels the email column "Personal Email" (not "Email
+    // Address"). Alias both spellings to o.email so the header-driven write populates whichever the
+    // destination tab actually uses; a tab has only one of these headers, so there is never a clash.
+    'Personal Email': o.email,
+    'Personal Email Address': o.email,
     'Contact Number': o.contact,
     'Birthday': birthday,
     'Bank': o.bank_name,

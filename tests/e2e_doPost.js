@@ -185,7 +185,7 @@ console.log('14. diag endpoint - doGet ?diag=1 exposes non-secret flags + HR des
 const diag = JSON.parse(ctx.doGet({ parameter: { diag: '1' } }).getContent());
 check(diag.ok === true && diag.flags && typeof diag.flags.hrSyncEnabled === 'boolean',
   'diag returns flag booleans incl. hrSyncEnabled');
-check(diag.hrTabs && diag.hrTabs.quay1 === 'IGSICA EMPLOYEES (Automated)' && diag.hrTabs.aqua === 'New Aqua (Automated)',
+check(diag.hrTabs && diag.hrTabs.quay1 === 'IGSICA EMPLOYEES (Automated)' && diag.hrTabs.aqua === 'AQUA EMPLOYEES (Automated)',
   'diag reports the HR destination tab names');
 const diagStr = JSON.stringify(diag);
 check(!/access_token|AKfycb|18fBKK/.test(diagStr), 'diag leaks no secrets/sheet ids');
