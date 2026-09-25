@@ -53,11 +53,16 @@ function verifyCaller_(accessToken) {
     if (!rows || !rows.length) return null;
     var s = rows[0];
     if (s.active === false) return null;
+    var email = String(s.email || '').trim();
+    // In-tool full-admin promotion (see BOARDING_ADMIN_ALLOW_). Kat gets the whole boarding
+    // surface without is_admin being set on the shared staff row (which would grant her admin
+    // across every Quay app). Mirror on the frontend: web/auth.js BOARDING_ADMIN_ALLOW.
+    var boardingAdmin = BOARDING_ADMIN_ALLOW_.indexOf(email.toLowerCase()) !== -1;
     return {
-      email: String(s.email || '').trim(),
+      email: email,
       name: String(s.name || '').trim(),
       isSuper: !!s.is_super,
-      isAdmin: !!s.is_admin,
+      isAdmin: !!s.is_admin || boardingAdmin,
       isBroker: !!s.is_senior_broker,
     };
   } catch (err) {
@@ -87,22 +92,21 @@ function requireAdmin_(ctx) {
 }
 
 /**
- * Individuals (by staff work email) allowed to use the Admin Check accept/decline actions WITHOUT
- * being a full admin. A tiny, explicit allowlist per the product decision to give Kat - and only Kat
- * - Admin Check access without granting her the rest of the admin surface (offboard/provision/retry/
- * remove stay requireAdmin_/requireSuper_). Mirror on the frontend: web/app.js canAdminCheck (username 'kat').
+ * Individuals (by staff work email) promoted to a FULL admin within this tool only, without
+ * is_admin being set on the shared staff row (which would grant admin across every Quay app).
+ * Product decision: give Kat the whole boarding surface (onboard/admin-check/offboard/provision).
+ * verifyCaller_ folds these into isAdmin, so all the requireAdmin_/requireOnboarder_/requireAdminCheck_
+ * gates below pass for them exactly as for a real admin. Mirror on the frontend: web/auth.js
+ * BOARDING_ADMIN_ALLOW. (requireSuper_ - retry an error row - stays super-only for everyone.)
  */
-var ADMIN_CHECK_ALLOW_ = ['kat@quay1.co.za'];
+var BOARDING_ADMIN_ALLOW_ = ['kat@quay1.co.za'];
 
 /**
- * Assert the caller may use the Admin Check tab's accept/decline actions: a super/admin, OR an
- * explicitly allowlisted individual (Kat). Everything else about the admin surface stays gated by
- * requireAdmin_ - this relaxes ONLY the accept/decline path.
+ * Assert the caller may use the Admin Check tab's accept/decline actions: a super/admin. Boarding
+ * admins (see BOARDING_ADMIN_ALLOW_) already resolve to is_admin in verifyCaller_, so they pass here.
  */
 function requireAdminCheck_(ctx) {
   if (ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin)) return;
-  var email = ctx && ctx.email ? String(ctx.email).trim().toLowerCase() : '';
-  if (email && ADMIN_CHECK_ALLOW_.indexOf(email) !== -1) return;
   throw new Error('forbidden: admin role required');
 }
 

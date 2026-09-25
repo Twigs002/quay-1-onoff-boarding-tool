@@ -28,13 +28,20 @@ window.AUTH = (() => {
 
   const emailFor = (u) => `${(u || '').toLowerCase().trim()}@${cfg.AUTH_EMAIL_DOMAIN}`;
 
+  // Individuals promoted to a full admin WITHIN this tool only (matched on staff id/username),
+  // without flipping is_admin on the shared staff row (which would grant admin across every Quay
+  // app - dashboard, clock, leads, etc.). Product decision: give Kat the full boarding surface.
+  // Mirror on the backend: apps-script/Auth.js BOARDING_ADMIN_ALLOW_ (matched there by work email).
+  const BOARDING_ADMIN_ALLOW = ['kat'];
+
   // Active super / admin / broker staff may sign in. Supers and admins get the
   // full hub with submit rights; brokers get a read-only view of their own
   // requests. Anyone else is turned away.
   function _gate(staff) {
     if (!staff) return { ok: false, error: 'No staff record for this login.' };
     if (staff.active === false) return { ok: false, error: 'This account is disabled.' };
-    const isSuper = !!staff.is_super, isAdmin = !!staff.is_admin,
+    const boardingAdmin = BOARDING_ADMIN_ALLOW.indexOf(String(staff.id || '').toLowerCase()) !== -1;
+    const isSuper = !!staff.is_super, isAdmin = !!staff.is_admin || boardingAdmin,
           isBroker = !!staff.is_senior_broker;
     if (!isSuper && !isAdmin && !isBroker) {
       return { ok: false, error: 'This login has no lifecycle-hub access.' };

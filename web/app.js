@@ -206,12 +206,9 @@
   };
 
   // Admin Check (accept FICA -> release provisioning + email CMA approvers) is super/admin only.
-  // Admin Check is visible to supers + admins, PLUS one explicitly allowlisted individual (Kat) who
-  // is not a full admin. Mirror on the backend: apps-script/Auth.js requireAdminCheck_ / ADMIN_CHECK_ALLOW_
-  // (matched there by work email). USER.username is the staff id and is always present.
-  const ADMIN_CHECK_ALLOW_USERS = ['kat'];
-  const canAdminCheck = () => !!(USER && (USER.isAdmin || USER.isSuper ||
-    ADMIN_CHECK_ALLOW_USERS.indexOf(String(USER.username || '').toLowerCase()) !== -1));
+  // In-tool boarding admins (e.g. Kat) are folded into isAdmin at sign-in by web/auth.js
+  // (BOARDING_ADMIN_ALLOW), so they satisfy this check exactly as a real admin does.
+  const canAdminCheck = () => !!(USER && (USER.isAdmin || USER.isSuper));
 
   function route(tab) {
     // Brokers cannot open Offboard or Admin Check; bounce them to Onboard.
