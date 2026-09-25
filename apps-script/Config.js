@@ -56,6 +56,11 @@ var PROP = {
   // The company "Quay 1 - HR Information Sheet" (owned by lieze@). Onboarding rows are mirrored to
   // its automated tabs (see Hr.js). Optional: Hr.js falls back to the known id when this is unset.
   HR_SHEET_ID: 'HR_SHEET_ID',
+  // Shared secret that unlocks the read-only ops diagnostic (GET ?diag=<token>). SECURE BY DEFAULT:
+  // when this property is unset the diagnostic is disabled entirely (the endpoint just returns the
+  // plain health ping), so nothing is exposed to anonymous callers. Set it to any random string to
+  // enable ?diag. See doGet / _diag_ in Router.js.
+  DIAG_TOKEN: 'DIAG_TOKEN',
   // The provisioning worker's Google service-account email (client_email from its key file). When set,
   // a full-status agent's FICA headshot is shared with it at enqueue so the worker can download the
   // photo and build the branded profile picture. Unset -> no share (worker falls back to the logo).

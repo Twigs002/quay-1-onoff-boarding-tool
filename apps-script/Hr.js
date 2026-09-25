@@ -220,7 +220,12 @@ function hrMarkTerminated_(fullName, quayEmail, endDate) {
     return { ok: true, dryRun: true, would: 'mark ' + name + ' terminated (' + end + ')' };
   }
   var ss = SpreadsheetApp.openById(hrSheetId_());
-  var tabs = [HR_TAB.quay1, HR_TAB.aqua, HR_TAB.tracking];
+  // Scan the current destination tabs + staging, PLUS the pre-repoint "New Brokers/Aqua (Automated)"
+  // tabs: while HR is migrating historical rows across by hand, a departing person may still live only
+  // on an old tab, and their End/Current Date must still get stamped. Missing tabs are skipped (_hrEnsureTab_
+  // returns null), and the name match is per-tab, so listing extra tabs is a safe superset, never a double
+  // of a single row. Drop the legacy entries once the manual migration is confirmed complete.
+  var tabs = [HR_TAB.quay1, HR_TAB.aqua, HR_TAB.tracking, 'New Brokers (Automated)', 'New Aqua (Automated)'];
   var rows = 0;
   for (var i = 0; i < tabs.length; i++) {
     var sh = _hrEnsureTab_(ss, tabs[i], false);
