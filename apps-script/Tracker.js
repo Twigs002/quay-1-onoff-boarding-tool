@@ -111,6 +111,12 @@ var ONB_COL = {
   // drives assignInductionWeek_ (re-stamped on a resubmission). induction_holiday_flag = a note when an
   // assigned induction day lands on a SA public holiday (flag, never move - an admin decides).
   fica_submitted_at: 63, induction_holiday_flag: 64, calendar_events_json: 65,
+  // Contract-verified human gate (appended, no shift). An admin must open the returned signed contract
+  // and explicitly confirm it is correctly signed BEFORE "Accept & set up" will provision anyone. The
+  // uploaded-file tick (fica_contract, col V) only proves a file arrived; this proves a human checked
+  // it. contract_verified_at/by are the durable audit markers (parity with approved_at/approved_by),
+  // stamped by approveAndProvision_ when the admin accepts with the verify box ticked. See Provisioning.js.
+  contract_verified_at: 66, contract_verified_by: 67,
 };
 
 var ONB_HEADERS = [
@@ -129,6 +135,7 @@ var ONB_HEADERS = [
   'Contract emailed at', 'FICA follow-up at',
   'FICA declines (JSON)', 'Declined at', 'Declined by', 'Aqua accept notified at',
   'Welcome email sent at', 'Flow set-up at', 'FICA submitted at', 'Induction holiday flag', 'Calendar events',
+  'Contract verified at', 'Contract verified by',
 ];
 
 /** FICA doc key -> the R..V column that records "received". `nda` (R) is set manually, not by

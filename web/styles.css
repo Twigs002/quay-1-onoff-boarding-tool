@@ -568,6 +568,8 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .ac-links { margin-top: 8px; font-size: 13px; }
 .ac-links a { color: var(--blue-800); font-weight: 600; text-decoration: none; }
 .ac-links a:hover { text-decoration: underline; }
+.ac-verify { margin-top: 10px; max-width: 520px; }
+.ac-verify .ck-label { font-weight: 600; }
 .ac-cma { margin-top: 6px; font-size: 12.5px; }
 .ac-cma.muted { color: var(--muted); }
 .ac-cma.warn-text { color: var(--amber); font-weight: 600; }

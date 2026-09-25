@@ -26,6 +26,7 @@ function _candidateSteps_(o, fica, isAqua) {
   var steps = [
     { key: 'contract', label: 'Contract sent', date: o.contract_emailed_at || '', done: !!o.contract_emailed_at },
     { key: 'fica', label: 'FICA received', date: o.fica_submitted_at || '', done: docsIn },
+    { key: 'verified', label: 'Contract verified', date: o.contract_verified_at || '', done: !!o.contract_verified_at },
     { key: 'approved', label: 'Approved', date: o.approved_at || '', done: !!o.approved_at },
     { key: 'accounts', label: 'Accounts set up', date: o.provisioned_at || '', done: !!o.provisioned_at },
   ];
@@ -106,6 +107,8 @@ function candidateDetail_(folderId, ctx) {
     },
     accounts: accounts,
     steps: steps,
+    contract_verified_at: o.contract_verified_at || '',
+    contract_verified_by: o.contract_verified_by || '',
     declined_at: o.declined_at || '',
     // Per-candidate communications history (every email actually sent to them), newest-first.
     comms: readComms_(folderId),

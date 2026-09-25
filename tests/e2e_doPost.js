@@ -167,6 +167,20 @@ const cap = ctx.provisionAll_('CAP-1', ['google', 'propdata', 'cma', 'dialfire']
 check(!!(cap.results && cap.results.google) && !cap.results.propdata && !cap.results.cma,
   `provisionAll_ strips propdata/cma for an aqua person even when passed explicitly (got ${Object.keys(cap.results || {}).join(',') || 'none'})`);
 
+console.log('13. contract-verify gate - a docs-ready candidate cannot be set up until the signed contract is verified');
+ctx.upsertOnboardingRow_({ folderId: 'VER-1', entity: 'quay1', name: 'Vera Verify', email: 'vera@personal.com',
+  fica_contract: 'Received x', fica_id: 'Received x', fica_poa: 'Received x', fica_bank: 'Received x' });
+const v1 = post({ kind: 'approve', accessToken: 'jwt', folderId: 'VER-1' });   // no contract_verified flag
+check(v1.ok === false && /verif/i.test(v1.error || ''),
+  `approve is refused until the signed contract is verified${v1.ok ? ' -> WRONGLY ALLOWED' : ''}`);
+const vRowBefore = ctx.readOnboardingByFolder_('VER-1');
+check(!String(vRowBefore.contract_verified_at || '').trim(), 'contract_verified_at NOT stamped by a refused approve');
+const v2 = post({ kind: 'approve', accessToken: 'jwt', folderId: 'VER-1', contract_verified: true });
+check(!(v2.error && /verif/i.test(v2.error)), 'approve with contract_verified:true clears the verify gate');
+const vRowAfter = ctx.readOnboardingByFolder_('VER-1');
+check(!!String(vRowAfter.contract_verified_at || '').trim() && vRowAfter.contract_verified_by === 'boss@quay1.co.za',
+  'contract_verified_at/by stamped (who + when) when accepted with the tick');
+
 console.log();
 if (FAIL.length) {
   console.log(`RESULT: SEAM NOT YET CONFORMED (${FAIL.length} check(s) fail CONTRACTS section 8)`);
