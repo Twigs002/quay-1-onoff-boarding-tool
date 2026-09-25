@@ -7,7 +7,7 @@
  *      "New Starters (Tracking)" tab with whatever is known so far. As FICA data lands, the same
  *      row is updated in place (upsert), so HR can watch a starter fill in.
  *   2. PROMOTE   - once FICA is complete, the finished row is COPIED (append-only) into the entity
- *      destination tab - "New Brokers (Automated)" for Quay 1, "New Aqua (Automated)" for Aqua -
+ *      destination tab - "IGSICA EMPLOYEES (Automated)" for Quay 1, "New Aqua (Automated)" for Aqua -
  *      and the tracking row is marked "Moved". Promotion is idempotent (guarded by hr_promoted_at):
  *      it never double-appends. It is non-destructive on the live sheet: the tracking row is marked,
  *      not deleted.
@@ -34,9 +34,13 @@ function hrSheetId_() {
   return optProp_(PROP.HR_SHEET_ID) || '18fBKKsuKJSKKshJ47RHGC44eB_7vRADSy0nzS6Y6DyE';
 }
 
-/** Destination tab per entity + the shared staging tab. Match the live sheet's tab names exactly. */
+/** Destination tab per entity + the shared staging tab. Match the live sheet's tab names exactly.
+ *  Quay 1 brokers promote into "IGSICA EMPLOYEES (Automated)" - the consolidated live broker tab (IGSICA
+ *  is the Quay 1 broker legal entity) that HR backfilled with the historical IGSICA EMPLOYEES roster, so
+ *  new automated hires land alongside history in one place (repointed 2026-09-25 from the old
+ *  "New Brokers (Automated)" tab, whose prior rows HR migrated across by hand). */
 var HR_TAB = {
-  quay1: 'New Brokers (Automated)',
+  quay1: 'IGSICA EMPLOYEES (Automated)',
   aqua: 'New Aqua (Automated)',
   tracking: 'New Starters (Tracking)',
 };
