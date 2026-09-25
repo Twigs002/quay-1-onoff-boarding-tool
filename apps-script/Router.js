@@ -43,19 +43,25 @@ function doGet(e) {
     // never carry markup into the page (defence-in-depth alongside jsInScript_ at the injection site).
     if (p.f) return ficaForm_(_safeFolderId_(p.f));          // candidate FICA upload page (HTML)
     if (p.i) return inductionPageHtml_(_safeFolderId_(p.i)); // candidate induction booking page (HTML)
-    if (p.diag) return jsonOut_(_diag_());                    // ops diagnostic (non-secret flags + HR tab rows)
-    return textOut_('ok'); // health ping
+    // Ops diagnostic (non-secret flags + HR tab rows/headers), but token-gated: only served when the
+    // caller presents ?diag=<token> matching the DIAG_TOKEN Script Property. Secure by default - when
+    // DIAG_TOKEN is unset the diagnostic is OFF and this falls through to the plain health ping, so the
+    // arming state / headcount / HR schema are never exposed to an anonymous caller who knows the URL.
+    var diagTok = optProp_(PROP.DIAG_TOKEN);
+    if (p.diag && diagTok && p.diag === diagTok) return jsonOut_(_diag_());
+    return textOut_('ok'); // health ping (also the response for a missing/wrong ?diag token)
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   }
 }
 
 /**
- * Unauthenticated read-only ops diagnostic (?diag=1). Returns ONLY non-secret operational metadata so an
- * operator can confirm at a glance which safety flags are armed and that HR mirroring is live: the feature
- * flags (all booleans), the HR destination tab names, and each HR tab's current last row (the next append
- * lands at lastRow+1). Deliberately carries NO secrets, NO sheet ids, and NO candidate/PII - nothing here
- * is sensitive beyond "is this feature turned on", so it needs no auth. HR-sheet reads are wrapped so a
+ * Token-gated read-only ops diagnostic (GET ?diag=<DIAG_TOKEN>; see doGet). Returns non-secret
+ * operational metadata so an operator can confirm which safety flags are armed and that HR mirroring is
+ * live: the feature flags (booleans), the HR destination tab names, each tab's current last row (next
+ * append = lastRow+1), and a per-tab header audit. It still carries NO secrets, NO sheet ids and NO
+ * candidate PII - but because it does reveal arming state / headcount / the HR column schema, doGet only
+ * calls it when the ?diag token matches DIAG_TOKEN (off by default). HR-sheet reads are wrapped so a
  * missing tab or access issue degrades to a note instead of throwing.
  */
 function _diag_() {

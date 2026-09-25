@@ -16,7 +16,7 @@ const check = (cond, label) => { console.log(`  [${cond ? 'PASS' : 'FAIL'}] ${la
 const ADMIN = { id: 'u1', email: 'boss@quay1.co.za', name: 'The Boss', is_admin: true, is_super: false, is_broker: false, active: true };
 
 const gas = loadGas({ props: DEFAULT_PROPS, dryRun: true, authUser: ADMIN });
-const { ctx, getSheet } = gas;
+const { ctx, getSheet, scriptProps } = gas;
 getSheet('Provisioning Queue');
 getSheet('Offboarding Queue');
 getSheet('Onboarding');
@@ -181,14 +181,22 @@ const vRowAfter = ctx.readOnboardingByFolder_('VER-1');
 check(!!String(vRowAfter.contract_verified_at || '').trim() && vRowAfter.contract_verified_by === 'boss@quay1.co.za',
   'contract_verified_at/by stamped (who + when) when accepted with the tick');
 
-console.log('14. diag endpoint - doGet ?diag=1 exposes non-secret flags + HR destination tabs');
-const diag = JSON.parse(ctx.doGet({ parameter: { diag: '1' } }).getContent());
+console.log('14. diag endpoint - token-gated ?diag (secure by default) exposes non-secret flags + HR tabs');
+// Secure by default: with DIAG_TOKEN unset, ?diag returns the plain health ping, NOT the diagnostic.
+delete scriptProps.DIAG_TOKEN;
+const diagClosed = ctx.doGet({ parameter: { diag: '1' } }).getContent();
+check(diagClosed === 'ok', 'no DIAG_TOKEN set -> ?diag falls through to the health ping (no disclosure)');
+// With DIAG_TOKEN set, a matching ?diag token unlocks the diagnostic; a wrong token stays closed.
+scriptProps.DIAG_TOKEN = 'sekret-tok';
+check(ctx.doGet({ parameter: { diag: 'wrong' } }).getContent() === 'ok', 'wrong ?diag token -> health ping (still closed)');
+const diag = JSON.parse(ctx.doGet({ parameter: { diag: 'sekret-tok' } }).getContent());
 check(diag.ok === true && diag.flags && typeof diag.flags.hrSyncEnabled === 'boolean',
-  'diag returns flag booleans incl. hrSyncEnabled');
+  'correct ?diag token -> flag booleans incl. hrSyncEnabled');
 check(diag.hrTabs && diag.hrTabs.quay1 === 'IGSICA EMPLOYEES (Automated)' && diag.hrTabs.aqua === 'AQUA EMPLOYEES (Automated)',
   'diag reports the HR destination tab names');
 const diagStr = JSON.stringify(diag);
-check(!/access_token|AKfycb|18fBKK/.test(diagStr), 'diag leaks no secrets/sheet ids');
+check(!/access_token|AKfycb|18fBKK|sekret-tok/.test(diagStr), 'diag leaks no secrets/sheet ids/token');
+delete scriptProps.DIAG_TOKEN;
 
 console.log('15. HR header matching tolerates line-break headers (Next of Kin\\nName -> key match)');
 check(ctx._hrNormHeader_('Next of Kin\nName') === ctx._hrNormHeader_('Next of Kin Name'),
