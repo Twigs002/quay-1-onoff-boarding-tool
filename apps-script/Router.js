@@ -78,6 +78,32 @@ function _diag_() {
       var sh = ss.getSheetByName(HR_TAB[k]);
       out.hrTabLastRow[HR_TAB[k]] = sh ? sh.getLastRow() : null;   // null = tab not found under that name
     });
+    // Deep header audit for the two ENTITY destination tabs: using the SAME matching hrPromote_ uses,
+    // report whether the ID key + name columns resolve (idKeyCol/nameCol = 0 means hrPromote_ would REFUSE
+    // to promote into that tab) and which tool field-keys land vs go unwritten. This is the definitive
+    // "will an accepted candidate actually populate this tab" check. Column labels only - no PII, no values.
+    out.hrHeaderAudit = {};
+    var fieldKeys = Object.keys(_hrFieldMap_({}));   // the static set of headers the tool can write
+    ['quay1', 'aqua'].forEach(function (ent) {
+      var tabName = HR_TAB[ent];
+      try {
+        var sh = ss.getSheetByName(tabName);
+        if (!sh) { out.hrHeaderAudit[ent] = { tab: tabName, found: false }; return; }
+        var headers = _hrReadHeaders_(sh);
+        var mapped = [], unmapped = [];
+        fieldKeys.forEach(function (fk) { (_hrHeaderIndex_(headers, fk) >= 0 ? mapped : unmapped).push(fk); });
+        out.hrHeaderAudit[ent] = {
+          tab: tabName,
+          found: true,
+          idKeyCol: _hrHeaderIndex_(headers, 'Identification Number') + 1,   // 0 => missing => promote refuses
+          nameCol: _hrHeaderIndex_(headers, 'Name & Surname') + 1,           // 0 => missing
+          nextAppendRow: sh.getLastRow() + 1,
+          mappedKeys: mapped,       // tool values that WILL land (a header matched)
+          unmappedKeys: unmapped,   // tool values with NO column on this tab (silently not written)
+          headers: headers,
+        };
+      } catch (e2) { out.hrHeaderAudit[ent] = { tab: tabName, error: String(e2) }; }
+    });
   } catch (e) {
     out.hrTabLastRowError = String(e);
   }
