@@ -190,6 +190,14 @@ check(diag.hrTabs && diag.hrTabs.quay1 === 'IGSICA EMPLOYEES (Automated)' && dia
 const diagStr = JSON.stringify(diag);
 check(!/access_token|AKfycb|18fBKK/.test(diagStr), 'diag leaks no secrets/sheet ids');
 
+console.log('15. HR header matching tolerates line-break headers (Next of Kin\\nName -> key match)');
+check(ctx._hrNormHeader_('Next of Kin\nName') === ctx._hrNormHeader_('Next of Kin Name'),
+  'a two-line "Next of Kin\\nName" header normalises to the same key as "Next of Kin Name"');
+check(ctx._hrHeaderIndex_(['Name & Surname', 'Next of Kin\nContact Number'], 'Next of Kin Contact Number') === 1,
+  '_hrHeaderIndex_ finds a line-broken header by the tool key');
+check(ctx._hrNormHeader_('Email Address                 ') === 'email address',
+  'trailing whitespace still collapses/trims to the clean key');
+
 console.log();
 if (FAIL.length) {
   console.log(`RESULT: SEAM NOT YET CONFORMED (${FAIL.length} check(s) fail CONTRACTS section 8)`);
