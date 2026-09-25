@@ -342,8 +342,11 @@ function _hrEnsureTab_(ss, name, createIfMissing) {
 }
 
 /** Row number whose `keyCol` equals `key` (as text), or 0. Skips the header row. */
-/** Normalise a header cell for tolerant matching: trimmed + lower-cased. */
-function _hrNormHeader_(h) { return String(h == null ? '' : h).trim().toLowerCase(); }
+/** Normalise a header cell for tolerant matching: collapse ALL internal whitespace (incl. line breaks)
+ *  to a single space, then trim + lower-case. The collapse matters because some live HR headers wrap
+ *  onto two lines - e.g. "Next of Kin\nName" - which must still match the tool's "Next of Kin Name" key
+ *  (without it, next-of-kin name/contact/email silently never write to the automated tabs). */
+function _hrNormHeader_(h) { return String(h == null ? '' : h).replace(/\s+/g, ' ').trim().toLowerCase(); }
 
 /** The destination tab's actual header row (row 1), as an array of strings. [] if the tab is empty. */
 function _hrReadHeaders_(sh) {
