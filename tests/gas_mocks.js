@@ -33,6 +33,7 @@ function makeSheet(name) {
     setFrozenRows() { return this; },
     getLastRow: () => rows.length,
     getLastColumn: () => (rows.length ? rows[0].length : 0),
+    deleteRow(rowNum) { if (rowNum >= 1 && rowNum <= rows.length) rows.splice(rowNum - 1, 1); return this; },
     getRange(r, c, numR = 1, numC = 1) {
       return {
         setValue(v) { ensure(rows, r, c); rows[r - 1][c - 1] = v; return this; },
