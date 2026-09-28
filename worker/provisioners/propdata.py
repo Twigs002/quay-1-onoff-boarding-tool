@@ -58,6 +58,8 @@ I_FIRST = "#input-field-first_name"
 I_LAST = "#input-field-last_name"
 I_EMAIL = "#input-field-email"
 I_CELL = "#input-cell_number"
+I_LOGIN_EMAIL = "#input-field-user"            # Profile > Login Email (the PDMS login, separate from Email)
+F_USER_GROUP = "#field-group"                  # Profile > User Group react-select
 FILE_PHOTO = "#image"                          # profile-picture <input type=file>, hidden
 
 # Fixed PDMS field values for a Quay 1 agent (see module docstring).
@@ -66,6 +68,7 @@ STATUS_ACTIVE = "Active"
 COUNTRY_CODE = "+27 (ZA)"
 DESIGNATION_FULL = "Non-Principal Property Practitioner"
 DESIGNATION_CANDIDATE = "-"  # a real, selectable PDMS option for non-full-FFC agents (actively picked)
+USER_GROUP = "Agent"  # Profile > User Group: every broker/specialist we create is a PDMS "Agent"
 
 _LOGIN_URL = "https://manage.propdata.net/login"
 
@@ -216,6 +219,11 @@ class PropDataProvisioner(Provisioner):
             if designation:
                 self._rs(page, page.locator(F_DESIGNATION), designation, "Designation")
 
+            # Profile: without these the record saves but the agent has no login and no user group,
+            # so the profile is incomplete. Login Email = the same quay address; User Group = "Agent".
+            page.locator(I_LOGIN_EMAIL).fill(email)
+            self._rs(page, page.locator(F_USER_GROUP), USER_GROUP, "User Group")
+
             # Profile Picture (best-effort: PDMS's marketing/help popups can overlay the section).
             photo_added = self._try_photo(page, _resolve_photo(person))
 
@@ -326,21 +334,39 @@ class PropDataProvisioner(Provisioner):
         sent - which silently breaks the whole save. Raise loudly naming the field + value so
         the failure is actionable (this is the usual cause of a 'did not save, fields: unknown')."""
         exact_re = re.compile(r"^\s*%s\s*$" % re.escape(value))
+        want_norm = re.sub(r"[^a-z0-9]", "", value.lower())  # case/space/punctuation-insensitive key
+
+        def _click_match() -> bool:
+            """Click the best-matching visible option: exact text first, then a normalized match
+            (ignoring case/whitespace/punctuation) so e.g. 'Non-Principal ...' == 'Non Principal ...'."""
+            ex = opts.filter(has_text=exact_re)
+            if ex.count():
+                ex.first.click()
+                return True
+            for i, txt in enumerate(opts.all_text_contents()):
+                if re.sub(r"[^a-z0-9]", "", (txt or "").lower()) == want_norm:
+                    opts.nth(i).click()
+                    return True
+            return False
+
         group.locator(".react-select__control").first.click()
         opts = page.locator(".react-select__option")
         try:
             opts.first.wait_for(state="visible", timeout=6000)
         except Exception:  # noqa: BLE001
             pass
-        if opts.filter(has_text=exact_re).count() == 0:
+        # Short lists show every option on open - match among them first (this is where the strict
+        # matcher used to fail on a hyphen/spacing difference). Only type to narrow a long list (e.g.
+        # Country Code) if nothing matched what is already shown.
+        if not _click_match():
             group.locator("input.react-select__input").first.press_sequentially(value, delay=30)
             page.wait_for_timeout(900)
-        exact = opts.filter(has_text=exact_re)
-        target = exact if exact.count() else opts.filter(has_text=value)
-        if target.count():
-            target.first.click()
-        else:
-            group.locator("input.react-select__input").first.press("Enter")
+            if not _click_match():
+                sub = opts.filter(has_text=value)
+                if sub.count():
+                    sub.first.click()
+                else:
+                    group.locator("input.react-select__input").first.press("Enter")
         page.wait_for_timeout(150)
         # Confirm the selection stuck; a still-empty control = no matching option.
         if group.locator(".react-select__single-value, .react-select__multi-value").count() == 0:
