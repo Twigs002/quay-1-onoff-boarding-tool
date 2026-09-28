@@ -153,6 +153,28 @@ function hrPromote_(folderId) {
     }
   }
 
+  // Folder-link fallback: the document-folder column is sometimes titled "HR Folder" / "Drive Folder" /
+  // "Employee Folder" etc. rather than exactly "Folder link" - which is why Aqua rows showed no folder.
+  // If we have a folder URL but NO column matched the canonical name, drop it into the first folder-titled
+  // column the tool does not already own (so any reasonable naming works on either entity tab).
+  var _folderUrl = fieldMap['Folder link'];
+  if (_folderUrl) {
+    var _hasCanonical = false;
+    for (var fi = 0; fi < destHeaders.length; fi++) {
+      if (_hrNormHeader_(destHeaders[fi]) === 'folder link') { _hasCanonical = true; break; }
+    }
+    if (!_hasCanonical) {
+      for (var gi = 0; gi < destHeaders.length; gi++) {
+        var gk = _hrNormHeader_(destHeaders[gi]);
+        if (gk.indexOf('folder') >= 0 && !Object.prototype.hasOwnProperty.call(normMap, gk)) {
+          dest.getRange(target, gi + 1).setNumberFormat('@').setValue(String(_folderUrl));
+          logAudit_('hr_folder_link_aliased', { folderId: folderId, dest: destName, column: destHeaders[gi] });
+          break;
+        }
+      }
+    }
+  }
+
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
   try {
     var track = _hrEnsureTab_(ss, HR_TAB.tracking, false);
