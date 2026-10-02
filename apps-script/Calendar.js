@@ -239,3 +239,77 @@ function backfillTeamDates() {
   Logger.log(JSON.stringify(out, null, 2));
   return out;
 }
+
+/**
+ * ONE-TIME (run-picker): ensure every provisioned Quay 1 starter's BIRTHDAY + WORK-ANNIVERSARY events
+ * exist on "Quay 1 Team Dates" AND carry the standing guests (CFG.TEAM_DATES_GUESTS, e.g. Kat). Fixes
+ * both gaps at once:
+ *   (a) people set up before the guest list existed, whose events don't yet invite Kat - adds her;
+ *   (b) people still missing the events entirely - creates them (already including the guests).
+ * Also REPORTS who was skipped and why (not provisioned / no start date / no birthday), so a missing
+ * anniversary is explained rather than silent. Idempotent (addGuest is a no-op if already invited;
+ * events are only created when missing), Quay 1 only, DRY_RUN-safe. Safe to re-run.
+ */
+function backfillTeamDatesGuests() {
+  var guests = (CFG.TEAM_DATES_GUESTS || []).filter(function (e) { return isEmail_(e); });
+  var out = {
+    created: [], guestsAdded: 0, alreadyInvited: 0, notProvisioned: [],
+    noAnniversary: [], noBirthday: [], missingEvents: 0, errors: [], dry: DRY_RUN_(),
+  };
+  var cal = null;
+  try { cal = _onbCalendar_(PROP.CAL_TEAM_DATES_ID, 'Quay 1 Team Dates'); }
+  catch (e) {
+    var m = 'Quay 1 Team Dates calendar not found (run setupCalendars first): ' + String(e);
+    Logger.log(m); return m;
+  }
+
+  listOnboarding_().forEach(function (o) {
+    try {
+      if ((o.entity || 'quay1') !== 'quay1') return;                 // Quay 1 only (Aqua has no Team Dates)
+      if (!o.provisioned_at) { if (o.name) out.notProvisioned.push(o.name); return; }
+
+      var have = {};
+      try { have = JSON.parse(o.calendar_events_json || '{}') || {}; } catch (e) { have = {}; }
+
+      // (a) Create any MISSING birthday/anniversary events. createOnboardingCalendarEvents_ attaches the
+      // standing guests on creation, so new events already invite Kat. Re-read so the guest step sees ids.
+      if ((!have.birthday && !!o.birthday) || (!have.anniversary && !!o.start_date)) {
+        var r = createOnboardingCalendarEvents_(o.folderId, o, { teamDatesOnly: true });
+        var made = (r.created || []).filter(function (k) { return k === 'birthday' || k === 'anniversary'; });
+        if (made.length) out.created.push({ name: o.name, created: made });
+        try { have = JSON.parse((readOnboardingByFolder_(o.folderId) || {}).calendar_events_json || '{}') || {}; } catch (e) {}
+      }
+
+      // Explain anyone STILL without an event (the answer to "why is there no anniversary for X").
+      if (!have.anniversary) out.noAnniversary.push({ name: o.name, why: o.start_date ? 'event not created' : 'no start date on record' });
+      if (!have.birthday) out.noBirthday.push({ name: o.name, why: o.birthday ? 'event not created' : 'no birthday on record' });
+
+      // (b) Add the standing guests to EXISTING events that lack them.
+      if (!DRY_RUN_() && guests.length) {
+        ['birthday', 'anniversary'].forEach(function (key) {
+          var id = have[key];
+          if (!id) return;
+          var ev = null;
+          try { ev = cal.getEventSeriesById(id); } catch (e) { ev = null; }
+          if (!ev) { try { ev = cal.getEventById(id); } catch (e2) { ev = null; } }
+          if (!ev) { out.missingEvents++; return; }
+          try {
+            var present = {};
+            (ev.getGuestList() || []).forEach(function (g) { present[String(g.getEmail() || '').toLowerCase()] = true; });
+            guests.forEach(function (gm) {
+              if (present[gm.toLowerCase()]) out.alreadyInvited++;
+              else { ev.addGuest(gm); out.guestsAdded++; }
+            });
+          } catch (e3) { out.errors.push({ name: o.name, key: key, error: String(e3) }); }
+        });
+      }
+    } catch (err) { out.errors.push({ folderId: o.folderId, error: String(err) }); }
+  });
+
+  logAudit_('team_dates_guests_backfill_run', {
+    created: out.created.length, guestsAdded: out.guestsAdded, notProvisioned: out.notProvisioned.length,
+    noAnniversary: out.noAnniversary.length, noBirthday: out.noBirthday.length, errors: out.errors.length, dry: DRY_RUN_(),
+  });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
