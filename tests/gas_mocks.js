@@ -201,6 +201,15 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
     // Every createEvent / createAllDayEventSeries records into calls.calendarEvents and .calendarEventsById.
     CalendarApp: (function () {
       var calendarsById = {};
+      function _wrapCalEvent(id, rec) {
+        if (!rec.guests) rec.guests = [];
+        return {
+          getId: function () { return id; },
+          deleteEvent: function () { rec.deleted = true; calls.calendarDeleted.push(id); },
+          getGuestList: function () { return rec.guests.map(function (e) { return { getEmail: function () { return e; } }; }); },
+          addGuest: function (email) { if (rec.guests.indexOf(email) < 0) rec.guests.push(email); },
+        };
+      }
       function makeCal(name) {
         var id = 'cal_' + name;
         var cal = {
@@ -211,16 +220,22 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
             calls.calendarEvents.push(rec); calls.calendarEventsById[eid] = rec;
             return { getId: function () { return eid; } };
           },
-          createAllDayEventSeries: function (title, d, recur) {
+          createAllDayEventSeries: function (title, d, recur, opts) {
             var sid = 'ser_' + (++_calSeq);
-            var rec = { id: sid, cal: name, kind: 'series', title: title, deleted: false };
+            var guests = (opts && opts.guests) ? String(opts.guests).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+            var rec = { id: sid, cal: name, kind: 'series', title: title, guests: guests, deleted: false };
             calls.calendarEvents.push(rec); calls.calendarEventsById[sid] = rec;
             return { getId: function () { return sid; } };
           },
           getEventById: function (eid) {
             var rec = calls.calendarEventsById[eid];
             if (!rec || rec.deleted) return null;
-            return { getId: function () { return eid; }, deleteEvent: function () { rec.deleted = true; calls.calendarDeleted.push(eid); } };
+            return _wrapCalEvent(eid, rec);
+          },
+          getEventSeriesById: function (sid) {
+            var rec = calls.calendarEventsById[sid];
+            if (!rec || rec.deleted) return null;
+            return _wrapCalEvent(sid, rec);
           },
         };
         calendarsById[id] = cal;
