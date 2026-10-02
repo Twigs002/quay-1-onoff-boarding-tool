@@ -46,6 +46,9 @@ var HR_TAB = {
   quay1: 'IGSICA EMPLOYEES (Automated)',
   aqua: 'AQUA EMPLOYEES (Automated)',
   tracking: 'New Starters (Tracking)',
+  // Archive tab a terminated person is MOVED to on offboard completion (their row is copied here with
+  // the end date and removed from the active roster). Created on demand if absent.
+  terminated: 'TERMINATED (Automated)',
 };
 
 /** The canonical column layout, verbatim from the live "New Brokers (Automated)" / "IGSICA
@@ -206,10 +209,13 @@ function hrMarkWelcomeSent_(folderId) {
 }
 
 /**
- * Mark a departing person TERMINATED on the HR sheet: flip their "End/Current Date" from 'Current' to
- * the offboard date, on whichever HR tab holds their row (matched by name). Header-driven + tolerant, so
- * it lands in the real column regardless of layout drift. Non-fatal, HR_SYNC-gated like every HR write;
- * a no-op when the row or the column isn't found. Called from _fireOne_ when an offboarding completes.
+ * MOVE a departing person to the "TERMINATED (Automated)" archive tab on offboard completion: copy their
+ * row there (with "End/Current Date" set to the offboard date) and REMOVE it from the active roster, so
+ * they no longer appear among current staff. Header-driven + tolerant, so it works regardless of column
+ * layout drift between tabs, and matched by name (offboarding carries no ID). Scans the current
+ * destination tabs + staging + the pre-repoint "New Brokers/Aqua (Automated)" legacy tabs, so someone HR
+ * has not yet migrated is still moved. Idempotent (never a duplicate archive row), non-fatal, HR_SYNC-gated.
+ * Called from _fireOne_ when an offboarding completes.
  */
 function hrMarkTerminated_(fullName, quayEmail, endDate) {
   var name = String(fullName || '').trim();
@@ -217,30 +223,77 @@ function hrMarkTerminated_(fullName, quayEmail, endDate) {
   if (!name) return { ok: false, error: 'a name is required to mark terminated' };
   if (!hrSyncEnabled_()) {
     logAudit_('hr_terminate_dryrun', { name: name, endDate: end });
-    return { ok: true, dryRun: true, would: 'mark ' + name + ' terminated (' + end + ')' };
+    return { ok: true, dryRun: true, would: 'move ' + name + ' to "' + HR_TAB.terminated + '" (' + end + ')' };
   }
   var ss = SpreadsheetApp.openById(hrSheetId_());
-  // Scan the current destination tabs + staging, PLUS the pre-repoint "New Brokers/Aqua (Automated)"
-  // tabs: while HR is migrating historical rows across by hand, a departing person may still live only
-  // on an old tab, and their End/Current Date must still get stamped. Missing tabs are skipped (_hrEnsureTab_
-  // returns null), and the name match is per-tab, so listing extra tabs is a safe superset, never a double
-  // of a single row. Drop the legacy entries once the manual migration is confirmed complete.
-  var tabs = [HR_TAB.quay1, HR_TAB.aqua, HR_TAB.tracking, 'New Brokers (Automated)', 'New Aqua (Automated)'];
-  var rows = 0;
-  for (var i = 0; i < tabs.length; i++) {
-    var sh = _hrEnsureTab_(ss, tabs[i], false);
+  // Archive tab (created on demand; tolerant match first so a spacing/case-drifted tab is reused, never
+  // duplicated). _hrEnsureTab_ seeds it with the HR header row when it has to create it.
+  var termTab = _hrEnsureTab_(ss, HR_TAB.terminated, true);
+  var termHeaders = _hrReadHeaders_(termTab);
+  var termNameIdx = _hrHeaderIndex_(termHeaders, 'Name & Surname');
+
+  // Idempotent: already archived -> no-op (never a second archive row for the same person).
+  if (termNameIdx >= 0 && _hrFindRowByKey_(termTab, termNameIdx + 1, name)) {
+    logAudit_('hr_terminate_already_archived', { name: name });
+    return { ok: true, already: true, dest: HR_TAB.terminated };
+  }
+
+  // Find the person on any active / staging / legacy tab; capture their row (by header) from the first
+  // hit, and collect every (tab,row) so they are removed from all of them.
+  var sourceTabs = [HR_TAB.quay1, HR_TAB.aqua, HR_TAB.tracking, 'New Brokers (Automated)', 'New Aqua (Automated)'];
+  var termName = _hrNormHeader_(termTab.getName());
+  var captured = null;                 // normalised-header -> value map of the person's row
+  var toDelete = [];                   // [{ sh, row }] removed after the copy lands
+  for (var i = 0; i < sourceTabs.length; i++) {
+    var sh = _hrEnsureTab_(ss, sourceTabs[i], false);
     if (!sh) continue;
+    if (_hrNormHeader_(sh.getName()) === termName) continue;   // never treat the archive as a source
     var headers = _hrReadHeaders_(sh);
-    var endIdx = _hrHeaderIndex_(headers, 'End/Current Date');
     var nameIdx = _hrHeaderIndex_(headers, 'Name & Surname');
-    if (endIdx < 0 || nameIdx < 0) continue;
+    if (nameIdx < 0) continue;
     var row = _hrFindRowByKey_(sh, nameIdx + 1, name);
     if (!row) continue;
-    sh.getRange(row, endIdx + 1).setNumberFormat('@').setValue(end);
-    rows++;
+    if (!captured) {
+      captured = {};
+      var vals = sh.getRange(row, 1, 1, headers.length).getValues()[0];
+      for (var j = 0; j < headers.length; j++) {
+        var hk = _hrNormHeader_(headers[j]);
+        if (hk) captured[hk] = vals[j];
+      }
+    }
+    toDelete.push({ sh: sh, row: row });
   }
-  logAudit_('hr_terminated', { name: name, endDate: end, rows: rows });
-  return { ok: true, rows: rows, endDate: end };
+
+  if (!captured) {
+    // Not on any HR tab (e.g. never promoted). Still record a minimal archive row so the termination is
+    // not lost.
+    captured = {};
+    captured[_hrNormHeader_('Name & Surname')] = name;
+    if (isEmail_(quayEmail)) captured[_hrNormHeader_('Email Address')] = quayEmail;
+    logAudit_('hr_terminate_not_on_active', { name: name });
+  }
+  captured[_hrNormHeader_('End/Current Date')] = end;
+
+  // Copy into the archive tab, placing each captured value under its matching column by header name.
+  var target = Math.max(termTab.getLastRow() + 1, 2);
+  for (var ci = 0; ci < termHeaders.length; ci++) {
+    var nk = _hrNormHeader_(termHeaders[ci]);
+    if (nk && Object.prototype.hasOwnProperty.call(captured, nk)) {
+      var v = captured[nk];
+      termTab.getRange(target, ci + 1).setNumberFormat('@').setValue(v == null ? '' : String(v));
+    }
+  }
+
+  // Remove from the active / legacy tabs. Delete highest row first so an earlier delete never shifts a
+  // row still to be removed (at most one row per tab, so order only matters within a tab).
+  toDelete.sort(function (a, b) { return b.row - a.row; });
+  for (var d = 0; d < toDelete.length; d++) {
+    try { toDelete[d].sh.deleteRow(toDelete[d].row); }
+    catch (e) { logAudit_('hr_terminate_delete_failed', { name: name, tab: toDelete[d].sh.getName(), error: String(e) }); }
+  }
+
+  logAudit_('hr_terminated_moved', { name: name, endDate: end, removed_from: toDelete.length, dest: HR_TAB.terminated });
+  return { ok: true, moved: true, dest: HR_TAB.terminated, removed_from: toDelete.length };
 }
 
 // ---------------------------------------------------------------- row builder
