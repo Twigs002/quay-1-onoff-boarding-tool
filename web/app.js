@@ -160,27 +160,41 @@
     if (!ENDPOINT) throw new Error('LIFECYCLE_ENDPOINT not set in config.js');
     const accessToken = await window.AUTH.getAccessToken();
     if (!accessToken) throw new Error('Session expired, sign in again.');
-    // AbortController gives every call a hard ceiling: if the backend stalls, the fetch rejects
-    // (caught by callers) instead of hanging forever and freezing the view on a spinner.
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
-    let res;
-    try {
-      res = await fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(Object.assign({ kind, accessToken }, data || {})),
-        signal: ctrl.signal,
-      });
-    } catch (err) {
-      throw new Error(err && err.name === 'AbortError' ? 'The server took too long to respond. Please try again.' : 'Could not reach the server. Check your connection and try again.');
-    } finally {
+    // A cold Apps Script /exec occasionally returns a non-JSON "Bad response" on the FIRST hit, BEFORE
+    // it runs the script - so the request had no effect and a retry is safe + almost always succeeds.
+    // This retry used to live only on the status/programs screens; doing it here means every one-shot
+    // action (edit email, remind, resend, change week, approve...) survives a cold start too. Real
+    // errors (auth, timeout, network, ok:false) throw immediately and are NEVER retried.
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // AbortController gives every call a hard ceiling: if the backend stalls, the fetch rejects
+      // instead of hanging forever and freezing the view on a spinner.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+      let res;
+      try {
+        res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(Object.assign({ kind, accessToken }, data || {})),
+          signal: ctrl.signal,
+        });
+      } catch (err) {
+        clearTimeout(timer);
+        throw new Error(err && err.name === 'AbortError' ? 'The server took too long to respond. Please try again.' : 'Could not reach the server. Check your connection and try again.');
+      }
       clearTimeout(timer);
+      let json;
+      try { json = await res.json(); }
+      catch (_) {
+        lastErr = new Error('Bad response from server.');   // cold-start non-JSON: retry (no side effect ran)
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      if (!res.ok || json.ok === false) throw new Error(json && json.error ? json.error : 'Request failed.');
+      return json;
     }
-    let json;
-    try { json = await res.json(); } catch (_) { throw new Error('Bad response from server.'); }
-    if (!res.ok || json.ok === false) throw new Error(json && json.error ? json.error : 'Request failed.');
-    return json;
+    throw lastErr;
   }
 
   // Shared surface for split view modules. The Offboard view lives in its own
