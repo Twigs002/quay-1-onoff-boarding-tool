@@ -159,6 +159,7 @@ function dispatch_(kind, body, ctx) {
     case 'resend_packet': return _resendPacketDispatch_(body, ctx);
     case 'set_induction_week': return _setInductionWeekDispatch_(body, ctx);
     case 'candidate_detail': return _candidateDetailDispatch_(body, ctx);
+    case 'update_email': return _updateEmailDispatch_(body, ctx);
     case 'provision': return _provisionDispatch_(body, ctx);
     case 'offboard': return offboardRequest_(body, ctx);
     case 'offboard_notify': return _offboardNotifyDispatch_(body, ctx);
@@ -254,6 +255,39 @@ function _candidateDetailDispatch_(body, ctx) {
   var folderId = String(body.folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   return candidateDetail_(folderId, ctx);
+}
+
+/**
+ * Correct a candidate's PERSONAL email (kind:'update_email'). Brokers mistype the address at onboard,
+ * so the contract + FICA link never reach the candidate; this lets an onboarder fix it on the candidate
+ * detail page. Row-scoped (a broker may only edit their own candidate, same _ownsRow_ gate as the
+ * detail page). Optionally re-sends the contract + FICA link to the corrected address (body.resend).
+ */
+function _updateEmailDispatch_(body, ctx) {
+  requireOnboarder_(ctx);
+  var folderId = String(body.folderId || '');
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var email = String(body.email || '').trim();
+  if (!isEmail_(email)) return { ok: false, error: 'a valid email address is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'not_found' };
+  var isAdmin = ctx && ctx.role && (ctx.role.is_super || ctx.role.is_admin);
+  var callerEmail = ctx && ctx.email ? String(ctx.email).toLowerCase() : '';
+  if (!isAdmin && !_ownsRow_(o, callerEmail)) return { ok: false, error: 'not_found' };
+
+  var previous = String(o.email || '');
+  if (email.toLowerCase() === previous.toLowerCase()) return { ok: true, email: email, previous: previous, unchanged: true };
+  setOnboardingCell_(folderId, ONB_COL.email, email);
+  logAudit_('candidate_email_updated', { folderId: folderId, from: previous, to: email, by: callerEmail });
+
+  // Optionally re-send the contract + FICA link to the corrected address. _remindContract_ re-reads the
+  // row, so it picks up the NEW email; it refuses (returns ok:false) for an already-provisioned person.
+  var resent = false;
+  if (body.resend) {
+    try { var r = _remindContract_(folderId, ctx); resent = !!(r && r.ok); }
+    catch (e) { logAudit_('candidate_email_resend_failed', { folderId: folderId, error: String(e) }); }
+  }
+  return { ok: true, email: email, previous: previous, resent: resent };
 }
 
 /** Manual (re)provision: an explicit systems list wins; else resolve from the Onboarding row. Guarded

@@ -685,6 +685,12 @@ body { background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 220px
 .doc-req { background: #FBF3DA; color: #8A6D0B; }
 .cd-week { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cd-week[hidden] { display: none; }
+.cd-editlink { font: inherit; font-size: 12px; font-weight: 600; color: var(--blue-800, #2E4680); background: none; border: 0; padding: 0 0 0 6px; cursor: pointer; text-decoration: underline; }
+.cd-editlink:hover { color: var(--accent, #3D5BA6); }
+.cd-host .cd-emailedit { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line-2, #EDF1F8); display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.cd-host .cd-emailedit[hidden] { display: none; }
+.cd-host .cd-emailedit .week-input { width: 100%; }
+.cd-resend-lbl { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted, #606C86); }
 
 @media (max-width: 640px) {
   .steps { overflow-x: auto; }
