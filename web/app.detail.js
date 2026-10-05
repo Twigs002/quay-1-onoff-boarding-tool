@@ -95,8 +95,18 @@
         <div class="block">
           <p class="fs-title">Personal details</p>
           <div class="grid">
-            ${row('Phone', p.phone)}${row('Personal email', p.email)}
+            ${row('Phone', p.phone)}
+            <div><p class="f-lbl">Personal email</p><p class="f-val">${p.email ? esc(p.email) : '—'} <button type="button" class="cd-editlink" data-cd-editemail>Edit</button></p></div>
             ${row('ID number', p.id_masked ? p.id_masked + ' (on file)' : '')}${row('Quay 1 email', p.quay_email)}
+          </div>
+          <div class="cd-emailedit" data-cd-emailedit hidden>
+            <label class="f-lbl" for="cd-emailinput">Correct the personal email</label>
+            <input id="cd-emailinput" type="email" class="week-input" data-cd-emailinput value="${esc(p.email || '')}" placeholder="name@example.com" aria-label="Correct personal email">
+            <label class="cd-resend-lbl"><input type="checkbox" data-cd-emailresend checked> Resend the contract + FICA link to the new address</label>
+            <div class="btns">
+              <button type="button" class="btn btn-primary btn-sm" data-cd-emailsave>Save</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cd-emailcancel>Cancel</button>
+            </div>
           </div>
         </div>
         <div class="block">
@@ -132,6 +142,33 @@
   }
 
   function wireDetail(host, d, onMutate) {
+    // Edit the candidate's personal email (brokers mistype it, so the contract/FICA never arrives).
+    const editEmailBtn = host.querySelector('[data-cd-editemail]');
+    const emailEditor = host.querySelector('[data-cd-emailedit]');
+    if (editEmailBtn && emailEditor) {
+      editEmailBtn.addEventListener('click', () => {
+        emailEditor.hidden = !emailEditor.hidden;
+        if (!emailEditor.hidden) { const i = emailEditor.querySelector('input[type=email]'); if (i) i.focus(); }
+      });
+      host.querySelector('[data-cd-emailcancel]').addEventListener('click', () => { emailEditor.hidden = true; });
+      host.querySelector('[data-cd-emailsave]').addEventListener('click', async () => {
+        const input = emailEditor.querySelector('[data-cd-emailinput]');
+        const email = (input.value || '').trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Invalid email', 'Enter a valid email address.', 'err'); return; }
+        const resendBox = emailEditor.querySelector('[data-cd-emailresend]');
+        const resend = !!(resendBox && resendBox.checked);
+        const save = host.querySelector('[data-cd-emailsave]');
+        save.classList.add('loading'); save.disabled = true;
+        try {
+          const r = await api(KINDS.updateEmail, { folderId: d.folderId, email, resend });
+          if (r && r.unchanged) toast('No change', 'That is already the email on file.', 'ok');
+          else toast('Email updated', `Changed to ${esc(email)}${r && r.resent ? ' — contract + FICA link resent.' : '.'}`, 'ok');
+          if (onMutate) onMutate();
+          H.reloadCandidateDetail && H.reloadCandidateDetail();   // re-render with the corrected email
+        } catch (err) { toast('Could not update email', err.message, 'err'); save.classList.remove('loading'); save.disabled = false; }
+      });
+    }
+
     const resend = host.querySelector('[data-cd-resend]');
     if (resend) resend.addEventListener('click', async () => {
       resend.classList.add('loading'); resend.disabled = true;

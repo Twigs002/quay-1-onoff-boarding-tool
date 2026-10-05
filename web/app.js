@@ -28,6 +28,7 @@
     resendPacket: 'resend_packet',
     setInductionWeek: 'set_induction_week',
     candidateDetail: 'candidate_detail',
+    updateEmail: 'update_email',
     status: 'status',
     programs: 'programs',
     retry: 'retry',
