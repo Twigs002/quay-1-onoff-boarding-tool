@@ -129,7 +129,9 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
   o = o || {};
   opts = opts || {};
   var result = { created: [], skipped: [], failed: [] };
-  if ((o.entity || 'quay1') === 'aqua') return result;   // Quay 1 only (Aqua has no induction)
+  // Quay 1 only, UNLESS the caller explicitly allows an induction-eligible Aqua contractor
+  // (opts.allowAqua, set by the Aqua induction path for Broker Assistant / Lead Nurturer).
+  if ((o.entity || 'quay1') === 'aqua' && !opts.allowAqua) return result;
 
   var have = {};
   try { have = JSON.parse(o.calendar_events_json || '{}') || {}; } catch (e) { have = {}; }
@@ -146,13 +148,23 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
   function inductions() { return indCal || (indCal = _onbCalendar_(PROP.CAL_INDUCTIONS_ID, 'Quay 1 Inductions')); }
   function teamDates() { return teamCal || (teamCal = _onbCalendar_(PROP.CAL_TEAM_DATES_ID, 'Quay 1 Team Dates')); }
 
+  // Induction Day 1/2 invite the candidate. Any extra standing guests (opts.inductionExtraGuests, e.g.
+  // Kat for Aqua inductees) ride along on the induction days too. De-duped; empty resolves to undefined.
+  var indExtra = (opts.inductionExtraGuests || []).filter(function (e) { return isEmail_(e); });
+  function _indGuests_() {
+    var g = [];
+    if (isEmail_(o.email)) g.push(o.email);
+    indExtra.forEach(function (e) { if (g.indexOf(e) < 0) g.push(e); });
+    return g.length ? g.join(',') : undefined;
+  }
+
   var tasks = [
     { key: 'day1', make: function () {
         var s = _dateAt_(o.induction_wed, 9); if (!s) return null;
         var e = new Date(s.getTime() + 3 * 3600 * 1000);
         return inductions().createEvent('Induction Day 1 - ' + name, s, e, {
           location: INDUCTION_ADDRESS,
-          guests: isEmail_(o.email) ? o.email : undefined, sendInvites: true,
+          guests: _indGuests_(), sendInvites: true,
           description: 'Welcome to Quay 1, ' + first + '. Day 1 of your induction, 09:00 - 12:00, at ' + INDUCTION_ADDRESS + '.',
         }).getId();
       } },
@@ -161,7 +173,7 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
         var e = new Date(s.getTime() + 3 * 3600 * 1000);
         return inductions().createEvent('Induction Day 2 - ' + name, s, e, {
           location: INDUCTION_ADDRESS,
-          guests: isEmail_(o.email) ? o.email : undefined, sendInvites: true,
+          guests: _indGuests_(), sendInvites: true,
           description: 'Day 2 of your Quay 1 induction, 09:00 - 12:00, at ' + INDUCTION_ADDRESS + '.',
         }).getId();
       } },
@@ -205,6 +217,29 @@ function createOnboardingCalendarEvents_(folderId, o, opts) {
     skipped: result.skipped.join(',') || 'none', failed: result.failed.join(',') || 'none',
   });
   return result;
+}
+
+/**
+ * EDITOR BACKFILL (run-picker; no trailing underscore). Create the calendar invites (Induction Day 1
+ * + Day 2, Birthday, Work anniversary) for ONE already-inducted Aqua contractor, with the standing
+ * team-dates guests (Kat) on all of them, including the induction days. Use this for someone who was
+ * inducted before the Aqua calendar path existed (e.g. Reuben): it creates only the calendar events,
+ * it does NOT re-send the induction email, so there is no double-send. Idempotent via
+ * calendar_events_json, DRY_RUN-safe, Aqua only. Reads the row by folderId.
+ *
+ * Usage (editor): run createAquaCalendarByFolder('<folderId>') and read the returned object.
+ */
+function createAquaCalendarByFolder(folderId) {
+  folderId = String(folderId || '').trim();
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found for folderId ' + folderId };
+  if ((o.entity || '') !== 'aqua') return { ok: false, error: 'not an Aqua row; this helper is Aqua-only' };
+  if (!String(o.induction_wed || '').trim() && !String(o.induction_thu || '').trim()) {
+    return { ok: false, error: 'no induction week on this row - run the induction first (inductAquaByFolder)' };
+  }
+  var r = createOnboardingCalendarEvents_(folderId, o, { allowAqua: true, inductionExtraGuests: (CFG.TEAM_DATES_GUESTS || []) });
+  return { ok: true, folderId: folderId, name: o.name || '', result: r, dry_run: DRY_RUN_() };
 }
 
 /**
