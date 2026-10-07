@@ -303,21 +303,26 @@ function listCompletedOnboarding_() {
   });
 }
 
-/** Admin cleanup: remove ONE onboarding row from the tracker, but ONLY when its status is terminal
- *  (Provisioned / Migrated legacy). The status is re-checked here so a stale or hand-crafted folderId
- *  can never delete an in-flight candidate. Logs the removal. Returns { ok, removed:{name,status} }
- *  or { ok:false, error }. Accounts and HR records are untouched; this only clears the pipeline row. */
-function removeOnboarding_(folderId, ctx) {
+/** Remove ONE onboarding row from the tracker. By default (no opts.force) this is ADMIN cleanup and
+ *  only runs when the status is terminal (Provisioned / Migrated legacy): the status is re-checked
+ *  here so a stale or hand-crafted folderId can never delete an in-flight candidate. A SUPER may pass
+ *  opts.force to clear an in-flight (non-terminal) candidate who is not going to join; the super role
+ *  is re-derived from ctx here as defense-in-depth, so force is honoured only for an actual super even
+ *  if the dispatch gate were wrong. Logs the removal (with a `forced` flag). Returns
+ *  { ok, removed:{name,status} } or { ok:false, error }. Accounts and HR records are untouched; this
+ *  only clears the pipeline row. */
+function removeOnboarding_(folderId, ctx, opts) {
   folderId = String(folderId || '');
   if (!folderId) return { ok: false, error: 'folderId is required' };
   var o = readOnboardingByFolder_(folderId);
   if (!o) return { ok: false, error: 'onboarding row not found' };
+  var force = !!(opts && opts.force) && !!(ctx && ctx.role && ctx.role.is_super);
   var status = String(o.status || '').trim().toLowerCase();
-  if ((CFG.REMOVABLE_STATUSES || []).indexOf(status) < 0) {
+  if (!force && (CFG.REMOVABLE_STATUSES || []).indexOf(status) < 0) {
     return { ok: false, error: 'refused: only completed rows (Provisioned or Migrated legacy) can be removed - this one is "' + o.status + '"' };
   }
   if (!deleteOnboardingRow_(folderId)) return { ok: false, error: 'onboarding row not found' };
-  logAudit_('onboarding_removed', { folderId: folderId, name: o.name, status: o.status, by: (ctx && ctx.email) || 'admin' });
+  logAudit_('onboarding_removed', { folderId: folderId, name: o.name, status: o.status, forced: force, by: (ctx && ctx.email) || 'admin' });
   bustProgramsCache_();   // a removed starter should disappear from Programs immediately
   return { ok: true, removed: { name: o.name, status: o.status } };
 }

@@ -190,11 +190,14 @@ function _listCompletedDispatch_(body, ctx) {
   return { ok: true, rows: listCompletedOnboarding_() };
 }
 
-/** Remove a completed onboarding row (kind:'remove_onboarding'). Admin-only, guarded to terminal
- *  status inside removeOnboarding_. Only clears the tracker row; accounts and HR records are untouched. */
+/** Remove an onboarding row (kind:'remove_onboarding'). Ordinary cleanup of a terminal-status row is
+ *  admin-only. A forced removal (body.force) clears an in-flight, non-terminal candidate and is
+ *  super-only; removeOnboarding_ re-derives the super role before honouring force. Only clears the
+ *  tracker row; accounts and HR records are untouched. */
 function _removeOnboardingDispatch_(body, ctx) {
-  requireAdmin_(ctx);
-  return removeOnboarding_(String(body.folderId || ''), ctx);
+  if (body.force === true) requireSuper_(ctx);
+  else requireAdmin_(ctx);
+  return removeOnboarding_(String(body.folderId || ''), ctx, { force: body.force === true });
 }
 
 /** Decline a candidate's FICA (kind:'decline_fica'). Admin-only, deliberate reject: records a reason
