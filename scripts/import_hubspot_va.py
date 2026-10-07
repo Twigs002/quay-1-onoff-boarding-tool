@@ -161,11 +161,22 @@ def load_rows(path: Path, sheet: str, entity_mode: str, limit: int | None):
         import openpyxl
     except ImportError:
         sys.exit("openpyxl not installed. Run: pip install openpyxl")
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    it = ws.iter_rows(values_only=True)
-    header = [clean(h) for h in next(it)]
+    # Some HubSpot exports ship a broken <dimension> tag (ref="A1"), which makes
+    # openpyxl's read_only mode report a 1x1 sheet - the header row then looks like
+    # just ['Record ID'] and every real column is "missing". Detect that and fall
+    # back to a full (non-read_only) load, which recomputes the true dimensions.
+    def _open(read_only):
+        wb = openpyxl.load_workbook(path, read_only=read_only, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+        it = ws.iter_rows(values_only=True)
+        header = [clean(h) for h in next(it)]
+        return wb, ws, it, header
+
+    wb, ws, it, header = _open(read_only=True)
     hidx = header_index(header)
+    if any(col_i(hidx, req) is None for req in (COL["record_id"], COL["first"], COL["last"])):
+        wb, ws, it, header = _open(read_only=False)   # broken dimension tag - reload fully
+        hidx = header_index(header)
     missing = [COL["record_id"], COL["first"], COL["last"]]
     for req in missing:
         if col_i(hidx, req) is None:
