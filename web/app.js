@@ -844,6 +844,9 @@
     // view-only: it shows document + approval state and offers Send reminder, but never an Accept
     // button (that would 403 for non-admins and duplicate the Admin Check action).
     const docPill = HUB.docPill;
+    // Supers get a per-row Remove here (mirrors the super-only Retry gate): everyone in this list is
+    // in-flight / non-terminal, so this is the one place to clear a candidate who is not going to join.
+    const canRemove = !!(USER && USER.isSuper);
     const cards = items.map((o) => {
       const entTag = HUB.entTag(o.entity);
       const booked = !!(o.induction_booked || o.induction_wed || o.induction_thu);
@@ -858,6 +861,8 @@
         ${docPill(o.docs && o.docs.poa, 'Address')}${docPill(o.docs && o.docs.bank, 'Bank')}</div>`;
       const remindBtn = !o.approved
         ? `<button type="button" class="btn btn-ghost btn-sm" data-remind="${esc(o.folderId)}" data-name="${esc(o.name || '')}" data-reminded="${esc(o.reminded_at || '')}">Send reminder</button>` : '';
+      const removeBtn = canRemove
+        ? `<button type="button" class="btn btn-ghost btn-sm" data-remove="${esc(o.folderId)}" data-name="${esc(o.name || '')}">Remove</button>` : '';
       const remindedNote = o.reminded_at ? `<div class="pipe-reminded">Reminded ${esc(timeAgo(o.reminded_at))}</div>` : '';
       return `<div class="pipe-row">
         <div class="pipe-main cd-open" data-open="${esc(o.folderId)}" role="button" tabindex="0" title="View candidate detail">
@@ -867,7 +872,7 @@
         </div>
         <div class="pipe-side">
           <span class="pill ${state.c}">${state.t}</span>
-          <div class="pipe-actions">${remindBtn}</div>
+          <div class="pipe-actions">${remindBtn}${removeBtn}</div>
           ${remindedNote}
         </div>
       </div>`;
@@ -902,6 +907,24 @@
         } catch (err) {
           toast('Could not send reminder', err.message, 'err');
           b.classList.remove('loading'); b.disabled = false;
+        }
+      });
+    });
+
+    // Super-only: clear an in-flight candidate who is not going to join. Forced removal (force:true)
+    // needs the super role on both sides; it only clears the tracker row, never accounts or HR records.
+    host.querySelectorAll('[data-remove]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.name || 'this person';
+        if (!confirm(`Remove ${name} from the Progress report? They are still in progress, so use this only for someone who is not going to join. It just clears their pipeline row, their accounts and HR records are left untouched.`)) return;
+        b.classList.add('loading'); b.disabled = true;
+        try {
+          await api(KINDS.removeOnboarding, { folderId: b.dataset.remove, force: true });
+          toast('Removed from pipeline', `${name} was cleared from the Progress report. Accounts and records are untouched.`, 'ok');
+          loadStatus(wrap || host.closest('.stack'), true);   // refresh so the removed candidate drops off
+        } catch (err) {
+          b.classList.remove('loading'); b.disabled = false;
+          toast('Could not remove', err.message, 'err');
         }
       });
     });
