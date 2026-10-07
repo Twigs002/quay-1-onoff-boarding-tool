@@ -517,6 +517,14 @@ function _maybeAquaInduction_(folderId, o) {
     return;
   }
   var iw = _ensureInductionWeekForProvisioning_(o);   // assigns induction_wed/thu on the row (DRY_RUN-safe)
+  o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // reflect the fresh week on the in-memory row for the calendar below
+
+  // Calendar invites for the inductee: Induction Day 1 + Day 2, Birthday and Work anniversary, with the
+  // standing team-dates guests (Kat) on ALL of them, induction days included. Idempotent via
+  // calendar_events_json, DRY_RUN-safe (createOnboardingCalendarEvents_ guards internally), non-fatal.
+  try { createOnboardingCalendarEvents_(folderId, o, { allowAqua: true, inductionExtraGuests: (CFG.TEAM_DATES_GUESTS || []) }); }
+  catch (e) { logAudit_('aqua_induction_calendar_failed', { folderId: folderId, error: String(e) }); }
+
   if (DRY_RUN_()) { logAudit_('aqua_induction_dryrun', { folderId: folderId, wed: iw.wed, thu: iw.thu }); return; }
   try {
     if (!isEmail_(o.email)) return;
