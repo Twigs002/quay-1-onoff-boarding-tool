@@ -473,12 +473,28 @@ function _sendAquaWelcome_(folderId, o) {
 
 /**
  * Aqua designations whose holders ALSO attend induction (on top of their welcome pack): Broker
- * Assistant + Lead Nurturer. Fancy Caller + Relationship Manager do not. Case-insensitive exact
- * match on the stored designation (Onboarding row). Set on the Aqua onboard form (internal-only).
+ * Assistant + Lead Nurturer. Fancy Caller + Relationship Manager do not. Matched DEFENSIVELY against
+ * the stored designation (Onboarding row): normalise (trim + lowercase) and accept a "lead nurtur"
+ * prefix so a near-miss stored value like "Lead Nurturing" (a gerund) counts as eligible rather than
+ * being silently skipped. Still false for "fancy caller", "relationship manager" and empty. Set on
+ * the Aqua onboard form (internal-only).
  */
 function _aquaInductionEligible_(designation) {
   var d = String(designation == null ? '' : designation).trim().toLowerCase();
-  return d === 'broker assistant' || d === 'lead nurturer';
+  if (!d) return false;
+  return d === 'broker assistant' || d.indexOf('lead nurtur') === 0;
+}
+
+/**
+ * Aqua designations that are known NOT to attend induction (they get the Google-only welcome pack and
+ * nothing more): Fancy Caller + Relationship Manager. Matched the same defensive way as
+ * _aquaInductionEligible_. Anything that is neither eligible nor recognised-non-attending is an
+ * UNEXPECTED designation and must be surfaced loudly (see _maybeAquaInduction_), never skipped quietly.
+ */
+function _aquaDesignationKnownNonAttending_(designation) {
+  var d = String(designation == null ? '' : designation).trim().toLowerCase();
+  if (!d) return false;
+  return d === 'fancy caller' || d === 'relationship manager';
 }
 
 /**
@@ -489,7 +505,17 @@ function _aquaInductionEligible_(designation) {
  */
 function _maybeAquaInduction_(folderId, o) {
   if (!o || (o.entity || '') !== 'aqua') return;
-  if (!_aquaInductionEligible_(o.designation)) return;
+  if (!_aquaInductionEligible_(o.designation)) {
+    // A non-empty designation that is neither induction-eligible NOR a recognised non-attending one
+    // (fancy caller / relationship manager) is unexpected - exactly the near-miss that silently skipped
+    // Reuben. Surface it LOUDLY so an unknown designation can never quietly drop induction again. The
+    // recognised non-attending designations (and empty) are still skipped quietly.
+    var des = String(o.designation == null ? '' : o.designation).trim();
+    if (des && !_aquaDesignationKnownNonAttending_(des)) {
+      logAudit_('aqua_induction_designation_unrecognized', { folderId: folderId, designation: des, name: o.name || '' });
+    }
+    return;
+  }
   var iw = _ensureInductionWeekForProvisioning_(o);   // assigns induction_wed/thu on the row (DRY_RUN-safe)
   if (DRY_RUN_()) { logAudit_('aqua_induction_dryrun', { folderId: folderId, wed: iw.wed, thu: iw.thu }); return; }
   try {
@@ -506,6 +532,34 @@ function _maybeAquaInduction_(folderId, o) {
       { name: company.name, cc: (ccEnabled_() && isEmail_(o.senior_email)) ? o.senior_email : undefined });
     logComms_(folderId, 'aqua_induction', o.email, 'Aqua induction notice (' + when + ')', o.name);
   } catch (e) { logAudit_('aqua_induction_notice_failed', { folderId: folderId, error: String(e) }); }
+}
+
+/**
+ * RETRO-INDUCT an Aqua contractor, run by hand from the Apps Script editor. Use this when an
+ * already-provisioned (or previously-skipped) Aqua inductee never got their induction week + notice -
+ * e.g. the provisioning hook ran before this hardening and a near-miss designation silently skipped
+ * them, and there is no manual Aqua route (setInductionWeekManual_ refuses Aqua) and the web POST path
+ * is unavailable. Reads the row, hard-checks the entity is Aqua, then runs the normal Aqua induction
+ * path, which assigns the induction week and sends the Aqua induction notice email. It inherits
+ * _maybeAquaInduction_'s own DRY_RUN handling, so when DRY_RUN is on nothing is sent (audit only).
+ *
+ * CAUTION - NOT idempotent: _maybeAquaInduction_ has no "already sent" guard, so running this twice
+ * for the same folderId sends the induction notice TWICE. Run it once per contractor.
+ *
+ * Usage (Apps Script editor): run inductAquaByFolder('<folderId>') and read the returned object in the
+ * execution log.
+ */
+function inductAquaByFolder(folderId) {
+  folderId = String(folderId || '').trim();
+  if (!folderId) return { ok: false, error: 'folderId is required' };
+  var o = readOnboardingByFolder_(folderId);
+  if (!o) return { ok: false, error: 'onboarding row not found for folderId ' + folderId };
+  if ((o.entity || '') !== 'aqua') {
+    return { ok: false, error: 'not an Aqua row (entity=' + (o.entity || '(blank)') + '); this helper is Aqua-only' };
+  }
+  logAudit_('aqua_induction_retro_run', { folderId: folderId, name: o.name || '', designation: o.designation || '', dry_run: DRY_RUN_() });
+  _maybeAquaInduction_(folderId, o);
+  return { ok: true, folderId: folderId, name: o.name || '', designation: o.designation || '', dry_run: DRY_RUN_() };
 }
 
 /**
