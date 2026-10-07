@@ -299,6 +299,7 @@ function provisionReadyBatch_() {
       if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(o.folderId, o); _maybeAquaInduction_(o.folderId, o); }
       else {
         var iw = _ensureInductionWeekForProvisioning_(o);
+        o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // refresh the in-memory row so the calendar below uses the freshly-assigned week (setInduction_ writes the sheet, not o)
         _sendInductionPacket_(o.folderId, o, iw.wed, iw.thu, iw.rescheduled);
         // Hand off to Diego NOW that accounts exist and the week is known. The Tuesday sweep only runs
         // before the Wed 08:00 batch, so a same-week inductee provisioned here would otherwise never get
@@ -419,6 +420,7 @@ function approveAndProvision_(folderId, ctx, opts) {
     if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(folderId, o); _maybeAquaInduction_(folderId, o); }
     else {
       var iw = _ensureInductionWeekForProvisioning_(o);
+      o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // refresh the in-memory row so the calendar below uses the freshly-assigned week (setInduction_ writes the sheet, not o)
       _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
       _sendFlowSetup_(folderId, o);   // hand off to Diego at provisioning; Tuesday sweep is the backstop
       // Calendar events (induction days + birthday + anniversary). Idempotent + non-fatal.
