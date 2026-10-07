@@ -29,7 +29,7 @@ The Sheet is the only shared state. Neither half calls the other directly.
 ## 2. Repo layout
 
 ```
-quay-1-boarding-tool/
+quay-1-onoff-boarding-tool/
 ├── README.md                 arm/deploy steps (user-gated), DRY_RUN note
 ├── .gitignore                node_modules, web/config.js, worker/.env, __pycache__, .clasp.json
 ├── docs/
