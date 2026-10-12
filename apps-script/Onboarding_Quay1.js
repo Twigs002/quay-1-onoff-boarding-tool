@@ -118,7 +118,7 @@ function _quay1Fields_(f) {
 function genQuay1Contract_(folder, c) {
   var company = CFG.COMPANY.quay1;
   var docName = company.name + ' Agreement - ' + (String(c.full_name || 'Candidate').trim());
-  var copyId = DriveApp.getFileById(quay1TemplateFor_(c.deal_type, c.activity)).makeCopy(docName, folder).getId();
+  var copyId = quay1OpenTemplate_(c.deal_type, c.activity).makeCopy(docName, folder).getId();
   var doc = DocumentApp.openById(copyId);
   var b = doc.getBody();
 
@@ -137,14 +137,42 @@ function genQuay1Contract_(folder, c) {
   return { docId: copyId, url: DriveApp.getFileById(copyId).getUrl(), pdfUrl: pdfFile.getUrl(), pdfFile: pdfFile };
 }
 
-/** Sale vs Rental template id. The UI `deal_type` (sale|rental) is the EXPLICIT override; when it
- *  is absent we derive it from the broker-activity code (rent_res_* -> Rental, sell_res_* -> Sale;
- *  any legacy value mentioning "rent" -> Rental). Everything else defaults to Sale. */
-function quay1TemplateFor_(dealType, activity) {
+/** Resolve which Quay 1 contract template applies: {key, label, id}. The UI `deal_type` (sale|rental)
+ *  is the EXPLICIT override; when it is absent we derive it from the broker-activity code (rent_res_*
+ *  -> Rental, sell_res_* -> Sale; any legacy value mentioning "rent" -> Rental). Everything else
+ *  defaults to Sale. Rental falls back to the (required) Sale template when QUAY1_TEMPLATE_RENTAL is
+ *  unset, and `key`/`label` follow that fallback so a caller's error names the template it actually
+ *  tried. A missing Sale property throws the clear "Missing required Script Property" error. */
+function quay1TemplateRef_(dealType, activity) {
   var dt = String(dealType || '').trim().toLowerCase();
   var isRental = dt ? (dt === 'rental' || dt === 'rent') : /^rent_|(?:^|\W)rent/i.test(String(activity || ''));
   var key = isRental ? PROP.QUAY1_TEMPLATE_RENTAL : PROP.QUAY1_TEMPLATE_SALE;
-  return optProp_(key) || prop_(PROP.QUAY1_TEMPLATE_SALE, true);
+  var id = optProp_(key);
+  if (!id) { // Rental unset -> fall back to Sale; Sale unset -> clear "missing property" error.
+    key = PROP.QUAY1_TEMPLATE_SALE;
+    id = prop_(PROP.QUAY1_TEMPLATE_SALE, true);
+    isRental = false;
+  }
+  return { key: key, label: isRental ? 'Rental' : 'Sale', id: id };
+}
+
+/** Back-compat: just the resolved template id (kept for existing callers/tests). */
+function quay1TemplateFor_(dealType, activity) { return quay1TemplateRef_(dealType, activity).id; }
+
+/** Open the resolved template as a Drive File, turning Google's opaque "No item with the given ID
+ *  could be found" into a message that names the template (Sale/Rental), its Script Property, the id
+ *  tried, and the two real causes - so the operator fixes it without reading code. */
+function quay1OpenTemplate_(dealType, activity) {
+  var ref = quay1TemplateRef_(dealType, activity);
+  try {
+    return DriveApp.getFileById(ref.id);
+  } catch (err) {
+    throw new Error(
+      'Quay 1 ' + ref.label + ' contract template is not accessible. Script Property ' + ref.key +
+      ' = "' + ref.id + '". Confirm that Google Doc exists (not trashed), the id is current, and it ' +
+      'is shared with the account the web app executes as. (Google: ' +
+      String(err && err.message ? err.message : err) + ')');
+  }
 }
 
 /** Broker-activity clause definition for a code (CFG.BROKER_ACTIVITIES); '' if unknown/empty. */
