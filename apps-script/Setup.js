@@ -486,14 +486,17 @@ function prepareQuay1MergeTemplates() {
       .makeCopy('Quay 1 ' + kind + ' agreement v2.1G (MERGE TEMPLATE)', parent);
     var doc = DocumentApp.openById(copy.getId());
     var b = doc.getBody();
-    // Unambiguous: the personal fields and the hardcoded example values.
-    b.replaceText('(Name:)\\s*_{2,}', '$1 {{FULL_NAME}}');
-    b.replaceText('(\\bID)\\s+_{2,}', '$1 {{ID_NUMBER}}');
+    // Unambiguous: the personal fields and the hardcoded example values. NOTE: Apps Script
+    // Body.replaceText() does NOT support $-group backreferences (they insert the literal "$1"),
+    // so the label is written out in full rather than captured.
+    b.replaceText('Name:\\s*_{2,}', 'Name: {{FULL_NAME}}');
+    b.replaceText('\\bID\\s+_{2,}', 'ID {{ID_NUMBER}}');
     b.replaceText('With effect from 21 March 2026', 'With effect from {{START_DATE}}');
     b.replaceText('Justin Nortier', '{{SENIOR_BROKER}}');
-    // Best-effort, FLAGGED: the broker commission split in clause 5.1 ("50%"). The 25% partnership
-    // split in 4.3.1 is deliberately left alone - confirm which the system should fill.
-    b.replaceText('commission equal to 50%', 'commission equal to {{COMMISSION}}%');
+    // {{COMMISSION}} is the BROKER's partnership share in clause 4.3.1 (the "25%" example). Clause
+    // 5.1's "50%" is the fixed company<->partnership split and MUST stay hardcoded (confirmed by the
+    // business). Tokenising 5.1 instead of 4.3.1 was the original bug.
+    b.replaceText('entitled to 25% of all commission', 'entitled to {{COMMISSION}}% of all commission');
     doc.saveAndClose();
     out[kind] = copy.getId();
   });
@@ -501,7 +504,7 @@ function prepareQuay1MergeTemplates() {
     '\n\nREVIEW each copy before repointing:' +
     '\n 1. {{FULL_NAME}} / {{ID_NUMBER}} landed on the Name / ID lines.' +
     '\n 2. {{START_DATE}} replaced "21 March 2026"; {{SENIOR_BROKER}} replaced "Justin Nortier".' +
-    '\n 3. {{COMMISSION}} was placed at clause 5.1 (the broker "50%" split). The 25% in 4.3.1 was left as-is - fix if wrong.' +
+    '\n 3. {{COMMISSION}} was placed at clause 4.3.1 (the broker partnership "25%" share). Clause 5.1 stays a fixed 50%.' +
     '\n 4. PLACE {{BROKER_ACTIVITY}} BY HAND: replace the "Broker Activities shall mean" definition clause' +
     '\n    (the one ending "(*delete inapplicable definition)") with {{BROKER_ACTIVITY}} so the system' +
     '\n    injects the correct clause per activity. Until you do, generated contracts keep the combined clause.' +
