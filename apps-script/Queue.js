@@ -243,7 +243,17 @@ function _onboardingPipeline_(isAdmin, email, pq) {
     if (String(r.action) !== 'create') return;
     var st = String(r.status || '').toLowerCase();
     var s = setup[r.folderId] || { incomplete: false, error: false };
+    // A worker that ran a create in DRY-RUN writes a 'done' row whose result_json carries dry_run:true -
+    // NO real account was made. If the app itself is armed, that row must NOT read as complete (audit #7),
+    // else a hire shows fully set up with no actual account. Treat a dry-run 'done' as still incomplete so
+    // it stays surfaced on the pipeline. (Both dry_run (worker) and dryRun (inline) shapes are honoured.)
+    var dryRunDone = false;
+    if (st === 'done') {
+      var res = safeJsonParse_(r.result_json, null);
+      dryRunDone = !!(res && (res.dry_run === true || res.dryRun === true));
+    }
     if (st === 'error') { s.error = true; s.incomplete = true; }
+    else if (dryRunDone) { s.incomplete = true; }
     else if (st !== 'done' && st !== 'skipped') { s.incomplete = true; }
     setup[r.folderId] = s;
   });
