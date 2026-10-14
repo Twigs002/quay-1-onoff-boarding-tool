@@ -179,7 +179,21 @@ function buildServices({ dryRun = true, props = {}, authUser = null } = {}) {
       sleep: () => {},
       base64Decode: () => [],
       newBlob: () => ({ getBytes: () => [], setName: () => {} }),
+      DigestAlgorithm: { SHA_256: 'SHA_256', MD5: 'MD5' },
+      // Deterministic per-input "digest" (same input -> same bytes, different input -> different bytes).
+      // Good enough for cache-key derivation in tests; not a real hash.
+      computeDigest: (_algo, str) => Array.from(String(str)).map((c) => c.charCodeAt(0) & 0xff),
+      base64EncodeWebSafe: (bytes) => Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_'),
+      base64Encode: (bytes) => Buffer.from(typeof bytes === 'string' ? bytes : bytes).toString('base64'),
     },
+    // In-memory script cache (one store per buildServices instance), enough to exercise token->role
+    // caching in Auth.verifyCaller_. TTL is accepted and ignored (tests do not advance time).
+    CacheService: (function () {
+      const store = {};
+      const api = { get: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+        put: (k, v) => { store[k] = String(v); }, remove: (k) => { delete store[k]; } };
+      return { getScriptCache: () => api, getUserCache: () => api, getDocumentCache: () => api };
+    })(),
     ContentService: {
       MimeType: { JSON: 'application/json', TEXT: 'text/plain' },
       createTextOutput(s) {

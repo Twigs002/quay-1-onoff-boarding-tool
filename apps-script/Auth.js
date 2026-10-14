@@ -27,12 +27,33 @@
  *   requireSuper_(ctx)           - void | throws   assert is_super (retry / destructive UI).
  */
 
+// How long a resolved token -> role is cached (seconds). Short enough that a deactivated or
+// role-changed staff row takes effect quickly, long enough to collapse the dashboard's repeated
+// polls + button presses into roughly one auth round-trip per window.
+var AUTH_ROLE_CACHE_TTL_SEC = 90;
+
 /**
  * Verify a Supabase access token and resolve the staff role. Returns null on any failure
- * (invalid token, no staff row, inactive) so callers treat it as unauthenticated.
+ * (invalid token, no staff row, inactive) so callers treat it as unauthenticated. Positive results
+ * are cached for AUTH_ROLE_CACHE_TTL_SEC to avoid re-hitting Supabase on every authenticated POST.
  */
 function verifyCaller_(accessToken) {
   if (!accessToken) return null;
+
+  // Cache token -> resolved role for a short window. Every authenticated POST (and the dashboard polls
+  // + every button) otherwise pays TWO serial, un-timeoutable Supabase round-trips here, which is the
+  // main cause of the authed-POST hangs. Cache POSITIVE results only, keyed by a hash of the token, for
+  // AUTH_ROLE_CACHE_TTL_SEC. A just-deactivated or role-changed staff row is honoured up to the TTL, which
+  // is an acceptable trade for an internal tool. Any cache failure falls through to a live verify.
+  var cache = null, cacheKey = null;
+  try {
+    cache = CacheService.getScriptCache();
+    cacheKey = 'authrole_' + Utilities.base64EncodeWebSafe(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, accessToken));
+    var hit = cache.get(cacheKey);
+    if (hit) { var cached = safeJsonParse_(hit, null); if (cached && cached.email) return cached; }
+  } catch (e) { cache = null; cacheKey = null; }
+
   var supaUrl = prop_(PROP.SUPABASE_URL, true);
   var anon = prop_(PROP.SUPABASE_ANON_KEY, true);
   try {
@@ -58,13 +79,15 @@ function verifyCaller_(accessToken) {
     // surface without is_admin being set on the shared staff row (which would grant her admin
     // across every Quay app). Mirror on the frontend: web/auth.js BOARDING_ADMIN_ALLOW.
     var boardingAdmin = BOARDING_ADMIN_ALLOW_.indexOf(email.toLowerCase()) !== -1;
-    return {
+    var caller = {
       email: email,
       name: String(s.name || '').trim(),
       isSuper: !!s.is_super,
       isAdmin: !!s.is_admin || boardingAdmin,
       isBroker: !!s.is_senior_broker,
     };
+    try { if (cache && cacheKey) cache.put(cacheKey, JSON.stringify(caller), AUTH_ROLE_CACHE_TTL_SEC); } catch (e) { /* cache unavailable: not fatal */ }
+    return caller;
   } catch (err) {
     return null;
   }
