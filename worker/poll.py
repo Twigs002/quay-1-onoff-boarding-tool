@@ -110,6 +110,17 @@ def process_row(bus: SheetBus, qr: QueueRow) -> str:
         res = _dispatch(qr)
         status = DONE if res.get("ok") else ERROR
         if status == DONE and qr.action == "create":
+            # A dry-run CREATE returns ok=True, so it would otherwise be written
+            # `done` exactly like a real one - the silent "hire looks set up but no
+            # account exists" trap (TEST #7). The real guard is _refuse_dryrun_creates
+            # in main(), which never lets an armed create reach here while the worker
+            # is dry; this is defence-in-depth + an explicit, auditable breadcrumb for
+            # any future direct caller, so a simulated `done` can never be mistaken for
+            # a real account at a glance in the logs.
+            if res.get("dry_run"):
+                log.warning("row %d %s: CREATE completed in DRY_RUN - result is SIMULATED, "
+                            "NO real %s account was made (result_json carries dry_run=true)",
+                            qr.row_index, qr.queue_id, qr.system)
             _mirror_account_flag(bus, qr, res)
         bus.finish(qr, status, res)
         log.info("row %d %s: %s  %s", qr.row_index, qr.queue_id, status,
@@ -134,6 +145,40 @@ def process_row(bus: SheetBus, qr: QueueRow) -> str:
         log.warning("row %d %s: failed (attempt %d/%d), released to pending: %s",
                     qr.row_index, qr.queue_id, attempts, config.MAX_ATTEMPTS, e)
         return "retry"
+
+
+def _refuse_dryrun_creates(rows: list[QueueRow]) -> list[QueueRow]:
+    """Fail-safe reconciliation of the worker's DRY_RUN against the app's armed state (TEST #7).
+
+    The worker's DRY_RUN is set in worker/.env, wholly independent of the Apps Script
+    app's own DRY_RUN; nothing reconciles the two. A worker-owned `create` row only ever
+    reaches `pending` on the real queue when the app is ARMED and genuinely wants a real
+    account made - an unarmed (dry) app does not enqueue browser-system create work. So a
+    pending create row is ALWAYS a real request. If THIS worker is dry it would merely
+    SIMULATE the account yet still write the row `done` (a dry-run result has ok=True), so
+    the hire reads as fully set up with no real account ever created - silent and dangerous.
+
+    Rather than fake a `done`, the worker REFUSES to process create rows while dry: they are
+    left `pending` (a visible backlog, not a false success) and the mismatch is logged loudly
+    so it is caught, not buried. Fixing it is a deliberate act (set DRY_RUN=0 to provision for
+    real). `deactivate` rows still flow (offboarding teardown is out of scope for #7). Leaving a
+    row untouched at `pending` is naturally idempotent - a later pass simply refuses it again.
+    Returns the rows that remain to be processed this pass.
+    """
+    if not config.DRY_RUN:
+        return rows
+    keep = [qr for qr in rows if qr.action != "create"]
+    refused = [qr for qr in rows if qr.action == "create"]
+    for qr in refused:
+        log.error("row %d %s: REFUSING a CREATE while worker DRY_RUN=1 (system=%s name=%s) - "
+                  "left pending, NOT marked done. The app enqueued a real account request but "
+                  "this worker is dry: set DRY_RUN=0 in worker/.env to provision for real.",
+                  qr.row_index, qr.queue_id, qr.system, qr.get("full_name") or "?")
+    if refused:
+        log.error("DRY_RUN/armed MISMATCH: %d pending CREATE row(s) left unprocessed this pass "
+                  "(a dry worker will not fake real account creation): %s",
+                  len(refused), [qr.queue_id for qr in refused])
+    return keep
 
 
 def main() -> int:
@@ -162,6 +207,9 @@ def main() -> int:
         log.error("stale-in_progress reaper failed (continuing): %s", e)
 
     rows = bus.pending_provisioning()
+    # Fail-safe: a dry worker must never fake real account creation (TEST #7). Refuse (leave
+    # pending + log loudly) any armed create rows before the per-pass cap is applied.
+    rows = _refuse_dryrun_creates(rows)
     if config.MAX_ROWS_PER_PASS > 0:
         rows = rows[:config.MAX_ROWS_PER_PASS]
     log.info("pending browser-portal rows this pass: %d", len(rows))
