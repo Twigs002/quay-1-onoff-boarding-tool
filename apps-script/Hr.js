@@ -182,26 +182,30 @@ function hrPromote_(folderId) {
     }
   }
 
-  // Folder-link fallback: the document-folder column is sometimes titled "HR Folder" / "Drive Folder" /
-  // "Employee Folder" etc. rather than exactly "Folder link" - which is why Aqua rows showed no folder.
-  // If we have a folder URL but NO column matched the canonical name, drop it into the first folder-titled
-  // column the tool does not already own (so any reasonable naming works on either entity tab).
+  // Folder link: always land the candidate's document-folder URL on the destination tab. Prefer a
+  // canonical "Folder link" column; else any folder-titled column the tool does not own (so "HR Folder"
+  // etc. work); else CREATE a "Folder link" column at the far right and write there. The brokers tab
+  // ("IGSICA EMPLOYEES (Automated)") and the Aqua tab ship without a folder column, so without this the
+  // link had nowhere to go and was silently dropped. Appending a new last column leaves every existing
+  // column (and its formulas/validation) untouched.
   var _folderUrl = fieldMap['Folder link'];
   if (_folderUrl) {
-    var _hasCanonical = false;
+    var _folderCol = 0;   // 1-based target column for the link
     for (var fi = 0; fi < destHeaders.length; fi++) {
-      if (_hrNormHeader_(destHeaders[fi]) === 'folder link') { _hasCanonical = true; break; }
+      if (_hrNormHeader_(destHeaders[fi]) === 'folder link') { _folderCol = fi + 1; break; }
     }
-    if (!_hasCanonical) {
+    if (!_folderCol) {
       for (var gi = 0; gi < destHeaders.length; gi++) {
         var gk = _hrNormHeader_(destHeaders[gi]);
-        if (gk.indexOf('folder') >= 0 && !Object.prototype.hasOwnProperty.call(normMap, gk)) {
-          dest.getRange(target, gi + 1).setNumberFormat('@').setValue(String(_folderUrl));
-          logAudit_('hr_folder_link_aliased', { folderId: folderId, dest: destName, column: destHeaders[gi] });
-          break;
-        }
+        if (gk.indexOf('folder') >= 0 && !Object.prototype.hasOwnProperty.call(normMap, gk)) { _folderCol = gi + 1; break; }
       }
     }
+    if (!_folderCol) {
+      _folderCol = destHeaders.length + 1;   // no folder column anywhere: create one at the far right
+      dest.getRange(1, _folderCol).setNumberFormat('@').setValue('Folder link');
+      logAudit_('hr_folder_link_column_created', { folderId: folderId, dest: destName, column: _folderCol });
+    }
+    dest.getRange(target, _folderCol).setNumberFormat('@').setValue(String(_folderUrl));
   }
 
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.
@@ -230,6 +234,32 @@ function hrPromote_(folderId) {
   catch (e) { logAudit_('hr_promoted_marker_failed', { folderId: folderId, error: String(e) }); }
   logAudit_('hr_promoted', { folderId: folderId, name: o.name, entity: entity, dest: destName });
   return { ok: true, row: target, dest: destName };
+}
+
+/**
+ * EDITOR BACKFILL (run-picker; no trailing underscore). Re-apply HR folder links to every
+ * already-promoted hire. The brokers tab ("IGSICA EMPLOYEES (Automated)") and the Aqua tab shipped
+ * without a Folder link column, so anyone promoted before the column existed has no link on their HR
+ * row. hrPromote_ is idempotent - it finds the person's existing row by ID number and updates it in
+ * place - and now ensures/fills the Folder link column, so re-running it per promoted row backfills the
+ * link without duplicating anyone. Inherits hrPromote_'s HR_SYNC / DRY_RUN guards (a no-op preview in
+ * DRY_RUN). Run backfillHrFolderLinks() from the editor and read the summary in the log.
+ */
+function backfillHrFolderLinks() {
+  var out = { scanned: 0, ok: 0, errors: [] };
+  listOnboarding_(function (o) { return !!o.hr_promoted_at && !!o.folderId; }).forEach(function (o) {
+    out.scanned++;
+    try {
+      var r = hrPromote_(o.folderId);
+      if (r && r.ok) out.ok++;
+      else out.errors.push({ folderId: o.folderId, name: o.name, error: (r && r.error) || 'unknown' });
+    } catch (e) {
+      out.errors.push({ folderId: o.folderId, name: o.name, error: String(e) });
+    }
+  });
+  logAudit_('hr_folder_link_backfill_run', { scanned: out.scanned, ok: out.ok, errors: out.errors.length, dry: DRY_RUN_() });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 /** Set the "Welcome Email Sent" cell on the candidate's HR row, called when the welcome pack actually
