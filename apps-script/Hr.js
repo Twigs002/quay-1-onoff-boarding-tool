@@ -92,10 +92,36 @@ function hrTrackingUpsert_(folderId) {
 
   var ss = SpreadsheetApp.openById(hrSheetId_());
   var sh = _hrEnsureTab_(ss, HR_TAB.tracking, true);
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
+  // Header-driven write (finding M1): resolve every column from the tab's ACTUAL header row, never
+  // from a fixed HR_HEADERS position - so a hand-reordered or hand-inserted column on the tracking
+  // tab can no longer silently corrupt the upsert. Assert the key columns resolve before any write;
+  // if they do not, fail loudly rather than key/write the wrong cell.
+  var headers = _hrReadHeaders_(sh);
+  var keyCol = _hrHeaderIndex_(headers, 'Identification Number') + 1;   // absent -> -1 + 1 = 0
+  var nameCol = _hrHeaderIndex_(headers, 'Name & Surname') + 1;
+  if (keyCol < 1 || nameCol < 1) {
+    logAudit_('hr_tracking_key_col_failed', { folderId: folderId, tab: HR_TAB.tracking,
+      hasKey: keyCol >= 1, hasName: nameCol >= 1 });
+    return { ok: false, error: 'HR tracking tab "' + HR_TAB.tracking + '" is missing its "Identification Number" and/or "Name & Surname" column - not writing.' };
+  }
   var target = _hrFindRowByKey_(sh, keyCol, o.id_number);
   if (!target) target = Math.max(sh.getLastRow() + 1, 2);
-  sh.getRange(target, 1, 1, HR_HEADERS.length).setNumberFormat('@').setValues([row]);
+  // Place each tool-owned value under its matching column BY NAME. Columns the tool does not own (the
+  // trailing "Tracking status", or any human-inserted column) are left untouched. Owned columns are
+  // written even when blank: this tab is the tool's own staging copy, so this stays identical to the
+  // prior HR_HEADERS-ordered setValues on a correctly-ordered tab.
+  var fieldMap = _hrFieldMap_(o);
+  var normMap = {};
+  Object.keys(fieldMap).forEach(function (k) { normMap[_hrNormHeader_(k)] = fieldMap[k]; });
+  for (var ci = 0; ci < headers.length; ci++) {
+    var nk = _hrNormHeader_(headers[ci]);
+    if (nk && Object.prototype.hasOwnProperty.call(normMap, nk)) {
+      var v = normMap[nk];
+      sh.getRange(target, ci + 1).setNumberFormat('@').setValue(v == null ? '' : String(v));
+    }
+  }
+  // Loudly surface any tool field that found NO column (a renamed/drifted header) so it is SEEN.
+  _hrAlertUnmappedFields_(fieldMap, headers, { folderId: folderId, dest: HR_TAB.tracking });
 
   try { setOnboardingCell_(folderId, ONB_COL.hr_tracking_at, nowIso_()); } catch (e) { /* non-fatal */ }
   return { ok: true, row: target };
@@ -182,10 +208,17 @@ function hrPromote_(folderId) {
   try {
     var track = _hrEnsureTab_(ss, HR_TAB.tracking, false);
     if (track) {
-      var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
-      var trow = _hrFindRowByKey_(track, keyCol, o.id_number);
+      // Header-driven on the tracking tab too (finding M1): find the key column and the "Tracking
+      // status" column BY NAME, never by a fixed HR_HEADERS position, so a reordered tracking tab
+      // still marks the right row/cell. Fall back to the canonical trailing status position only when
+      // no named status column is present (e.g. an older tab created before the status header existed).
+      var tHeaders = _hrReadHeaders_(track);
+      var tKeyCol = _hrHeaderIndex_(tHeaders, 'Identification Number') + 1;
+      var tStatusCol = _hrHeaderIndex_(tHeaders, HR_TRACKING_STATUS_HEADER) + 1;
+      if (tStatusCol < 1) tStatusCol = HR_HEADERS.length + 1;
+      var trow = tKeyCol >= 1 ? _hrFindRowByKey_(track, tKeyCol, o.id_number) : 0;
       if (trow) {
-        track.getRange(trow, HR_HEADERS.length + 1)
+        track.getRange(trow, tStatusCol)
           .setNumberFormat('@').setValue('Moved to ' + destName + ' ' + fmtDate_(nowIso_()));
       }
     }
@@ -213,19 +246,33 @@ function hrMarkWelcomeSent_(folderId) {
     return { ok: true, dryRun: true, would: 'mark Welcome Email Sent for ' + (o.name || o.id_number) };
   }
   var ss = SpreadsheetApp.openById(hrSheetId_());
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1;
-  var col = HR_HEADERS.indexOf('Welcome Email Sent') + 1;
   var val = fmtDate_(o.welcome_email_at || nowIso_());
   var entity = (o.entity === 'aqua') ? 'aqua' : 'quay1';
   var tabs = [HR_TAB[entity], HR_TAB.tracking];   // prefer the "active" destination tab, else staging
+  // Resolve BOTH the key column and the "Welcome Email Sent" column from EACH tab's ACTUAL header row,
+  // never from a fixed HR_HEADERS position: the Aqua "AQUA EMPLOYEES (Automated)" tab orders its
+  // columns differently, so a positional write landed the welcome date in the wrong cell (the
+  // folder-link bug class). This is immune to that column drift now.
   for (var i = 0; i < tabs.length; i++) {
     var sh = _hrEnsureTab_(ss, tabs[i], false);
     if (!sh) continue;
-    var row = _hrFindRowByKey_(sh, keyCol, o.id_number);
-    if (row) {
-      sh.getRange(row, col).setNumberFormat('@').setValue(val);
-      return { ok: true, tab: tabs[i], row: row };
+    var headers = _hrReadHeaders_(sh);
+    var keyCol = _hrHeaderIndex_(headers, 'Identification Number') + 1;
+    if (keyCol < 1) {
+      logAudit_('hr_welcome_no_key_col_failed', { folderId: folderId, name: o.name, tab: tabs[i] });
+      continue;
     }
+    var row = _hrFindRowByKey_(sh, keyCol, o.id_number);
+    if (!row) continue;
+    var col = _hrHeaderIndex_(headers, 'Welcome Email Sent') + 1;
+    if (col < 1) {
+      // The person IS on this tab but the welcome column was renamed/removed: do NOT write to a guessed
+      // position. Surface loudly (mirrors to the Alerts tab) so the header is fixed, and stop here.
+      logAudit_('hr_field_unmapped_failed', { folderId: folderId, dest: tabs[i], field: 'Welcome Email Sent' });
+      return { ok: false, tab: tabs[i], row: row, error: 'HR tab "' + tabs[i] + '" has no "Welcome Email Sent" column - not writing.' };
+    }
+    sh.getRange(row, col).setNumberFormat('@').setValue(val);
+    return { ok: true, tab: tabs[i], row: row };
   }
   return { ok: true, skipped: 'no HR row yet - reflected on promotion' };
 }
@@ -454,6 +501,40 @@ function _hrFindRowByKey_(sh, keyCol, key) {
   return 0;
 }
 
+/** Loud-fail guard (finding H3 / 2D): surface any tool-OWNED field carrying a non-empty value that
+ *  found NO matching column on the destination tab - the folder-link bug class, where a renamed or
+ *  drifted header silently swallows the value. Emits one 'hr_field_unmapped_failed' per dropped field;
+ *  the '_failed' suffix mirrors it to the operator-visible Alerts tab (see logAudit_), so a drifted
+ *  header is SEEN rather than silently lost. Fields the canonical HR layout never carries (optional
+ *  tool extras) are exempt, and an email alias is suppressed when a sibling spelling IS present (a tab
+ *  carries exactly one of "Email Address" / "Personal Email"), so a correctly-named tab stays silent. */
+function _hrAlertUnmappedFields_(fieldMap, destHeaders, info) {
+  var present = {};
+  for (var i = 0; i < destHeaders.length; i++) {
+    var hk = _hrNormHeader_(destHeaders[i]);
+    if (hk) present[hk] = true;
+  }
+  // Optional tool extras with no home on the canonical HR layout - absence is normal, never an alert.
+  // (Folder link lands only where a folder-titled column exists - hrPromote_ aliases it; FFC Status is
+  // an extra beside the canonical "FFC CERTIFICATE NUMBER".)
+  var exempt = { 'folder link': true, 'ffc status': true };
+  // Alias groups: a tab carries exactly ONE spelling; a present sibling means the value DID land.
+  var aliasGroups = [['email address', 'personal email', 'personal email address']];
+  Object.keys(fieldMap).forEach(function (field) {
+    var val = fieldMap[field];
+    if (val == null || String(val) === '') return;        // empty: nothing was going to be written
+    var nk = _hrNormHeader_(field);
+    if (!nk || present[nk] || exempt[nk]) return;         // landed, or a known-optional extra
+    for (var g = 0; g < aliasGroups.length; g++) {
+      if (aliasGroups[g].indexOf(nk) < 0) continue;
+      for (var s = 0; s < aliasGroups[g].length; s++) {
+        if (present[aliasGroups[g][s]]) return;           // a sibling spelling carried this value
+      }
+    }
+    logAudit_('hr_field_unmapped_failed', { folderId: info.folderId, dest: info.dest, field: field });
+  });
+}
+
 // ---------------------------------------------------------------- SA ID helpers
 
 /** True for a 13-digit, all-numeric South African ID number. */
@@ -538,7 +619,6 @@ function saIdRepair_(raw) {
 function repairHrIds_(apply) {
   var armed = apply === true && hrSyncEnabled_();
   var summary = { apply: armed, tabs: {} };
-  var keyCol = HR_HEADERS.indexOf('Identification Number') + 1; // column 4
   var ss;
   try { ss = SpreadsheetApp.openById(hrSheetId_()); }
   catch (e) { logAudit_('hr_id_repair_failed', { error: String(e) }); summary.error = String(e); return summary; }
@@ -547,6 +627,18 @@ function repairHrIds_(apply) {
     var name = HR_TAB[k];
     var sh = ss.getSheetByName(name);
     if (!sh) return;
+    // Resolve the ID key column from THIS tab's ACTUAL header row, never from a fixed HR_HEADERS
+    // position: a tab whose column 4 is NOT the ID (e.g. an account-number column on a drifted or
+    // differently-ordered destination tab) would be mangled by a positional rewrite. If the tab has
+    // no "Identification Number" column at all, skip it and surface loudly rather than rewrite the
+    // wrong column.
+    var headers = _hrReadHeaders_(sh);
+    var keyCol = _hrHeaderIndex_(headers, 'Identification Number') + 1;
+    if (keyCol < 1) {
+      logAudit_('hr_id_repair_no_key_col_failed', { tab: name });
+      summary.tabs[name] = { skipped: 'no Identification Number column' };
+      return;
+    }
     var t = { scanned: 0, repaired: 0, normalized: 0, review: [] };
     summary.tabs[name] = t;
     var last = sh.getLastRow();
