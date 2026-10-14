@@ -105,12 +105,9 @@
     meta.textContent = 'Loading...';
     try {
       if (offbCache && !force) { renderTree(wrap, offbCache); return; }
-      let r, lastErr;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { r = await api(KINDS.programs, {}); lastErr = null; break; }
-        catch (e) { lastErr = e; await new Promise((res) => setTimeout(res, 600)); }
-      }
-      if (lastErr) throw lastErr;
+      // api() already retries the cold-start "Bad response" internally for this read-only kind, and
+      // surfaces auth/timeout errors immediately, so no outer retry loop (which would re-fire those).
+      const r = await api(KINDS.programs, {});
       offbCache = r;
       renderTree(wrap, r);
     } catch (err) {
