@@ -306,11 +306,17 @@ function _provisionDispatch_(body, ctx) {
   if (!o.approved_at && !o.provisioned_at) {
     return { ok: false, error: 'not approved: an admin must Approve & set up this candidate before (re)provisioning' };
   }
+  // Fail-closed entity gate (audit #4): a blank entity must NEVER default to quay1 on this account-creating
+  // path - it would provision across the Active/Quay 1 confidentiality wall. Refuse before resolving systems.
+  if (!_hasEntity_(o)) {
+    logAudit_('provision_refused_blank_entity', { folderId: folderId, path: 'provision_dispatch' });
+    return { ok: false, error: 'entity missing - refusing to provision' };
+  }
   var systems = _provisionList_(body, body);
   if (!systems) {
     // o.designation holds the broker-activity label ("... (JB)"/"(SB)"), which brokerRole_ reads for
     // the entitlements matrix on a standalone re-provision (the code isn't a separate row column).
-    systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+    systems = resolveSystems_(o.entity, o.programs, null, o.team, o.activity || o.designation);
   }
   return provisionAll_(folderId, systems, ctx);
 }

@@ -28,6 +28,33 @@
  * row with {"dry_run":true}. No live mutation until armed.
  */
 
+/** Fail-closed entity gate (audit #4): true only when a row carries a usable entity. On an
+ *  account-creating or HR-promoting path a BLANK entity must NEVER silently default to quay1 - a
+ *  mis-scoped row would provision + promote across the Active/Quay 1 confidentiality wall. Callers on
+ *  those paths refuse when this is false. Read-only/display fallbacks keep their harmless || 'quay1'. */
+function _hasEntity_(o) {
+  return !!String((o && o.entity) || '').trim();
+}
+
+/** Return a shallow copy of a log payload with POPIA-sensitive fields redacted (audit #6): the full SA
+ *  id_number is replaced by an id_present flag + id_last4 (last 4 digits only), never the whole 13-digit
+ *  identifier. Used ONLY for what goes to the audit log / Stackdriver; the data written to the sheets and
+ *  the real request payloads are left untouched. */
+function _redactLogPayload_(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  var out = {};
+  Object.keys(payload).forEach(function (k) {
+    if (k === 'id_number') {
+      var s = String(payload[k] == null ? '' : payload[k]).trim();
+      out.id_present = !!s;
+      out.id_last4 = s ? s.slice(-4) : '';
+    } else {
+      out[k] = payload[k];
+    }
+  });
+  return out;
+}
+
 /** Resolve the systems to provision. An explicit list (the form's ticked systems) is the base
  *  selection; when none is given we fall back to the entity core set plus any systems mapped from
  *  ticked programs. On TOP of either, the team's Team-Directory Systems are ALWAYS unioned in as a
@@ -144,6 +171,11 @@ function _propdataRole_(person) {
 // ctx is passed through for downstream audit/identity use.
 function provisionAll_(folderId, systems, ctx) {
   var person = _personFor_(folderId);
+  // NOTE: the fail-closed entity gate (audit #4) lives on the CALLERS (approveAndProvision_,
+  // provisionReadyBatch_, Router._provisionDispatch_) - every real account-creating path refuses a
+  // blank entity BEFORE reaching here, and _postProvisionHandoff_ guards the HR-promote step. It is
+  // deliberately NOT re-checked here so this stays a pure orchestrator (a direct unit call with an
+  // explicit systems list is still exercisable); the entry-point guards are the enforced boundary.
   // Entity cap, defense in depth: re-apply ENTITY_SYSTEMS_ALLOW here too, not only in resolveSystems_,
   // so nothing can smuggle a barred system onto an entity however the systems list was assembled - a
   // hand-edited systems_json, a legacy row, or an explicit `provision` list all pass through here.
@@ -275,9 +307,16 @@ function provisionReadyBatch_() {
   listOnboarding_().forEach(function (o) {
     if (o.provisioned_at) { out.already++; return; }        // done in a prior run
     if (!_provisionReady_(o)) { out.not_ready++; return; }   // waiting on signed contract / FICA
+    // Fail-closed entity gate (audit #4): refuse a blank-entity row rather than defaulting it to quay1,
+    // which would provision + promote across the Active/Quay 1 wall. Skip it (never minting accounts).
+    if (!_hasEntity_(o)) {
+      out.errors.push({ folderId: o.folderId, error: 'entity missing - refusing to provision' });
+      logAudit_('provision_refused_blank_entity', { folderId: o.folderId, path: 'batch' });
+      return;
+    }
     var systems = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(systems) || !systems.length) {
-      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+      systems = resolveSystems_(o.entity, o.programs, null, o.team, o.activity || o.designation);
     }
     // Lock ONLY the provision-stamp critical section, and RE-READ the row under the lock: an interactive
     // "Approve & set up" may have provisioned this row since the listOnboarding_ snapshot, so without the
@@ -349,6 +388,13 @@ function approveAndProvision_(folderId, ctx, opts) {
     if (String(o.declined_at || '').trim()) {
       return { ok: false, error: 'declined: this candidate was declined and has not re-submitted yet - they must re-submit the declined documents before they can be accepted' };
     }
+    // Fail-closed entity gate (audit #4). A blank entity must NEVER default to quay1 on this path - it
+    // would provision + promote across the Active/Quay 1 confidentiality wall. Refuse before any mutation
+    // (no approval stamp, no accounts) so a mis-scoped row is corrected, not silently set up as quay1.
+    if (!_hasEntity_(o)) {
+      logAudit_('provision_refused_blank_entity', { folderId: folderId, path: 'approve' });
+      return { ok: false, error: 'entity missing - refusing to provision' };
+    }
     // HARD contract-verification gate. The fica_contract tick only proves a file was uploaded; before
     // any accounts are minted a human must open the signed contract and confirm it is correctly signed.
     // The admin does this by ticking the "verified" box, which sends contract_verified:true (opts.contractVerified).
@@ -374,7 +420,7 @@ function approveAndProvision_(folderId, ctx, opts) {
 
     var systems = safeJsonParse_(o.systems_json, null);
     if (!Array.isArray(systems) || !systems.length) {
-      systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
+      systems = resolveSystems_(o.entity, o.programs, null, o.team, o.activity || o.designation);
     }
 
     var prov = provisionAll_(folderId, systems, ctx);
@@ -432,8 +478,20 @@ function approveAndProvision_(folderId, ctx, opts) {
 function _postProvisionHandoff_(o) {
   if (!o) return;
   var folderId = o.folderId;
+  // Fail-closed entity gate (audit #4) on the HR-promote path too: hrPromote_ would default a blank
+  // entity to quay1 (across the Active/Quay 1 wall). Upstream provision guards make this unreachable
+  // with a blank entity, but refuse loudly rather than promote a mis-scoped row if it ever is reached.
+  if (!_hasEntity_(o)) {
+    logAudit_('provision_refused_blank_entity', { folderId: folderId, path: 'handoff' });
+    return;
+  }
   bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
-  try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
+  // Track the post-account steps that fail so a hire left Provisioned but with an incomplete HR record
+  // or missing calendar invites raises a VISIBLE, retryable signal (audit #9) instead of reading as
+  // fully set up. Both steps stay non-fatal (caught, logged, never un-provision).
+  var failed = [];
+  try { hrPromote_(folderId); }
+  catch (e) { failed.push('hr_promote'); logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
   if ((o.entity || '') === 'aqua') {
     _sendAquaWelcome_(folderId, o);
     _maybeAquaInduction_(folderId, o);
@@ -443,7 +501,16 @@ function _postProvisionHandoff_(o) {
     _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
     _sendFlowSetup_(folderId, o);
     try { createOnboardingCalendarEvents_(folderId, o); }
-    catch (ce) { logAudit_('calendar_events_failed', { folderId: folderId, error: String(ce) }); }
+    catch (ce) { failed.push('calendar'); logAudit_('calendar_events_failed', { folderId: folderId, error: String(ce) }); }
+  }
+  // Audit #9: the hire IS provisioned (accounts exist; never un-provision), but a post-account step
+  // failed - surface ONE loud, retryable signal. A *_failed kind is auto-mirrored to the Alerts tab +
+  // Tuesday digest (see logAudit_ / _recentAlertCount_), and a status note shows it on the tracker so an
+  // operator knows to retry (hrPromote_ + calendar are both idempotent, so a re-run safely completes).
+  if (failed.length) {
+    logAudit_('setup_incomplete_failed', { folderId: folderId, name: o.name || '', incomplete: failed.join(',') });
+    try { setOnboardingStatus_(folderId, 'Provisioned (setup incomplete)'); }
+    catch (se) { logAudit_('setup_incomplete_status_failed', { folderId: folderId, error: String(se) }); }
   }
 }
 
@@ -1126,7 +1193,9 @@ function _propdata_(person, action) {
     vendor_id: optProp_(PROP.PROPDATA_VENDOR_ID), role: _propdataRole_(person),
   };
   if (!_propdataReady_()) {
-    logAudit_('propdata_dryrun', { action: action, payload: payload });
+    // POPIA (audit #6): never write the full SA id_number to the audit log / Stackdriver. Log a redacted
+    // copy (presence + last 4 only); the real payload, with the id, is still returned for the live path.
+    logAudit_('propdata_dryrun', { action: action, payload: _redactLogPayload_(payload) });
     return { ok: true, dryRun: true, would: payload };
   }
   // TODO(B2): confirm the real agent endpoint path with api-support@propdata.net.
