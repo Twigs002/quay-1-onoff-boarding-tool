@@ -33,6 +33,14 @@ var PROPDATA_HEADERS = ['First Name', 'Last Name', 'Email', 'Active'];
 // makes repeat loads return with zero I/O. Short TTL bounds staleness after an admin pastes a fresh
 // roster export. Fully fail-safe: any cache error just falls through to a rebuild.
 var PROGRAMS_CACHE_KEY = 'programs_tree_v1';
+// The divisions directory is cached under its OWN key with a longer TTL and is deliberately NOT cleared
+// by bustProgramsCache_ (a new onboard / provision / removal changes WHO is on a team, never the divisions
+// list). This keeps the slow, timeout-less GitHub fetch out of the hot path: busting the programs tree on
+// every mutation rebuilds from the sheets but reuses the cached divisions. A last-known-good copy is also
+// persisted to Script Properties so a GitHub outage with a cold cache serves stale rather than empty.
+var DIVISIONS_CACHE_KEY = 'programs_divisions_v1';
+var DIVISIONS_CACHE_TTL = 600; // seconds (10 min)
+var DIVISIONS_LKG_PROP = 'PROGRAMS_DIVISIONS_LKG';
 var PROGRAMS_CACHE_TTL = 120; // seconds
 
 /** Drop the memoised Programs tree so the next read rebuilds from source. Call after any change to
@@ -315,16 +323,40 @@ function _tabRows_(tabName, ss) {
 
 // ---------------------------------------------------------------- divisions + helpers
 
-/** The divisions directory (CFG.DIVISIONS_URL). {sections:[]} on any failure (never throws). */
+/** The divisions directory (CFG.DIVISIONS_URL). Cached under DIVISIONS_CACHE_KEY (own longer TTL, not
+ *  busted on mutations) so the timeout-less GitHub fetch leaves the hot path. On a fetch failure or a
+ *  non-200 it serves the last-known-good copy (cache, then Script Properties) rather than an empty tree
+ *  that would make every account read "none". {sections:[]} only when nothing good has ever been seen.
+ *  Never throws. */
 function _programsDivisions_() {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+  if (cache) {
+    try { var hit = cache.get(DIVISIONS_CACHE_KEY); if (hit) return JSON.parse(hit); } catch (e) { /* rebuild */ }
+  }
+
+  var fresh = null;
   try {
     var res = UrlFetchApp.fetch(CFG.DIVISIONS_URL, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) { logAudit_('programs_divisions_failed', { code: res.getResponseCode() }); return { sections: [] }; }
-    return safeJsonParse_(res.getContentText(), { sections: [] }) || { sections: [] };
+    if (res.getResponseCode() === 200) fresh = safeJsonParse_(res.getContentText(), null);
+    else logAudit_('programs_divisions_failed', { code: res.getResponseCode() });
   } catch (err) {
     logAudit_('programs_divisions_failed', { error: String(err) });
-    return { sections: [] };
   }
+
+  if (fresh && fresh.sections) {
+    var payload = JSON.stringify(fresh);
+    try { if (cache) cache.put(DIVISIONS_CACHE_KEY, payload, DIVISIONS_CACHE_TTL); } catch (e) { /* too big / down */ }
+    try { PropertiesService.getScriptProperties().setProperty(DIVISIONS_LKG_PROP, payload); } catch (e) { /* >9KB / down: best-effort */ }
+    return fresh;
+  }
+
+  // Fetch failed or returned an unusable body: serve the last-known-good copy if we have one.
+  try {
+    var lkg = PropertiesService.getScriptProperties().getProperty(DIVISIONS_LKG_PROP);
+    if (lkg) { var parsed = JSON.parse(lkg); if (parsed && parsed.sections) { logAudit_('programs_divisions_served_stale', {}); return parsed; } }
+  } catch (e) { /* fall through to empty */ }
+  return { sections: [] };
 }
 
 /** Dot-insensitive, lower-cased email (Google Workspace ignores dots in the local part). '' if invalid. */
