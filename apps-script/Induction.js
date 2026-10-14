@@ -345,21 +345,46 @@ function tuesdayDigest_() {
     // excluding declined keeps out rows that have dropped out.
     else if (!o.induction_wed && !o.induction_thu && o.contract_emailed_at && !o.declined_at) buckets.unbooked.push(o);
   });
+  // Aqua inductees now ALSO attend induction (Broker Assistant / Lead Nurturer - see _maybeAquaInduction_),
+  // so an Aqua row with an induction week this week must appear here too, or the digest looks incomplete
+  // (an Aqua inductee due this week was silently missing). An induction_wed is only ever written for an
+  // Aqua row that is induction-eligible (a non-attending Aqua contractor never gets a week), so filtering
+  // on "has an induction_wed in this week" surfaces EXACTLY the Aqua inductees, not every Aqua contractor.
+  // They are merged into "due this week" with an "(Aqua)" label on the name so they ride the existing
+  // table + counts, keeping every Quay 1 row/bucket/count exactly as it was. The "Awaiting FICA" bucket
+  // stays Quay 1 only (it is a Quay 1 pre-induction concept). Appended AFTER the Quay 1 rows.
+  listOnboarding_(function (o) { return o.entity === 'aqua' && !_isMigratedLegacy_(o); }).forEach(function (o) {
+    var wed = _asDate_(o.induction_wed);
+    if (wed && wed >= weekStart && wed <= weekEnd && !o.declined_at) {
+      var row = {};
+      Object.keys(o).forEach(function (k) { row[k] = o[k]; });
+      row.name = (String(o.name || '').trim() || 'Aqua inductee') + ' (Aqua)';
+      buckets.dueThisWeek.push(row);
+    }
+  });
   var company = CFG.COMPANY.quay1;
   var to = CFG.DIGEST_NOTIFY.filter(function (x) { return x; }).join(',');
   var awaitingAccept = buckets.dueThisWeek.filter(function (o) { return !o.approved_at; }).length;
   var holidayClashes = buckets.dueThisWeek.filter(function (o) { return o.induction_holiday_flag; }).length;
   // Operator health line: system alerts logged this week (swallowed *_failed events) + a heads-up when
   // the SA public-holiday table is about to run out. Both are otherwise invisible to whoever reads this.
+  var since7 = _isoDate_(_addDays_(new Date(), -7));
   var health = {
-    alerts: _recentAlertCount_(_isoDate_(_addDays_(new Date(), -7))),
+    alerts: _recentAlertCount_(since7),
     holidayWarning: _holidayTableWarning_(),
   };
+  // Contract-generation failures are *_failed events, so they are already inside health.alerts - but a
+  // bare count does not tell anyone WHO is stranded. Pull their names so the digest calls them out by
+  // name (reinforcing the immediate per-failure alert from onboardQuay1_). See _recentContractGenFailures_.
+  var contractFails = _recentContractGenFailures_(since7);
   var subject = company.name + ' - induction digest (' + buckets.dueThisWeek.length +
     ' due, ' + buckets.unbooked.length + ' awaiting FICA)' + (health.alerts ? ' [' + health.alerts + ' alert' + (health.alerts === 1 ? '' : 's') + ']' : '');
   var body = 'Induction status. Due this week: ' + buckets.dueThisWeek.length +
     ' (' + awaitingAccept + ' still awaiting acceptance). Awaiting FICA: ' + buckets.unbooked.length + '.' +
     (holidayClashes ? '\n\nATTENTION: ' + holidayClashes + ' induction day this week clashes with a SA public holiday - see the Status column.' : '') +
+    (contractFails.length ? '\n\nACTION NEEDED: contract generation failed this week for ' + contractFails.join(', ') +
+      ' - ' + (contractFails.length === 1 ? 'this candidate is' : 'these candidates are') +
+      ' stranded with no contract sent (status "Contract error"). Please check the Quay 1 contract template.' : '') +
     (health.alerts ? '\n\nSystem alerts this week: ' + health.alerts + ' - see the Alerts tab in the tracker.' : '') +
     (health.holidayWarning ? '\n\n' + health.holidayWarning : '');
   GmailApp.sendEmail(to, subject, body,
@@ -381,6 +406,32 @@ function _recentAlertCount_(sinceIso) {
     for (var i = 0; i < when.length; i++) { if (String(when[i][0]).slice(0, 10) >= since) n++; }
     return n;
   } catch (e) { return 0; }
+}
+
+/** Names of candidates whose contract generation FAILED (an Alerts-tab *_contract_gen_failed row) on or
+ *  after `sinceIso` (a YYYY-MM-DD), read out of the logged detail JSON. Lets the Tuesday digest call a
+ *  stranded candidate out BY NAME instead of only counting the failure in health.alerts. [] when the
+ *  tab/tracker is absent or nothing matched. Fully guarded - never throws into the digest. */
+function _recentContractGenFailures_(sinceIso) {
+  try {
+    var id = optProp_(PROP.TRACKER_SHEET_ID);
+    if (!id) return [];
+    var t = SpreadsheetApp.openById(id).getSheetByName(CFG.TAB.ALERTS);
+    if (!t) return [];
+    var last = t.getLastRow();
+    if (last < 2) return [];
+    var rows = t.getRange(2, 1, last - 1, 3).getValues();   // When (SAST) | Kind | Details
+    var since = String(sinceIso || '').slice(0, 10);
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]).slice(0, 10) < since) continue;
+      if (!/contract_gen_failed$/.test(String(rows[i][1]))) continue;
+      var name = '';
+      try { name = String((JSON.parse(rows[i][2] || '{}') || {}).name || '').trim(); } catch (e) { name = ''; }
+      out.push(name || 'a candidate');
+    }
+    return out;
+  } catch (e) { return []; }
 }
 
 /** A heads-up string when the SA public-holiday table is about to run out (so induction dates keep

@@ -61,7 +61,14 @@ function onboardQuay1_(body, ctx) {
     systems = resolveSystems_('quay1', c.programs, _provisionList_(body, f), c.team, c.activity);
   } catch (err) {
     try { setOnboardingStatus_(folder.getId(), 'Contract error'); } catch (e) { /* row still stands */ }
-    logAudit_('quay1_contract_gen_failed', { folderId: folder.getId(), error: String(err) });
+    // Carry the candidate name into the audit detail so the Alerts tab (and the Tuesday digest, which
+    // reads it back) can name the stranded candidate, not just count the failure.
+    logAudit_('quay1_contract_gen_failed', { folderId: folder.getId(), name: c.full_name, error: String(err) });
+    // A contract-gen failure strands the candidate with no contract out, and until now its only trace
+    // was the Alerts tab - a candidate sat stuck for 2 days before anyone noticed. Alert the ops/admin
+    // digest recipients straight away so a human sees it within the hour. Non-fatal + DRY_RUN-safe: a
+    // notification problem must never mask the real error we are about to return.
+    _notifyQuay1ContractGenFailure_(folder.getId(), c.full_name, err);
     return { ok: false, folderId: folder.getId(), folderUrl: folder.getUrl(),
       error: 'contract generation failed: ' + String(err && err.message ? err.message : err) };
   }
@@ -81,6 +88,35 @@ function onboardQuay1_(body, ctx) {
     ok: true, folderId: folder.getId(), folderUrl: folder.getUrl(), pdfUrl: gen.pdfUrl,
     emailed: emailed, provisioning_deferred: true, systems: systems,
   };
+}
+
+/**
+ * Alert the ops/admin digest recipients the moment a Quay 1 contract fails to generate, so a stranded
+ * candidate (status 'Contract error') is noticed within the day instead of only on a manual Alerts-tab
+ * check. Reuses CFG.DIGEST_NOTIFY (the same recipients the Tuesday induction digest goes to). Best
+ * effort: nothing is sent in DRY_RUN, and any send problem is swallowed (logged) so it can never break
+ * onboarding or mask the real contract error the caller is returning.
+ */
+function _notifyQuay1ContractGenFailure_(folderId, name, err) {
+  try {
+    if (DRY_RUN_()) { logAudit_('quay1_contract_gen_alert_skipped_dryrun', { folderId: folderId, name: name }); return; }
+    var to = (CFG.DIGEST_NOTIFY || []).filter(function (x) { return x; }).join(',');
+    if (!to) return;
+    var company = CFG.COMPANY.quay1;
+    var who = String(name || '').trim() || 'A candidate';
+    var reason = String(err && err.message ? err.message : err);
+    var body = who + ' could not be onboarded - contract generation failed.\n\n' +
+      'Error: ' + reason + '\n' +
+      'Candidate folder: https://drive.google.com/drive/folders/' + folderId + '\n\n' +
+      'The candidate is stranded with no contract sent (status "Contract error"). This is most often a ' +
+      'missing or deleted contract template - please check the Quay 1 contract template Script Property ' +
+      'points at a real Doc. The full log is on the Alerts tab in the tracker.';
+    GmailApp.sendEmail(to, company.name + ' - ACTION NEEDED: contract generation failed for ' + who, body,
+      { name: company.name });
+  } catch (e) {
+    // A failed alert is itself a *_failed event, so it still lands on the Alerts tab via logAudit_.
+    logAudit_('quay1_contract_gen_alert_failed', { folderId: folderId, error: String(e) });
+  }
 }
 
 /**
