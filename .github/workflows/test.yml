@@ -1,0 +1,55 @@
+name: Tests
+
+# Runs the offline test suites on every push and pull request. Both suites run
+# without network, browser, gspread or playwright (the worker imports those
+# lazily), so no extra install step is needed. The job fails if any suite fails.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # node_harness.js is the aggregate GAS suite; each tests/e2e_*.js is a
+      # standalone script that exits non-zero on failure. Run them all and fail
+      # the build if any one fails (collect results, do not stop at the first).
+      - name: Node e2e suite
+        run: |
+          set -u
+          fail=0
+          for f in tests/node_harness.js tests/e2e_*.js; do
+            echo "::group::node $f"
+            if node "$f"; then
+              echo "PASS $f"
+            else
+              echo "FAIL $f"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "One or more node test suites failed."
+            exit 1
+          fi
+
+      # Offline dry-run harness for the python worker (claim/dispatch/write-back).
+      # Exits non-zero on any failed check, which fails the build.
+      - name: Python worker harness
+        run: python3 tests/py_harness.py
