@@ -38,6 +38,19 @@
     removeOnboarding: 'remove_onboarding',
   };
 
+  // Kinds whose POST has NO backend side effect - they only read and return a
+  // snapshot. These are the ONLY kinds api() is allowed to auto-retry when a
+  // cold Apps Script /exec returns a non-JSON "Bad response": re-sending a read
+  // is harmless. EVERY other kind is a mutation (approve, offboard, onboard,
+  // remind, resend, set week, update email, retry, remove ...); a response lost
+  // near the timeout may mean the backend ALREADY ran, so a blind retry would
+  // double-fire the side effect (a second paid CMA approval email, a duplicate
+  // contract, a double teardown). Those surface the error instead of retrying.
+  // (The fuller fix is a backend idempotency key; this read-only allowlist is
+  // the safe frontend-only guard until that lands.)
+  const READ_ONLY_KINDS = [KINDS.status, KINDS.programs, KINDS.candidateDetail, KINDS.listCompleted];
+  const isReadOnlyKind = (kind) => READ_ONLY_KINDS.indexOf(kind) !== -1;
+
   // Provisioning systems (docs/CONTRACTS.md section 6). google/propdata are the
   // core stack, checked by default. cma/dialfire are optional and auto-check when
   // the matching broker program is ticked on the Quay 1 form. (Property24 is no
@@ -156,15 +169,32 @@
   // `accessToken` and the payload fields sit at the top level alongside kind.
   const API_TIMEOUT_MS = 35000;  // a wedged Apps Script POST must surface as an error, never an eternal spinner
 
+  // When the Supabase JWT has lapsed there is no point retrying - the user must
+  // sign in again. api() throws this exact message, and callers scatter it into
+  // toasts/inline errors; left there the user just gets repeated error toasts
+  // with no way back. handleSessionExpired() instead returns them to the login
+  // gate. The gate element is removed from the DOM on sign-in (onSignedIn), so
+  // the simplest reliable reset is a reload: boot() re-checks the session, finds
+  // none, and re-shows the gate. The one-shot guard stops concurrent failing
+  // calls from stacking reloads/toasts.
+  const SESSION_EXPIRED_MSG = 'Session expired, sign in again.';
+  let _sessionExpiryHandled = false;
+  function handleSessionExpired() {
+    if (_sessionExpiryHandled) return;
+    _sessionExpiryHandled = true;
+    toast('Session expired', 'Please sign in again.', 'error');
+    setTimeout(() => location.reload(), 1200);
+  }
+
   async function api(kind, data) {
     if (!ENDPOINT) throw new Error('LIFECYCLE_ENDPOINT not set in config.js');
     const accessToken = await window.AUTH.getAccessToken();
-    if (!accessToken) throw new Error('Session expired, sign in again.');
+    if (!accessToken) { handleSessionExpired(); throw new Error(SESSION_EXPIRED_MSG); }
     // A cold Apps Script /exec occasionally returns a non-JSON "Bad response" on the FIRST hit, BEFORE
     // it runs the script - so the request had no effect and a retry is safe + almost always succeeds.
-    // This retry used to live only on the status/programs screens; doing it here means every one-shot
-    // action (edit email, remind, resend, change week, approve...) survives a cold start too. Real
-    // errors (auth, timeout, network, ok:false) throw immediately and are NEVER retried.
+    // This retry is ONLY applied to read-only kinds (see READ_ONLY_KINDS / isReadOnlyKind): for a
+    // mutation a lost response may mean the backend already ran, so retrying it could double-fire the
+    // side effect. Real errors (auth, timeout, network, ok:false) throw immediately and are NEVER retried.
     let lastErr;
     for (let attempt = 0; attempt < 3; attempt++) {
       // AbortController gives every call a hard ceiling: if the backend stalls, the fetch rejects
@@ -187,7 +217,12 @@
       let json;
       try { json = await res.json(); }
       catch (_) {
-        lastErr = new Error('Bad response from server.');   // cold-start non-JSON: retry (no side effect ran)
+        lastErr = new Error('Bad response from server.');
+        // Retry a non-JSON body ONLY for read-only kinds. For a mutation the
+        // backend may already have run before the response was lost, so we must
+        // NOT retry - surface the error and let the user decide (re-check the
+        // status/queue) rather than risk double-firing the side effect.
+        if (!isReadOnlyKind(kind)) throw lastErr;
         await new Promise((r) => setTimeout(r, 500));
         continue;
       }
@@ -553,17 +588,12 @@
     const body = $('#progBody', wrap), meta = $('#progMeta', wrap);
     body.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>`;
     meta.textContent = 'Loading...';
-    // The first POST to a cold Apps Script /exec occasionally returns a non-JSON body
-    // ("Bad response from server"); it always succeeds on a retry. So retry twice, briefly,
-    // before surfacing an error - the user should not have to hit Refresh.
+    // api() already retries the cold-start "Bad response" internally for this read-only kind, so
+    // there is no outer retry loop here: wrapping it in a second loop would just re-fire auth/timeout
+    // errors that should surface at once, and compound the attempt count.
     try {
       if (programsCache && !force) { renderPrograms(body, meta, programsCache); return; }
-      let r, lastErr;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { r = await api(KINDS.programs, {}); lastErr = null; break; }
-        catch (e) { lastErr = e; await new Promise((res) => setTimeout(res, 600)); }
-      }
-      if (lastErr) throw lastErr;
+      const r = await api(KINDS.programs, {});
       programsCache = r;
       renderPrograms(body, meta, r);
     } catch (err) {
@@ -651,16 +681,13 @@
     pipe.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div>`;
     body.innerHTML = '';
     meta.textContent = 'Loading...';
-    let r = null, lastErr = null;
-    // A cold /exec can return non-JSON ("Bad response") on the first hit; retry only that case.
-    // A timeout or auth error is real - surface it immediately rather than retrying for ~100s.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try { r = await api(KINDS.status, {}); lastErr = null; break; }
-      catch (err) { lastErr = err; if (!/Bad response/.test(err.message)) break; }
-    }
-    if (lastErr) {
+    // api() already retries the cold-start "Bad response" internally for this read-only kind, and
+    // surfaces a timeout/auth error immediately, so a single call is enough - no outer retry loop.
+    let r = null;
+    try { r = await api(KINDS.status, {}); }
+    catch (err) {
       meta.textContent = '';
-      pipe.innerHTML = `<div class="state"><div class="state-title">Could not load the progress report</div><div>${esc(lastErr.message)}</div></div>`;
+      pipe.innerHTML = `<div class="state"><div class="state-title">Could not load the progress report</div><div>${esc(err.message)}</div></div>`;
       return;
     }
     const rows = (r.rows || r.data || []).slice();       // provisioning queue (created systems)

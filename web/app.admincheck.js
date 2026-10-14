@@ -80,12 +80,9 @@
     body.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>`;
     meta.textContent = 'Loading...';
     try {
-      let r, lastErr;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { r = await api(KINDS.status, {}); lastErr = null; break; }
-        catch (e) { lastErr = e; await new Promise((res) => setTimeout(res, 600)); }
-      }
-      if (lastErr) throw lastErr;
+      // api() already retries the cold-start "Bad response" internally for this read-only kind, and
+      // surfaces auth/timeout errors immediately, so no outer retry loop (which would re-fire those).
+      const r = await api(KINDS.status, {});
       // Awaiting acceptance = documents all in, not yet approved. The snapshot
       // carries every entity; we keep them all and filter client-side on toggle.
       allItems = ((r && r.onboarding) || []).filter((o) => o.docs_ready && !o.approved);
