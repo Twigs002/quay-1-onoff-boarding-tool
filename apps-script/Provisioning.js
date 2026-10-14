@@ -279,7 +279,16 @@ function provisionReadyBatch_() {
     if (!Array.isArray(systems) || !systems.length) {
       systems = resolveSystems_(o.entity || 'quay1', o.programs, null, o.team, o.activity || o.designation);
     }
+    // Lock ONLY the provision-stamp critical section, and RE-READ the row under the lock: an interactive
+    // "Approve & set up" may have provisioned this row since the listOnboarding_ snapshot, so without the
+    // re-check the batch and a click could both mint accounts for one person. The idempotent handoff and
+    // the account-request emails run after the lock, exactly like the interactive path.
+    var lock = _acquireLock_();
+    lock.waitLock(30000);
+    var ok = false;
     try {
+      var fresh = readOnboardingByFolder_(o.folderId);
+      if (!fresh || fresh.provisioned_at) { out.already++; return; }   // provisioned elsewhere since the snapshot
       var prov = provisionAll_(o.folderId, systems, ctx);
       if (prov.anyError) {
         setOnboardingStatus_(o.folderId, 'Setup error');
@@ -289,36 +298,21 @@ function provisionReadyBatch_() {
       if (prov.dryRun) { return; }   // test mode: do not mark done; the armed run will provision for real
       setOnboardingCell_(o.folderId, ONB_COL.provisioned_at, nowIso_());
       setOnboardingStatus_(o.folderId, 'Provisioned');
-      bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
-      // Promote into HR's entity "active" tab on acceptance (same single promotion point as the
-      // interactive accept path; append-once, idempotent, HR_SYNC/DRY_RUN-safe).
-      try { hrPromote_(o.folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: o.folderId, error: String(e) }); }
-      // Quay 1: the induction week is already auto-assigned (at FICA submission), so send the induction
-      // PACKET directly with the assigned dates + logins - no "pick your week" step. Aqua: Google-only
-      // welcome pack (no induction). Same one-time sends as the interactive accept path.
-      if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(o.folderId, o); _maybeAquaInduction_(o.folderId, o); }
-      else {
-        var iw = _ensureInductionWeekForProvisioning_(o);
-        o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // refresh the in-memory row so the calendar below uses the freshly-assigned week (setInduction_ writes the sheet, not o)
-        _sendInductionPacket_(o.folderId, o, iw.wed, iw.thu, iw.rescheduled);
-        // Hand off to Diego NOW that accounts exist and the week is known. The Tuesday sweep only runs
-        // before the Wed 08:00 batch, so a same-week inductee provisioned here would otherwise never get
-        // a Flow handoff; the sweep remains an idempotent backstop (flow_setup_at guards double-sends).
-        _sendFlowSetup_(o.folderId, o);
-        // Calendar events (induction days + birthday + anniversary). Idempotent + non-fatal.
-        try { createOnboardingCalendarEvents_(o.folderId, o); }
-        catch (ce) { logAudit_('calendar_events_failed', { folderId: o.folderId, error: String(ce) }); }
-      }
-      // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for
-      // that week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to induction week.
-      _maybeRequestCma_(o.folderId, o, systems);        // CMA/Dialfire account-requests also fire from
-      _maybeRequestDialfire_(o.folderId, o, systems);   // the batch path (idempotent, stamped once)
-      _maybeNotifyAquaAccepted_(o.folderId, o);         // Aqua "can join" notice (no-op for quay1)
-      out.provisioned.push(o.folderId);
+      ok = true;
     } catch (err) {
       out.errors.push({ folderId: o.folderId, error: String(err) });
       logAudit_('provision_batch_failed', { folderId: o.folderId, error: String(err) });
+      return;
+    } finally {
+      lock.releaseLock();
     }
+    // Outside the lock (all idempotent, success only): the CMA/Dialfire account-request emails + the
+    // Aqua "can join" notice, then the post-account handoff (HR promote, induction/welcome, calendar, Flow).
+    _maybeRequestCma_(o.folderId, o, systems);
+    _maybeRequestDialfire_(o.folderId, o, systems);
+    _maybeNotifyAquaAccepted_(o.folderId, o);
+    _postProvisionHandoff_(o);
+    out.provisioned.push(o.folderId);
   });
   logAudit_('provision_batch_run', out);
   Logger.log(JSON.stringify(out, null, 2));
@@ -333,10 +327,14 @@ function provisionReadyBatch_() {
  */
 function approveAndProvision_(folderId, ctx, opts) {
   opts = opts || {};
-  // Serialise: two concurrent "Approve & set up" clicks must not both provision (double account).
-  // The lock also makes the read-check-provision-stamp one critical section.
+  // Serialise ONLY the read-check-provision-stamp critical section so two concurrent "Approve & set up"
+  // clicks (or the scheduled batch overlapping a click) cannot both mint accounts for one row. The
+  // slower, idempotent handoff (HR promote, induction/welcome, calendar, Flow) runs AFTER the lock is
+  // released, via _postProvisionHandoff_, so one slow Gmail/Calendar/HR call no longer serialises every
+  // other request behind the script lock.
   var lock = _acquireLock_();
   lock.waitLock(30000);
+  var handoff = null;
   try {
     var o = readOnboardingByFolder_(folderId);
     if (!o) return { ok: false, error: 'onboarding row not found' };
@@ -409,29 +407,43 @@ function approveAndProvision_(folderId, ctx, opts) {
     }
     setOnboardingCell_(folderId, ONB_COL.provisioned_at, nowIso_());
     setOnboardingStatus_(folderId, 'Provisioned');
-    bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
-    // Now the starter is accepted AND set up: promote them into HR's entity "active" tab (append-once,
-    // idempotent). This is the ONLY place HR promotion happens - NOT at FICA upload - so a declined or
-    // never-hired candidate never lands in HR's active tab. Non-fatal + HR_SYNC/DRY_RUN-safe.
-    try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
-    // Real accounts exist now. Quay 1: the induction week was already auto-assigned at FICA submission,
-    // so send the induction PACKET directly (assigned dates + logins), no "pick your week" step. Aqua
-    // has no induction, so an Aqua contractor gets the Google-only welcome pack. CC the senior when on.
-    if ((o.entity || '') === 'aqua') { _sendAquaWelcome_(folderId, o); _maybeAquaInduction_(folderId, o); }
-    else {
-      var iw = _ensureInductionWeekForProvisioning_(o);
-      o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // refresh the in-memory row so the calendar below uses the freshly-assigned week (setInduction_ writes the sheet, not o)
-      _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
-      _sendFlowSetup_(folderId, o);   // hand off to Diego at provisioning; Tuesday sweep is the backstop
-      // Calendar events (induction days + birthday + anniversary). Idempotent + non-fatal.
-      try { createOnboardingCalendarEvents_(folderId, o); }
-      catch (ce) { logAudit_('calendar_events_failed', { folderId: folderId, error: String(ce) }); }
-    }
-    // Flow Set Up to Diego is NOT sent here anymore - it goes out on the Tuesday ~15:00 sweep for that
-    // week's inductees (flowSetupInductionWeek_), so Diego gets it aligned to their induction week.
-    return { ok: true, approved_at: approvedAt, approved_by: approvedBy, provisioning: prov.results };
+    // Accounts exist and the row is stamped. Everything past here (HR promote, induction/welcome,
+    // calendar, Flow) is idempotent + non-fatal, so it runs AFTER the lock is released - see
+    // _postProvisionHandoff_ - keeping slow Gmail/Calendar/HR work out of the critical section.
+    handoff = { o: o, approvedAt: approvedAt, approvedBy: approvedBy, prov: prov };
   } finally {
     lock.releaseLock();
+  }
+
+  // Only the success path falls through here (every other branch returns inside the locked try, which
+  // still runs the finally). So `handoff` is always set when we reach this point.
+  _postProvisionHandoff_(handoff.o);
+  return { ok: true, approved_at: handoff.approvedAt, approved_by: handoff.approvedBy, provisioning: handoff.prov.results };
+}
+
+/**
+ * Post-account handoff for a freshly-provisioned hire, run OUTSIDE the provisioning lock: HR promote,
+ * then the entity-appropriate sends (Quay 1: induction packet + Flow + calendar events; Aqua: Google
+ * welcome pack + any induction). Every step is guarded by its own idempotency marker (hr_promoted_at,
+ * welcome/flow stamps, calendar_events_json), so this is safe out of the critical section and safe to
+ * call more than once. Non-fatal: a failure here is logged, never thrown, and never un-provisions the
+ * hire. Flow Set Up also goes out on the Tuesday ~15:00 sweep (flowSetupInductionWeek_) as a backstop.
+ */
+function _postProvisionHandoff_(o) {
+  if (!o) return;
+  var folderId = o.folderId;
+  bustProgramsCache_();   // newly-provisioned hire should reflect on Programs immediately
+  try { hrPromote_(folderId); } catch (e) { logAudit_('hr_promote_failed', { folderId: folderId, error: String(e) }); }
+  if ((o.entity || '') === 'aqua') {
+    _sendAquaWelcome_(folderId, o);
+    _maybeAquaInduction_(folderId, o);
+  } else {
+    var iw = _ensureInductionWeekForProvisioning_(o);
+    o.induction_wed = iw.wed; o.induction_thu = iw.thu;  // refresh the in-memory row so the calendar uses the freshly-assigned week
+    _sendInductionPacket_(folderId, o, iw.wed, iw.thu, iw.rescheduled);
+    _sendFlowSetup_(folderId, o);
+    try { createOnboardingCalendarEvents_(folderId, o); }
+    catch (ce) { logAudit_('calendar_events_failed', { folderId: folderId, error: String(ce) }); }
   }
 }
 
