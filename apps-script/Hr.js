@@ -182,12 +182,13 @@ function hrPromote_(folderId) {
     }
   }
 
-  // Folder link: always land the candidate's document-folder URL on the destination tab. Prefer a
-  // canonical "Folder link" column; else any folder-titled column the tool does not own (so "HR Folder"
-  // etc. work); else CREATE a "Folder link" column at the far right and write there. The brokers tab
-  // ("IGSICA EMPLOYEES (Automated)") and the Aqua tab ship without a folder column, so without this the
-  // link had nowhere to go and was silently dropped. Appending a new last column leaves every existing
-  // column (and its formulas/validation) untouched.
+  // Folder link: always land the candidate's document folder on the destination tab AS A CLICKABLE
+  // HYPERLINK (the broker's name as the link text, pointing at their HR folder - the same convention as
+  // the manual tabs' "Link to HR" column). Prefer a canonical "Folder link" column; else any
+  // folder-titled column the tool does not own (so "HR Folder" etc. work); else CREATE a "Folder link"
+  // column at the far right. The brokers tab ("IGSICA EMPLOYEES (Automated)") and the Aqua tab ship
+  // without a folder column, so without this the link had nowhere to go and was silently dropped.
+  // Appending a new last column leaves every existing column (and its formulas/validation) untouched.
   var _folderUrl = fieldMap['Folder link'];
   if (_folderUrl) {
     var _folderCol = 0;   // 1-based target column for the link
@@ -205,7 +206,11 @@ function hrPromote_(folderId) {
       dest.getRange(1, _folderCol).setNumberFormat('@').setValue('Folder link');
       logAudit_('hr_folder_link_column_created', { folderId: folderId, dest: destName, column: _folderCol });
     }
-    dest.getRange(target, _folderCol).setNumberFormat('@').setValue(String(_folderUrl));
+    // Clickable hyperlink: label is the broker's name (double-quotes doubled for the formula string),
+    // the URL is the deterministic Drive folder URL (no quotes). NOT text-formatted, so it renders as a
+    // live link rather than a literal "=HYPERLINK(...)" string.
+    var _linkLabel = String(o.name || 'HR folder').replace(/"/g, '""');
+    dest.getRange(target, _folderCol).setValue('=HYPERLINK("' + String(_folderUrl) + '","' + _linkLabel + '")');
   }
 
   // Mark the tracking row as moved (non-destructive) so HR sees it left the staging list.

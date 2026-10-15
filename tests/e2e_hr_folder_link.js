@@ -27,8 +27,9 @@ const fIdx = headers.findIndex((h) => lc(h) === 'folder link');
 check(fIdx >= 0, `a "Folder link" column was created (headers: ${headers.join(' | ')})`);
 const rows = dest.getDataRange().getValues();
 const bradRow = rows.find((row) => String(row[1]) === '8001015009087');
-check(!!bradRow && String(bradRow[fIdx]) === 'https://drive.google.com/drive/folders/FL-1',
-  `the folder URL was written to Brad's row (got "${bradRow ? bradRow[fIdx] : 'no row'}")`);
+const cell = bradRow ? String(bradRow[fIdx]) : '';
+check(/^=HYPERLINK\(/i.test(cell) && cell.indexOf('https://drive.google.com/drive/folders/FL-1') >= 0 && cell.indexOf('Brad Broker') >= 0,
+  `the folder is a clickable HYPERLINK (name -> folder) on Brad's row (got "${cell}")`);
 
 // Idempotent: a second promote reuses the column (no duplicate) and the link stays.
 g.ctx.hrPromote_('FL-1');
